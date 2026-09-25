@@ -8,7 +8,7 @@ An educational app about the math of the Taiwan Sports Lottery (台灣運彩): w
 
 ## The app
 
-Four tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, 詳細, refresh) sit in a slim row at the top. On desktop the tabs are in the top bar.
+Four tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, 詳細, refresh) sit in a slim row at the top. Big numbers never wrap: they shrink (to 60% at most) to fit on one line. On desktop the tabs are in the top bar.
 
 Logos come from ESPN, with dark-background versions in dark mode: the leagues on the filters, cards and boards, and the teams on the games.
 
@@ -110,7 +110,7 @@ The choice is remembered.
   - the typical result, the average back, the tickets bought and the total bet (averages);
   - the group's range from its biggest loser to its biggest winner;
   - the typical loss in bubble teas.
-- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart, their story, and their highest and lowest running total (and the week of each). The numbers in the stories are clickable too.
+- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart, their story, their 百分位 (PR: the share of the crowd they finished ahead of), and their highest and lowest running total (and the week of each). The numbers in the stories are clickable too.
 - **One shared world:** each week every game and F1 race has a single real result that everyone who bet on it shares. This is a hash of (seed, week, market, which real game), so it takes no storage and any player can still be replayed alone.
   - Sports keep their real number of distinct games per week.
   - With 24 races a year, F1 long shots come in only as rarely as they should.

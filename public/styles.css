@@ -849,3 +849,11 @@ details.market[open] > summary { margin-bottom: 6px; }
 .heart-bars .run-hits { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .heart-bars .run-bar { background: linear-gradient(90deg, #f87171, var(--bad-strong)); }
 .heart-bars li.heart-worst .run-hits { color: var(--bad-strong); font-weight: 700; }
+
+/* Single numbers stay on one line: the page shrinks their font to fit (see
+   fitNumbers in app.js) instead of letting a big figure wrap on phones. */
+.stat, .player-line, .lapse-stats p, .buy { min-width: 0; }
+.stat-value, .player-line strong, .lapse-stats strong, .story-big, .buy strong, .you-end {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.buy strong { display: block; }

@@ -1095,6 +1095,8 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       },
       // Notable players, replayed in full, and crowd-wide numbers for the fun facts.
       notable: pickNotable(records, replayIndex),
+      // Everyone's final result at every 0.1%, to place any one player in the crowd.
+      finalQuantiles: Array.from({ length: 1001 }, (_, i) => finalAt(i / 1000)),
       crowd: {
         winnings: crowd.winnings,
         losses: crowd.losses,

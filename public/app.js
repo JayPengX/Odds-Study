@@ -2150,6 +2150,9 @@ function renderLookup(serial) {
   let lo = 0;
   p.path.forEach((v, i) => (v > p.path[hi] && (hi = i), v < p.path[lo] && (lo = i)));
   const point = i => `${fmtMoney(p.path[i])} · ${t('simWeekN', { n: fmtCount(i + 1) })}`;
+  // 百分位 (PR): the share of the crowd this player finished ahead of.
+  const qs = stats.finalQuantiles;
+  const pr = qs ? Math.max(1, Math.min(99, Math.floor((qs.filter(v => v < p.final).length / qs.length) * 100))) : null;
   $('lookup-result').replaceChildren(
     el('div', { class: 'lookup-card' }, [
       el('div', { class: 'story-head' }, [
@@ -2162,6 +2165,7 @@ function renderLookup(serial) {
       el('div', { class: 'player-lines' }, [
         line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
         line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
+        pr ? line(t('playerPercentile'), t('playerPR', { n: pr })) : null,
         line(t('playerPeak'), point(hi), p.path[hi] > 0 ? 'back-high' : 'back-low'),
         line(t('playerLow'), point(lo), p.path[lo] < 0 ? 'back-low' : 'back-high'),
         line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
@@ -2625,6 +2629,44 @@ window.addEventListener('resize', () => {
   };
   place();
   phone.addEventListener('change', place);
+}
+
+// Big numbers on one line: each of these shrinks its font (down to 60%) until
+// it fits its box, instead of wrapping onto a second row on phones. Checked
+// when its text changes and when its box resizes (which also covers a tab or
+// the 詳細 switch showing it for the first time).
+const FIT_SELECTOR = '.stat-value, .player-line strong, .lapse-stats strong, .story-big, .buy strong, .you-end';
+function fitNumber(node) {
+  node.style.fontSize = '';
+  if (!node.clientWidth) return;
+  const full = parseFloat(getComputedStyle(node).fontSize);
+  let size = full;
+  while (node.scrollWidth > node.clientWidth + 0.5 && size > full * 0.6) {
+    size -= 0.5;
+    node.style.fontSize = `${size}px`;
+  }
+}
+if ('ResizeObserver' in window) {
+  const fitted = new WeakSet();
+  const resized = new ResizeObserver(entries => entries.forEach(entry => fitNumber(entry.target)));
+  const check = node => {
+    if (!fitted.has(node)) {
+      fitted.add(node);
+      resized.observe(node);
+    }
+    fitNumber(node);
+  };
+  new MutationObserver(mutations => {
+    const seen = new Set();
+    for (const m of mutations) {
+      const target = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      if (!target || seen.has(target)) continue;
+      seen.add(target);
+      const own = target.closest(FIT_SELECTOR);
+      if (own) check(own);
+      else for (const node of target.querySelectorAll(FIT_SELECTOR)) check(node);
+    }
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
 }
 
 // Tells the page's failsafe (in index.html) that the scripts loaded and started.
