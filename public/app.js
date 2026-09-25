@@ -2204,8 +2204,9 @@ function renderStories(stats, period) {
   const money = v => fmtMoney(v, { sign: false });
   const stories = [];
   // `tone`: how the big figure reads (good, bad or neutral); money by its sign.
+  // A record held only within the player's habit says so in its title.
   const add = (icon, titleKey, p, big, textKey, vars, tone = null) =>
-    p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), t(`habit_${p.habit.key}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
+    p && stories.push({ icon, title: p.overall ? t(titleKey) : t('storyAmong', { title: t(titleKey), habit: t(`habit_${p.habit.key}`) }), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), t(`habit_${p.habit.key}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
   const w = notable.biggestWin;
   if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), 'storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds), final: fmtMoney(w.final) });
   const best = notable.best;

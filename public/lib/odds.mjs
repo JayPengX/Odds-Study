@@ -731,6 +731,48 @@ export function playerRandom(seed, index) {
   return seededRandom((Math.imul(seed, 0x9e3779b1) + Math.imul(index + 1, 0x85ebca6b)) >>> 0);
 }
 
+// The crowd's records, in the order the stories tell them: each one's
+// starting value and whether higher beats it.
+const RECORDS = {
+  biggestWin: [-Infinity, true],
+  best: [-Infinity, true],
+  fall: [-1, true],
+  drought: [-1, true],
+  worst: [Infinity, false],
+  hotStreak: [0, true],
+  longshot: [0, true],
+  worstWeek: [0, false],
+  mostTickets: [0, true],
+  closest: [Infinity, false],
+  taxman: [0, true]
+};
+const RECORD_START = Object.fromEntries(Object.entries(RECORDS).map(([key, [start]]) => [key, start]));
+
+// Who tells each story. The riskiest habits would hold nearly every record,
+// so apart from the crowd's biggest winner and loser (always the real ones,
+// taken first), each record goes to the best habit that hasn't had a story
+// yet (every habit gets one before any gets two). `overall` says whether that
+// player holds the record for the whole crowd, not just within their habit.
+const FIXED_RECORDS = ['best', 'worst'];
+function pickNotable(records, replay) {
+  const used = new Set();
+  const out = {};
+  const keys = [...FIXED_RECORDS, ...Object.keys(RECORDS).filter(key => !FIXED_RECORDS.includes(key))];
+  for (const key of keys) {
+    const higher = RECORDS[key][1];
+    const holders = records[key]
+      .map(([index, value], h) => ({ h, index, value }))
+      .filter(r => r.index >= 0)
+      .sort((x, y) => (higher ? y.value - x.value : x.value - y.value));
+    if (!holders.length) continue;
+    if (holders.every(r => used.has(r.h))) used.clear();
+    const pick = FIXED_RECORDS.includes(key) ? holders[0] : holders.find(r => !used.has(r.h));
+    used.add(pick.h);
+    out[key] = { ...replay(pick.index), overall: pick === holders[0] };
+  }
+  return out;
+}
+
 // Histogram bins for the weekly spread: about 2 million counters at most, and
 // a range wide enough for the worst chaser.
 function histogramShape(weeks) {
@@ -855,6 +897,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
   const path = new Float64Array(weeks);
   const states = new Array(total);
   const rngs = new Uint32Array(total);
+  const habitIndex = groups.map(group => HABITS.indexOf(group.habit));
   const emptySum = () => ({ n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 });
   // One tally per checkpoint: group sums, record holders and crowd totals.
   const tallies = new Map(
@@ -863,27 +906,17 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       {
         finals: new Float64Array(total),
         sums: groups.map(emptySum),
-        records: {
-          biggestWin: [-1, -Infinity],
-          best: [-1, -Infinity],
-          worst: [-1, Infinity],
-          drought: [-1, -1],
-          fall: [-1, -1],
-          hotStreak: [-1, 0],
-          longshot: [-1, 0],
-          worstWeek: [-1, 0],
-          mostTickets: [-1, 0],
-          closest: [-1, Infinity],
-          taxman: [-1, 0]
-        },
+        // Each record per habit: [player index, value].
+        records: Object.fromEntries(Object.entries(RECORD_START).map(([key, start]) => [key, HABITS.map(() => [-1, start])])),
         crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0 }
       }
     ])
   );
   const count = (tally, g, index, story) => {
+    const h = habitIndex[g];
     const beat = (key, value, higher = true) => {
-      const r = tally.records[key];
-      if (higher ? value > r[1] : value < r[1]) tally.records[key] = [index, value];
+      const r = tally.records[key][h];
+      if (higher ? value > r[1] : value < r[1]) tally.records[key][h] = [index, value];
     };
     const sum = tally.sums[g];
     const c = tally.crowd;
@@ -1061,7 +1094,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         everAheadShare: sumOf('everAhead') / total
       },
       // Notable players, replayed in full, and crowd-wide numbers for the fun facts.
-      notable: Object.fromEntries(Object.entries(records).filter(([, [index]]) => index >= 0).map(([key, [index]]) => [key, replayIndex(index)])),
+      notable: pickNotable(records, replayIndex),
       crowd: {
         winnings: crowd.winnings,
         losses: crowd.losses,

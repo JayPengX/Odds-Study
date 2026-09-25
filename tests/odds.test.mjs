@@ -513,6 +513,10 @@ test('any player can be replayed on their own, and groups add up', async () => {
     assert.equal(again.tickets, who.tickets);
     assert.equal(again.habit, who.habit);
   }
+  // The stories are spread over the habits: every habit tells at least one.
+  const habitsTelling = new Set(Object.values(stats.notable).map(who => who.habit.key));
+  assert.equal(habitsTelling.size, HABITS.length);
+  for (const key of ['best', 'worst']) assert.ok(stats.notable[key].overall, key);
   assert.equal(stats.groupStats.length, 30);
   assert.equal(stats.groupStats.reduce((n, g) => n + g.players, 0), stats.players);
   for (const g of stats.groupStats) assert.ok(g.worst <= g.q10 && g.q10 <= g.median && g.median <= g.q90 && g.q90 <= g.best);

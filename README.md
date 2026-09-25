@@ -94,7 +94,7 @@ The choice is remembered.
   - what the crowd's total loss would buy: bubble teas, bowls of beef noodles, iPhones and scooters;
   - the luckiest 10%, the middle player and the unluckiest 10%;
   - habits and fans ranked by money back;
-  - record holders by their number in the crowd, each with their full story:
+  - record holders by their number in the crowd, each with their full story. The biggest winner and loser are always the real ones; the other records are shared out so every habit tells at least one (the best of a habit not yet shown gets it, titled like "精算派之中・最慘的一週"):
     - the biggest single ticket, the biggest winner and loser;
     - the roller coaster (furthest ahead, yet ended down);
     - the longest winning and losing streaks;
