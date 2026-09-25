@@ -18,7 +18,13 @@ With estimated odds only, every MLB bet comes out at about NT$87, because the fo
 
 ## How it works
 
-A static site with no build step and no dependencies. The page fetches odds live in the visitor's browser through the shared sports proxy (`sports-proxy.pengzjay.workers.dev`, from the Shared-Proxy repo), which adds the CORS headers Polymarket doesn't send. The proxy only accepts requests from `https://jaypengx.github.io` and `http://localhost:<port>`.
+A static site with no build step and no dependencies. The page fetches odds live in the visitor's browser, and every request goes through the `sports-proxy` Cloudflare Worker from [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy) (`https://sports-proxy.pengzjay.workers.dev/sports-proxy?url=…`, set as `PROXY_URL` in `public/lib/sources.mjs`). The proxy adds the CORS headers Polymarket doesn't send and caches responses. For the MLB and Premier League Polymarket pages the page asks for `&trim=polymarket-events`, which cuts each response to the few fields it reads.
+
+The page has no direct-fetch fallback, so it depends on that Worker:
+
+- **No proxy, no data.** If the Worker is down, the page loads but shows no odds. The tests don't need it.
+- **Allowed origins only.** The proxy accepts requests only from `https://jaypengx.github.io` and `http://localhost:<port>`. Hosting the page anywhere else needs that origin added to `ALLOWED_ORIGINS` in Shared-Proxy's `sports-proxy-worker.js`.
+- **Allowed hosts only.** It forwards only to hosts on its allowlist (`site.api.espn.com` and `gamma-api.polymarket.com` are the ones used here). A new data source needs its host added there first.
 
 | File | Purpose |
 | --- | --- |
