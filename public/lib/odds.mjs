@@ -686,7 +686,9 @@ function histogramShape(weeks) {
 // (1 month = 4 weeks, 3 = 13, 6 = 26, 12 = 52).
 export const MAX_MONTHS = 60;
 export const monthWeeks = months => Math.round((months * 52) / 12);
-export const MONTH_WEEKS = Array.from({ length: MAX_MONTHS }, (_, i) => monthWeeks(i + 1));
+// Month by month up to a year, then every 3 months (fewer checkpoints keep long runs quick).
+export const PERIOD_MONTHS = Array.from({ length: MAX_MONTHS }, (_, i) => i + 1).filter(m => m <= 12 || m % 3 === 0);
+export const MONTH_WEEKS = PERIOD_MONTHS.map(monthWeeks);
 export const SPORTS = ['mlb', 'epl', 'nba', 'f1'];
 // Who bets on what. A fan of one sport bets on it while it's in season; in
 // its off-season, OFFSEASON_SWITCH of them bet on whatever else is on that

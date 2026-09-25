@@ -107,8 +107,8 @@ The choice is remembered.
   - Sports keep their real number of distinct games per week.
   - With 24 races a year, F1 long shots come in only as rarely as they should.
   - Picks are weighted by each option's chance, so a 0.1% driver gets about 0.1% of the bets.
-- **Periods:** a slider by the month from 1 month to 5 years, with quick picks (1 month, 6 months, 1, 2, 3 and 5 years). The seed is fixed, so the same period always gives the same result.
-  - Every run records the crowd at the end of each month along the way, so the default 1-year run answers every period up to a year at once.
+- **Periods:** a slider from 1 month to 5 years (month by month up to a year, then every 3 months), with quick picks (1 month, 6 months, 1, 2, 3 and 5 years). The seed is fixed, so the same period always gives the same result.
+  - Every run records the crowd at the end of each of those periods along the way, so the default 1-year run answers every period up to a year at once.
   - Longer periods carry every player on from the furthest week played so far and play only the extra weeks. Tests check this matches a straight run exactly.
 - **How it runs:** in a Web Worker, streaming weeks into histograms instead of keeping 100,000 paths. Tests prove this equals simulating everyone in full.
 

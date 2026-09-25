@@ -32,6 +32,7 @@ import {
   simulateCrowd,
   gamesInWeek,
   MONTH_WEEKS,
+  PERIOD_MONTHS,
   monthWeeks,
   replayPlayer,
   slipErrors,
@@ -2564,7 +2565,7 @@ $('detail-toggle').addEventListener('click', () => {
 // "1 個月", "半年", "1 年 3 個月", "5 年": a period of whole months.
 function periodName(weeks) {
   const t = state.t;
-  const months = MONTH_WEEKS.indexOf(weeks) + 1 || Math.round((weeks * 12) / 52);
+  const months = PERIOD_MONTHS[MONTH_WEEKS.indexOf(weeks)] ?? Math.round((weeks * 12) / 52);
   const y = Math.floor(months / 12);
   const m = months % 12;
   if (!y && m === 6) return t('periodHalf');
@@ -2579,7 +2580,7 @@ const PERIOD_PRESETS = [1, 6, 12, 24, 36, 60];
 // The label follows the slider as it moves; the simulation runs on release.
 function renderPeriods() {
   const weeks = Number($('sim-weeks').value);
-  const months = MONTH_WEEKS.indexOf(weeks) + 1;
+  const months = PERIOD_MONTHS[MONTH_WEEKS.indexOf(weeks)];
   $('sim-months').value = String(months);
   $('period-value').textContent = periodName(weeks);
   $('sim-periods').replaceChildren(
@@ -2600,8 +2601,10 @@ function setPeriod(months) {
   renderSim();
 }
 
-$('sim-months').addEventListener('input', event => ($('period-value').textContent = periodName(monthWeeks(Number(event.target.value)))));
-$('sim-months').addEventListener('change', event => setPeriod(Number(event.target.value)));
+// The nearest period the simulation records.
+const snapMonths = m => PERIOD_MONTHS.reduce((best, x) => (Math.abs(x - m) < Math.abs(best - m) ? x : best));
+$('sim-months').addEventListener('input', event => ($('period-value').textContent = periodName(monthWeeks(snapMonths(Number(event.target.value))))));
+$('sim-months').addEventListener('change', event => setPeriod(snapMonths(Number(event.target.value))));
 
 function showTab(tab) {
   state.tab = tab;
