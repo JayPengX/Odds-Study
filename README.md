@@ -110,7 +110,7 @@ The choice is remembered.
   - the typical result, the average back and the tickets bought;
   - the group's range from its biggest loser to its biggest winner;
   - the typical loss in bubble teas.
-- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart and their story. The numbers in the stories are clickable too.
+- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart, their story, and their highest and lowest running total (and the week of each). The numbers in the stories are clickable too.
 - **One shared world:** each week every game and F1 race has a single real result that everyone who bet on it shares. This is a hash of (seed, week, market, which real game), so it takes no storage and any player can still be replayed alone.
   - Sports keep their real number of distinct games per week.
   - With 24 races a year, F1 long shots come in only as rarely as they should.
