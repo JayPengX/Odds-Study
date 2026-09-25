@@ -434,3 +434,45 @@ test('the multi-sport crowd splits by fan type and replays players exactly', asy
   assert.equal(again.notable.best.final, stats.notable.best.final);
   assert.deepEqual([...again.characters.median.path], [...stats.characters.median.path]);
 });
+
+test('one run gives every shorter period, and 3 years carries on from 1 year', async () => {
+  const { simulateCrowd, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
+  const base = { sportPools, startWeek: 38, perGroup: 40, seed: 9 };
+  const strip = r => ({ ...r, bands: undefined });
+  // Checkpoints inside one 52-week run = separate runs of 4 / 13 / 52 weeks.
+  const year = simulateCrowd({ ...base, weeks: 52, checkpoints: [4, 13, 52] });
+  for (const w of [4, 13, 52]) {
+    const alone = simulateCrowdStats({ ...base, weeks: w });
+    assert.deepEqual(strip(year.results[w]), strip(alone), `${w} weeks`);
+    assert.equal(year.results[w].bands.length, w);
+    for (let i = 0; i < w; i++) assert.equal(year.results[w].bands[i].ahead, alone.bands[i].ahead);
+  }
+  // 52 weeks then 104 more = 156 weeks straight.
+  const longer = simulateCrowd({ ...base, weeks: 156, resume: year.resume }).results[156];
+  const straight = simulateCrowdStats({ ...base, weeks: 156 });
+  assert.deepEqual(strip(longer), strip(straight));
+  assert.equal(longer.bands.length, 156);
+  for (let i = 0; i < 156; i++) assert.equal(longer.bands[i].ahead, straight.bands[i].ahead);
+});
+
+test('ticket frequency matches surveys: about one ticket every two weeks for the median bettor', async () => {
+  const { simulateCrowdStats, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
+  const stats = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 100, seed: 2 });
+  const perMonth = stats.totals.tickets / stats.players / 12;
+  // Hong Kong football bettors (HKU, 2021): median once every two weeks.
+  assert.ok(perMonth > 1 && perMonth < 3.5, `${perMonth} tickets a month`);
+});
+
+test('every guide entry is a [title, text] pair in both languages', async () => {
+  globalThis.navigator ??= { language: 'en' };
+  const { makeT } = await import('../public/lib/i18n.mjs');
+  for (const locale of ['zh', 'en']) {
+    const t = makeT(locale);
+    for (const [title, items] of [[t('guideMathTitle'), t('mathSteps')], ...t('guide')]) {
+      assert.equal(typeof title, 'string');
+      for (const item of items) assert.ok(Array.isArray(item) && item.length === 2 && item.every(x => typeof x === 'string'), `${locale} ${title}: ${JSON.stringify(item).slice(0, 60)}`);
+    }
+  }
+});

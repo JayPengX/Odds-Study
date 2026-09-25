@@ -486,9 +486,10 @@ button.pick:active { transform: scale(0.98); }
 .bar-item .habit-meta { grid-column: 2 / 4; font-size: 0.72rem; color: var(--text-muted); }
 
 .stories { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
-.story { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; display: grid; grid-template-columns: 46px 1fr; gap: 0 12px; align-content: start; }
-.story > :not(.story-icon) { grid-column: 2; }
-.story-icon { grid-row: 1 / 4; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 1.45rem; background: var(--surface-sunken); }
+.story { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.story-head { display: flex; align-items: center; gap: 12px; }
+.story-head .story-serial { font-size: 1.05rem; }
+.story-icon { flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 1.45rem; background: var(--surface-sunken); }
 .story-title { font-weight: 700; font-size: 0.86rem; color: var(--text-secondary); }
 .story-serial { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 800; font-size: 1.3rem; letter-spacing: -0.01em; }
 .story-text { color: var(--text-secondary); font-size: 0.82rem; }
@@ -584,7 +585,6 @@ details.market > summary::-webkit-details-marker { display: none; }
 details.market > summary .market-title::after { content: ' ▸'; color: var(--text-muted); }
 details.market[open] > summary .market-title::after { content: ' ▾'; }
 details.market[open] > summary { margin-bottom: 6px; }
-.story { grid-template-columns: 46px 1fr; }
 .story-big { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.25; }
 .story-title { color: var(--text-secondary); font-size: 0.82rem; font-weight: 600; }
 .story-title .story-serial { font-size: 0.82rem; font-weight: 700; }
@@ -593,3 +593,5 @@ details.market[open] > summary { margin-bottom: 6px; }
 .fact-value { font-size: 1.05rem; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .truths .fact-value { color: var(--bad-strong); }
 .fact-text { font-size: 0.8rem; color: var(--text-secondary); }
+.story-big.neutral { color: var(--text-primary); }
+.story-text { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.55; }

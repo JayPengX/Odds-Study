@@ -73,15 +73,28 @@ The choice is remembered.
 - **The calendar:** time runs forward from this week on each league's real schedule. In a year that's about 2,550 MLB, 390 Premier League and 1,260 NBA games, plus 24 F1 races.
   - In a sport's off-season, 30% of its fans bet on something else.
   - Today's real prices stand in for future games. The NBA uses a typical-game template, because its game odds aren't fetched.
-- **Stakes:** mostly NT$100–500, now and then up to NT$3,000, taxed over NT$5,000.
+- **How often and how much:** calibrated on the closest published survey, the University of Hong Kong's 2021 government-commissioned gambling study. The median football bettor there bets once every two weeks and spends HK$201–500 a month; Taiwanese studies don't publish these figures.
+  - In the simulation, habits range from about one ticket every three weeks (Careful) to one a week (Big fan). The average person buys about 2 tickets a month.
+  - Most tickets are NT$100–500, now and then up to NT$3,000. Anything paying over NT$5,000 is taxed.
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;
   - the luckiest 10%, the middle player and the unluckiest 10%;
   - habits and fans ranked by money back;
-  - record holders by their number in the crowd;
-  - the brutal truths.
+  - record holders by their number in the crowd, each with their full story:
+    - the biggest single ticket, the biggest winner and loser;
+    - the roller coaster (furthest ahead, yet ended down);
+    - the longest winning and losing streaks;
+    - the longest shot that came in and the worst single week;
+    - the most tickets, the closest to break-even and the most tax paid;
+  - the brutal truths and surprising facts, each a number, a caption and the explanation:
+    - how much others lose for every NT$1 won;
+    - the top-1% line and who never won once;
+    - how often a first-ticket winner still loses;
+    - the hit rate, the tax collected and what the lottery makes per day.
 - **Periods:** 1 month to 3 years. The seed is fixed, so the same period always gives the same result.
+  - The default 1-year run records 1, 3 and 6 months along the way, so switching to them is instant.
+  - 3 years carries every player on from week 52 and plays only the extra two years. Tests check it matches a straight 3-year run exactly.
 - **How it runs:** in a Web Worker, streaming weeks into histograms instead of keeping 100,000 paths. Tests prove this equals simulating everyone in full.
 
 ### 說明 Guide

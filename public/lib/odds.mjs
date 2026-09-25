@@ -347,31 +347,36 @@ export function blendOutcomes(draftKings, polymarket) {
 }
 
 // Mulberry32: small seedable PRNG so a simulation can be replayed.
+// `.state()` is where the sequence is now: seededRandom(r.state()) carries on
+// exactly where r stopped.
 export function seededRandom(seed) {
   let a = seed >>> 0;
-  return () => {
+  const next = () => {
     a = (a + 0x6d2b79f5) >>> 0;
     let t = a;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  next.state = () => a;
+  return next;
 }
 
 // Betting habits for the season simulator. Each week a player buys a random
-// number of tickets (Poisson around `perWeek`, so some weeks none), each with
+// number of tickets (Poisson around `perWeek`, so most weeks none: from about
+// 1.5 tickets a month for the careful to one a week for a big fan), each with
 // `legs` legs from different games (most lottery MLB games need 2+) and legs
 // chosen by `pick`. Most tickets are a few hundred NT$ (`stakes`); a `big`
 // share of them are NT$1,000-3,000. A chaser starts at `stakes[0]`, doubles
 // after a losing week up to `chaseCap`, and drops back after a winning one.
 export const BIG_STAKES = [1000, 2000, 3000];
 export const HABITS = [
-  { key: 'casual', perWeek: 1, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any' },
-  { key: 'fan', perWeek: 3, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite' },
-  { key: 'underdog', perWeek: 2, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog' },
-  { key: 'dreamer', perWeek: 2, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any' },
-  { key: 'chaser', perWeek: 2, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000 },
-  { key: 'careful', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best' }
+  { key: 'casual', perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any' },
+  { key: 'fan', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite' },
+  { key: 'underdog', perWeek: 0.5, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog' },
+  { key: 'dreamer', perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any' },
+  { key: 'chaser', perWeek: 0.75, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000 },
+  { key: 'careful', perWeek: 0.35, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best' }
 ];
 
 // Splits a pool of bets ({gameId, fairChance, odds}) into the lists each
@@ -421,32 +426,82 @@ function picker(lists, weights = lists.map(() => 1)) {
   return { compiled, cum, games: compiled.reduce((n, c) => n + new Set(c.game).size, 0) };
 }
 
-// One player's `weeks` of betting with `habit`. `weekPicker(w)` is what the
-// player bets on in week w (null: nothing to bet on; then with chance
-// `switchRate` they bet on `fallback(w)` instead). Writes the running profit
-// at the end of each week into `path` (if given) and returns the story.
-function playSeason(habit, weekPicker, weeks, random, path, fallback = null, switchRate = 0, legsCap = null) {
+// A player's running totals, so a season can stop and carry on later.
+function freshState(habit) {
+  return {
+    profit: 0,
+    tickets: 0,
+    wonTickets: 0,
+    staked: 0,
+    biggestWin: 0,
+    biggestWinWeek: -1,
+    biggestWinStake: 0,
+    biggestWinLegs: 0,
+    biggestWinOdds: 0,
+    losing: 0,
+    longestLosing: 0,
+    winning: 0,
+    longestWinning: 0,
+    // The longest-odds ticket that won, the worst week, tax withheld, and
+    // whether the very first ticket won.
+    longshotOdds: 0,
+    longshotWeek: -1,
+    longshotStake: 0,
+    longshotWin: 0,
+    worstWeek: 0,
+    worstWeekAt: -1,
+    taxPaid: 0,
+    firstWon: null,
+    chaseStake: habit.stakes[0],
+    maxStake: 0,
+    peak: 0,
+    peakWeek: -1,
+    maxDrop: 0
+  };
+}
+
+// The story told about a player at some point of their season.
+function storyOf(st) {
+  return {
+    final: st.profit,
+    tickets: st.tickets,
+    wonTickets: st.wonTickets,
+    staked: st.staked,
+    biggestWin: st.biggestWin,
+    biggestWinWeek: st.biggestWinWeek,
+    biggestWinStake: st.biggestWinStake,
+    biggestWinLegs: st.biggestWinLegs,
+    biggestWinOdds: st.biggestWinOdds,
+    longestLosing: st.longestLosing,
+    maxStake: st.maxStake,
+    peak: st.peak,
+    peakWeek: st.peakWeek,
+    everAhead: st.peak > 0,
+    maxDrop: st.maxDrop,
+    longestWinning: st.longestWinning,
+    longshotOdds: st.longshotOdds,
+    longshotWeek: st.longshotWeek,
+    longshotStake: st.longshotStake,
+    longshotWin: st.longshotWin,
+    worstWeek: st.worstWeek,
+    worstWeekAt: st.worstWeekAt,
+    taxPaid: st.taxPaid,
+    firstWon: st.firstWon === true
+  };
+}
+
+// One player's betting with `habit` from week `from` up to `weeks`, carrying
+// on from `st` (their state so far; a fresh one by default). `weekPicker(w)`
+// is what the player bets on in week w (null: nothing to bet on; then with
+// chance `switchRate` they bet on `fallback(w)` instead). Writes the running
+// profit at the end of each week into `path` (if given), calls
+// `onWeek(w + 1, st)` after each week, and returns the story.
+function playSeason(habit, weekPicker, weeks, random, path, fallback = null, switchRate = 0, legsCap = null, { from = 0, st = freshState(habit), onWeek = null } = {}) {
   const noTicket = Math.exp(-habit.perWeek);
   const [lo, hi] = legsCap ?? habit.legs;
   const legSpan = hi - lo + 1;
   const base = habit.stakes[0];
-  let profit = 0;
-  let tickets = 0;
-  let wonTickets = 0;
-  let staked = 0;
-  let biggestWin = 0;
-  let biggestWinWeek = -1;
-  let biggestWinStake = 0;
-  let biggestWinLegs = 0;
-  let biggestWinOdds = 0;
-  let losing = 0;
-  let longestLosing = 0;
-  let chaseStake = base;
-  let maxStake = 0;
-  let peak = 0;
-  let peakWeek = -1;
-  let maxDrop = 0;
-  for (let w = 0; w < weeks; w++) {
+  for (let w = from; w < weeks; w++) {
     let pick = weekPicker(w);
     if (!pick && fallback && random() < switchRate) pick = fallback(w);
     // Poisson number of tickets this week (none when there's nothing to bet on).
@@ -474,53 +529,55 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       }
       if (legs === 0) continue;
       const stake = habit.chaseCap
-        ? chaseStake
+        ? st.chaseStake
         : random() < habit.big
           ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
           : habit.stakes[Math.floor(random() * habit.stakes.length)];
-      const result = won ? afterTax(stake * odds) - stake : -stake;
-      tickets++;
-      staked += stake;
+      const gross = stake * odds;
+      const result = won ? afterTax(gross) - stake : -stake;
+      st.firstWon ??= won;
+      st.tickets++;
+      st.staked += stake;
       week += result;
-      if (stake > maxStake) maxStake = stake;
+      if (stake > st.maxStake) st.maxStake = stake;
       if (won) {
-        wonTickets++;
-        losing = 0;
-        if (result > biggestWin) {
-          biggestWin = result;
-          biggestWinWeek = w;
-          biggestWinStake = stake;
-          biggestWinLegs = legs;
-          biggestWinOdds = odds;
+        st.wonTickets++;
+        st.losing = 0;
+        if (++st.winning > st.longestWinning) st.longestWinning = st.winning;
+        st.taxPaid += gross - afterTax(gross);
+        if (odds > st.longshotOdds) {
+          st.longshotOdds = odds;
+          st.longshotWeek = w;
+          st.longshotStake = stake;
+          st.longshotWin = result;
         }
-      } else if (++losing > longestLosing) longestLosing = losing;
+        if (result > st.biggestWin) {
+          st.biggestWin = result;
+          st.biggestWinWeek = w;
+          st.biggestWinStake = stake;
+          st.biggestWinLegs = legs;
+          st.biggestWinOdds = odds;
+        }
+      } else {
+        st.winning = 0;
+        if (++st.losing > st.longestLosing) st.longestLosing = st.losing;
+      }
     }
-    if (habit.chaseCap && count > 0) chaseStake = week < 0 ? Math.min(chaseStake * 2, habit.chaseCap) : base;
-    profit += week;
-    if (path) path[w] = profit;
-    if (profit > peak) {
-      peak = profit;
-      peakWeek = w;
+    if (week < st.worstWeek) {
+      st.worstWeek = week;
+      st.worstWeekAt = w;
     }
-    if (peak - profit > maxDrop) maxDrop = peak - profit;
+    if (habit.chaseCap && count > 0) st.chaseStake = week < 0 ? Math.min(st.chaseStake * 2, habit.chaseCap) : base;
+    st.profit += week;
+    if (path) path[w] = st.profit;
+    if (st.profit > st.peak) {
+      st.peak = st.profit;
+      st.peakWeek = w;
+    }
+    if (st.peak - st.profit > st.maxDrop) st.maxDrop = st.peak - st.profit;
+    if (onWeek) onWeek(w + 1, st);
   }
-  return {
-    final: profit,
-    tickets,
-    wonTickets,
-    staked,
-    biggestWin,
-    biggestWinWeek,
-    biggestWinStake,
-    biggestWinLegs,
-    biggestWinOdds,
-    longestLosing,
-    maxStake,
-    peak,
-    peakWeek,
-    everAhead: peak > 0,
-    maxDrop
-  };
+  return storyOf(st);
 }
 
 // One player's season with their full week-by-week path.
@@ -615,7 +672,13 @@ function multiSportGroups(sportPools, startWeek, weeks) {
 // histogram (for the 10/25/50/75/90% bands) and each group into running sums.
 // Record holders and the players at the top 10%, middle and bottom 10% are
 // replayed at the end for their full stories.
-export function simulateCrowdStats({ pools, sportPools, startWeek = 0, weeks, perHabit, perGroup, seed = 1, onProgress }) {
+//
+// The crowd at several points at once: one pass of `weeks` weeks yields the
+// stats after each week in `checkpoints` (1, 3 and 6 months come free with a
+// year). `resume` (from an earlier run's `resume`) carries every player on
+// from where that run stopped instead of starting over, so 3 years is the
+// 1-year run plus 2 more years. Returns { results: {weeks: stats}, resume }.
+export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpoints = [weeks], perHabit, perGroup, seed = 1, onProgress, resume = null }) {
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {
@@ -624,56 +687,106 @@ export function simulateCrowdStats({ pools, sportPools, startWeek = 0, weeks, pe
       });
   const per = perGroup ?? perHabit ?? 500;
   const total = groups.length * per;
-  const play = (g, random, path) => playSeason(g.habit, g.weekPicker, weeks, random, path, g.fallback, g.switchRate, g.legs);
+  const from = resume?.weeks ?? 0;
+  const marks = [...new Set(checkpoints)].filter(c => c > from && c <= weeks).sort((x, y) => x - y);
   const { bins, lo, width } = histogramShape(weeks);
-  const hist = new Uint32Array(weeks * bins);
-  const aheadByWeek = new Uint32Array(weeks);
-  const finals = new Float64Array(total);
+  // Weekly spread for the weeks this run plays; earlier weeks come from `resume`.
+  const span = weeks - from;
+  const hist = new Uint32Array(span * bins);
+  const aheadByWeek = new Uint32Array(span);
   const path = new Float64Array(weeks);
-  const sums = groups.map(() => ({ n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 }));
-  // Record holders (by player index) and crowd-wide totals for the fun facts.
-  const records = { biggestWin: [-1, -Infinity], best: [-1, -Infinity], worst: [-1, Infinity], drought: [-1, -1], fall: [-1, -1] };
-  const beat = (key, index, value, higher = true) => {
-    if (higher ? value > records[key][1] : value < records[key][1]) records[key] = [index, value];
+  const states = new Array(total);
+  const rngs = new Uint32Array(total);
+  const emptySum = () => ({ n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 });
+  // One tally per checkpoint: group sums, record holders and crowd totals.
+  const tallies = new Map(
+    marks.map(m => [
+      m,
+      {
+        finals: new Float64Array(total),
+        sums: groups.map(emptySum),
+        records: {
+          biggestWin: [-1, -Infinity],
+          best: [-1, -Infinity],
+          worst: [-1, Infinity],
+          drought: [-1, -1],
+          fall: [-1, -1],
+          hotStreak: [-1, 0],
+          longshot: [-1, 0],
+          worstWeek: [-1, 0],
+          mostTickets: [-1, 0],
+          closest: [-1, Infinity],
+          taxman: [-1, 0]
+        },
+        crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0 }
+      }
+    ])
+  );
+  const count = (tally, g, index, story) => {
+    const beat = (key, value, higher = true) => {
+      const r = tally.records[key];
+      if (higher ? value > r[1] : value < r[1]) tally.records[key] = [index, value];
+    };
+    const sum = tally.sums[g];
+    const c = tally.crowd;
+    tally.finals[index] = story.final;
+    const returned = story.staked + story.final;
+    sum.n++;
+    sum.staked += story.staked;
+    sum.net += story.final;
+    sum.tickets += story.tickets;
+    sum.rr += returned * returned;
+    sum.rs += returned * story.staked;
+    sum.ss += story.staked * story.staked;
+    if (story.final > 0) {
+      sum.ahead++;
+      c.winnings += story.final;
+    } else c.losses -= story.final;
+    if (story.everAhead) sum.everAhead++;
+    if (groups[g].habit.chaseCap && story.maxStake >= groups[g].habit.chaseCap) sum.capHits++;
+    if (story.wonTickets === 0 && story.tickets > 0) c.neverWon++;
+    c.wonTickets += story.wonTickets;
+    c.taxTotal += story.taxPaid;
+    if (story.taxPaid > 0) c.taxed++;
+    if (story.firstWon) {
+      c.firstWon++;
+      if (story.final < 0) c.firstWonLost++;
+    }
+    beat('biggestWin', story.biggestWin);
+    beat('best', story.final);
+    beat('worst', story.final, false);
+    beat('drought', story.longestLosing);
+    // Furthest ahead at some point, yet down at the end.
+    if (story.final < 0) beat('fall', story.peak);
+    beat('hotStreak', story.longestWinning);
+    beat('longshot', story.longshotOdds);
+    beat('worstWeek', story.worstWeek, false);
+    beat('mostTickets', story.tickets);
+    // Closest to breaking even, among people who really played.
+    if (story.tickets >= 10) beat('closest', Math.abs(story.final), false);
+    beat('taxman', story.taxPaid);
   };
-  let winnings = 0;
-  let losses = 0;
-  let neverWon = 0;
   for (let g = 0; g < groups.length; g++) {
     const group = groups[g];
-    const sum = sums[g];
     for (let i = 0; i < per; i++) {
       const index = g * per + i;
-      const story = play(group, playerRandom(seed, index), path);
-      finals[index] = story.final;
-      for (let w = 0; w < weeks; w++) {
-        const v = path[w];
-        let bin = Math.floor((v - lo) / width);
-        bin = bin < 0 ? 0 : bin >= bins ? bins - 1 : bin;
-        hist[w * bins + bin]++;
-        if (v > 0) aheadByWeek[w]++;
-      }
-      const returned = story.staked + story.final;
-      sum.n++;
-      sum.staked += story.staked;
-      sum.net += story.final;
-      sum.tickets += story.tickets;
-      sum.rr += returned * returned;
-      sum.rs += returned * story.staked;
-      sum.ss += story.staked * story.staked;
-      if (story.final > 0) {
-        sum.ahead++;
-        winnings += story.final;
-      } else losses -= story.final;
-      if (story.wonTickets === 0 && story.tickets > 0) neverWon++;
-      beat('biggestWin', index, story.biggestWin);
-      beat('best', index, story.final);
-      beat('worst', index, story.final, false);
-      beat('drought', index, story.longestLosing);
-      // Furthest ahead at some point, yet down at the end.
-      if (story.final < 0) beat('fall', index, story.peak);
-      if (story.everAhead) sum.everAhead++;
-      if (group.habit.chaseCap && story.maxStake >= group.habit.chaseCap) sum.capHits++;
+      const random = resume ? seededRandom(resume.rngs[index]) : playerRandom(seed, index);
+      const st = resume ? { ...resume.states[index] } : freshState(group.habit);
+      playSeason(group.habit, group.weekPicker, weeks, random, path, group.fallback, group.switchRate, group.legs, {
+        from,
+        st,
+        onWeek: (w, now) => {
+          const v = now.profit;
+          let bin = Math.floor((v - lo) / width);
+          bin = bin < 0 ? 0 : bin >= bins ? bins - 1 : bin;
+          hist[(w - 1 - from) * bins + bin]++;
+          if (v > 0) aheadByWeek[w - 1 - from]++;
+          const tally = tallies.get(w);
+          if (tally) count(tally, g, index, storyOf(now));
+        }
+      });
+      states[index] = st;
+      rngs[index] = random.state();
       if (onProgress && index % 2000 === 1999) onProgress((index + 1) / total);
     }
   }
@@ -687,20 +800,16 @@ export function simulateCrowdStats({ pools, sportPools, startWeek = 0, weeks, pe
     }
     return lo + (bins - 0.5) * width;
   };
-  const bands = Array.from({ length: weeks }, (_, w) => ({
-    q10: at(w, 0.1),
-    q25: at(w, 0.25),
-    q50: at(w, 0.5),
-    q75: at(w, 0.75),
-    q90: at(w, 0.9),
-    ahead: aheadByWeek[w]
-  }));
+  const bands = [
+    ...(resume?.bands ?? []),
+    ...Array.from({ length: span }, (_, w) => ({ q10: at(w, 0.1), q25: at(w, 0.25), q50: at(w, 0.5), q75: at(w, 0.75), q90: at(w, 0.9), ahead: aheadByWeek[w] }))
+  ];
   // Per habit and per fan type, merged over the other dimension.
   const summarize = members => {
-    const s = members.reduce((a, m) => {
-      for (const k of Object.keys(a)) a[k] += m[k];
-      return a;
-    }, { n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 });
+    const s = members.reduce((acc, m) => {
+      for (const k of Object.keys(acc)) acc[k] += m[k];
+      return acc;
+    }, emptySum());
     const n = s.n;
     const back = s.staked > 0 ? (s.staked + s.net) / s.staked : 1;
     const aheadShare = s.ahead / n;
@@ -719,36 +828,58 @@ export function simulateCrowdStats({ pools, sportPools, startWeek = 0, weeks, pe
       players: n
     };
   };
-  const summaries = HABITS.map(habit => ({ habit, ...summarize(sums.filter((_, g) => groups[g].habit === habit)) }));
-  const fanSummaries = sportPools ? FANS.map(fan => ({ fan, ...summarize(sums.filter((_, g) => groups[g].fan === fan)) })) : [];
-  const order = Uint32Array.from({ length: total }, (_, i) => i).sort((a, b) => finals[a] - finals[b]);
-  // Replays one player exactly; `serial` is their 1-based number in the crowd.
-  const replayIndex = index => {
-    const group = groups[Math.floor(index / per)];
-    const p = new Float64Array(weeks);
-    return { serial: index + 1, habit: group.habit, fan: group.fan, path: p, ...play(group, playerRandom(seed, index), p) };
-  };
-  const replay = q => replayIndex(order[Math.round((total - 1) * q)]);
-  const finalAt = q => finals[order[Math.round((total - 1) * q)]];
-  const sumOf = key => sums.reduce((t, s) => t + s[key], 0);
-  return {
-    weeks,
-    players: total,
-    bands,
-    summaries,
-    fanSummaries,
-    characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
-    totals: {
-      staked: sumOf('staked'),
-      net: sumOf('net'),
-      tickets: sumOf('tickets'),
-      aheadShare: sumOf('ahead') / total,
-      everAheadShare: sumOf('everAhead') / total
-    },
-    // Notable players, replayed in full, and crowd-wide numbers for the fun facts.
-    notable: Object.fromEntries(Object.entries(records).filter(([, [index]]) => index >= 0).map(([key, [index]]) => [key, replayIndex(index)])),
-    crowd: { winnings, losses, neverWonShare: neverWon / total, top1: finalAt(0.99), top01: finalAt(0.999) }
-  };
+  const results = {};
+  for (const [m, tally] of tallies) {
+    const { finals, sums, records, crowd } = tally;
+    const summaries = HABITS.map(habit => ({ habit, ...summarize(sums.filter((_, g) => groups[g].habit === habit)) }));
+    const fanSummaries = sportPools ? FANS.map(fan => ({ fan, ...summarize(sums.filter((_, g) => groups[g].fan === fan)) })) : [];
+    const order = Uint32Array.from({ length: total }, (_, i) => i).sort((x, y) => finals[x] - finals[y]);
+    // Replays one player exactly up to this checkpoint; `serial` is their
+    // 1-based number in the crowd.
+    const replayIndex = index => {
+      const group = groups[Math.floor(index / per)];
+      const p = new Float64Array(m);
+      return { serial: index + 1, habit: group.habit, fan: group.fan, path: p, ...playSeason(group.habit, group.weekPicker, m, playerRandom(seed, index), p, group.fallback, group.switchRate, group.legs) };
+    };
+    const replay = q => replayIndex(order[Math.round((total - 1) * q)]);
+    const finalAt = q => finals[order[Math.round((total - 1) * q)]];
+    const sumOf = key => sums.reduce((acc, x) => acc + x[key], 0);
+    results[m] = {
+      weeks: m,
+      players: total,
+      bands: bands.slice(0, m),
+      summaries,
+      fanSummaries,
+      characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
+      totals: {
+        staked: sumOf('staked'),
+        net: sumOf('net'),
+        tickets: sumOf('tickets'),
+        aheadShare: sumOf('ahead') / total,
+        everAheadShare: sumOf('everAhead') / total
+      },
+      // Notable players, replayed in full, and crowd-wide numbers for the fun facts.
+      notable: Object.fromEntries(Object.entries(records).filter(([, [index]]) => index >= 0).map(([key, [index]]) => [key, replayIndex(index)])),
+      crowd: {
+        winnings: crowd.winnings,
+        losses: crowd.losses,
+        neverWonShare: crowd.neverWon / total,
+        top1: finalAt(0.99),
+        top01: finalAt(0.999),
+        wonTickets: crowd.wonTickets,
+        taxTotal: crowd.taxTotal,
+        taxedShare: crowd.taxed / total,
+        firstWonShare: crowd.firstWon / total,
+        firstWonLostShare: crowd.firstWon > 0 ? crowd.firstWonLost / crowd.firstWon : 0
+      }
+    };
+  }
+  return { results, resume: { weeks, states, rngs, bands } };
+}
+
+// The crowd after `weeks` weeks (one checkpoint of simulateCrowd).
+export function simulateCrowdStats(options) {
+  return simulateCrowd({ ...options, checkpoints: [options.weeks] }).results[options.weeks];
 }
 
 // Value at quantile q (0-1) of an ascending sorted array.

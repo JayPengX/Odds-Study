@@ -28,7 +28,7 @@ import {
   SLIP_RULES,
   choose,
   seededRandom,
-  simulateCrowdStats,
+  simulateCrowd,
   slipErrors,
   slipSizes,
 } from './lib/odds.mjs';
@@ -1329,17 +1329,18 @@ function crowdStats(sportBets, weeks) {
   let reject;
   const promise = new Promise((res, rej) => ((resolve = res), (reject = rej)));
   crowdJob = { key, promise, reject };
-  const done = stats => {
-    crowdCache.set(key, stats);
+  // Every period the run answered (a 1-year run also gives 1, 3 and 6 months).
+  const done = results => {
+    for (const [w, stats] of Object.entries(results)) crowdCache.set(crowdKey(sportBets, Number(w)), stats);
     crowdJob = null;
     hideLoading();
-    resolve(stats);
+    resolve(results[weeks]);
   };
   try {
     worker ??= new Worker(new URL('./sim-worker.js', import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
       if (data.id !== key) return;
-      if (data.stats) done(data.stats);
+      if (data.results) done(data.results);
       else report(data.progress);
     };
     worker.onerror = () => {
@@ -1353,7 +1354,8 @@ function crowdStats(sportBets, weeks) {
   // No worker (very old browser): run here after the loading screen paints.
   function runHere() {
     const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
-    setTimeout(() => done(simulateCrowdStats({ sportPools, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED })), 30);
+    const checkpoints = [...$('sim-weeks').options].map(o => Number(o.value)).filter(w => w <= weeks);
+    setTimeout(() => done(simulateCrowd({ sportPools, startWeek, weeks, checkpoints, perGroup: PER_GROUP, seed: SIM_SEED }).results), 30);
   }
   return promise;
 }
@@ -1402,7 +1404,7 @@ function drawSim(stats, weeks) {
   renderPlayers(characters);
   renderHabits(summaries);
   renderFans(stats.fanSummaries);
-  renderFacts(totals, characters, summaries, period);
+  renderFacts(stats, totals, characters, summaries, period);
   renderStories(stats, period);
   renderSimTable(bands, characters, weeks);
 }
@@ -1524,70 +1526,100 @@ function renderFans(fans) {
   );
 }
 
-// A fact as a big number and a short caption.
-function factItem(value, caption) {
-  return el('li', { class: 'fact' }, [value ? el('strong', { class: 'fact-value', text: value }) : null, el('span', { class: 'fact-text', text: caption })]);
+// A fact: a big number, a bold caption, then the full explanation.
+function factItem(value, caption, why) {
+  return el('li', { class: 'fact' }, [
+    value ? el('strong', { class: 'fact-value', text: value }) : null,
+    el('span', { class: 'fact-text', text: caption }),
+    why ? el('span', { class: 'fact-why', text: why }) : null
+  ]);
 }
 
-function renderFacts(totals, characters, summaries, period) {
+function renderFacts(stats, totals, characters, summaries, period) {
   const t = state.t;
   const money = v => fmtMoney(v, { sign: false });
   const facts = [];
   const by = key => summaries.find(h => h.habit.key === key);
-  facts.push(factItem(`${money(by('casual').back)} → ${money(by('dreamer').back)}`, t('factParlay')));
-  if (totals.everAheadShare > totals.aheadShare) facts.push(factItem(`${fmtShare(totals.everAheadShare)} → ${fmtShare(totals.aheadShare)}`, t('factEverAhead')));
+  facts.push(factItem(`${money(by('casual').back)} → ${money(by('dreamer').back)}`, t('factParlay'), t('factParlayWhy')));
+  if (totals.everAheadShare > totals.aheadShare) facts.push(factItem(`${fmtShare(totals.everAheadShare)} → ${fmtShare(totals.aheadShare)}`, t('factEverAhead'), t('factEverAheadWhy')));
   const chaser = by('chaser');
-  if (chaser.capShare > 0) facts.push(factItem(fmtShare(chaser.capShare), t('factChaser', { cap: money(chaser.habit.chaseCap) })));
+  if (chaser.capShare > 0) {
+    facts.push(factItem(fmtShare(chaser.capShare), t('factChaser', { cap: money(chaser.habit.chaseCap) }), t('factChaserWhy', { staked: money(chaser.avgStaked), final: fmtMoney(chaser.avgFinal) })));
+  }
   const lucky = characters[0].player;
-  if (lucky.biggestWin > 0) facts.push(factItem(t('inARow', { n: lucky.longestLosing }), t('factLucky')));
+  if (lucky.biggestWin > 0) facts.push(factItem(t('inARow', { n: lucky.longestLosing }), t('factLucky'), t('factLuckyWhy', { win: money(lucky.biggestWin) })));
   const avgLoss = -totals.net / SIM_PLAYERS;
   if (avgLoss > 0) {
     const hours = (avgLoss / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: avgLoss < 10 * MIN_WAGE_HOURLY ? 1 : 0 });
-    facts.push(factItem(t('hoursN', { n: hours }), t('factWage', { period, loss: money(avgLoss) })));
+    facts.push(factItem(t('hoursN', { n: hours }), t('factWage', { period, loss: money(avgLoss) }), t('factWageWhy', { wage: MIN_WAGE_HOURLY })));
   }
-  if (totals.net < 0) facts.push(factItem(money((-totals.net / totals.staked) * 100), t('factHouse')));
-  else facts.push(factItem(null, t('factHouseWon')));
+  const hitRate = totals.tickets > 0 ? stats.crowd.wonTickets / totals.tickets : 0;
+  facts.push(factItem(fmtShare(hitRate), t('factHitRate'), t('factHitRateWhy', { tickets: fmtCount(totals.tickets), won: fmtCount(stats.crowd.wonTickets) })));
+  if (stats.crowd.taxTotal > 0) facts.push(factItem(money(stats.crowd.taxTotal), t('factTax'), t('factTaxWhy', { share: fmtChance(stats.crowd.taxedShare) })));
+  if (totals.net < 0) facts.push(factItem(money(-totals.net / (stats.weeks * 7)), t('factPerDay'), t('factPerDayWhy', { total: fmtCount(SIM_PLAYERS_SHOWN) })));
+  if (totals.net < 0) {
+    facts.push(factItem(money((-totals.net / totals.staked) * 100), t('factHouse'), t('factHouseWhy', { total: fmtCount(SIM_PLAYERS_SHOWN), staked: money(totals.staked), net: money(-totals.net) })));
+  } else facts.push(factItem(null, t('factHouseWon')));
   $('sim-facts').replaceChildren(...facts);
 }
 
-// Record holders among the 100,000, by their number in the crowd: a big key
-// number and one short line each. Then the crowd-wide truths behind them.
+// Record holders among the 100,000, by their number in the crowd: the key
+// figure, who they are, then their story. Then the crowd-wide truths.
 function renderStories(stats, period) {
   const t = state.t;
   const { notable, crowd } = stats;
   const money = v => fmtMoney(v, { sign: false });
-  const who = p => (p.fan ? `${t(`fan_${p.fan.key}`)} · ${t(`habit_${p.habit.key}`)}` : t(`habit_${p.habit.key}`));
   const stories = [];
-  const add = (icon, titleKey, p, big, line) => p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, big, line: `${who(p)} · ${line}` });
+  // `tone`: how the big figure reads (good, bad or neutral); money by its sign.
+  const add = (icon, titleKey, p, big, textKey, vars, tone = null) =>
+    p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), t(`habit_${p.habit.key}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
   const w = notable.biggestWin;
-  if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), t('storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds) }));
+  if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), 'storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds), final: fmtMoney(w.final) });
   const best = notable.best;
   // The biggest ticket often makes the biggest winner too, who without it
   // would have been losing: say so when it's true.
   const bestIsBigWin = best?.serial === w?.serial && best.final - best.biggestWin < 0;
-  if (best) add('🏆', 'storyBestTitle', best, fmtMoney(best.final), t(bestIsBigWin ? 'storyBestSame' : 'storyBest', { tickets: fmtCount(best.tickets), staked: money(best.staked) }));
+  if (best) add('🏆', 'storyBestTitle', best, fmtMoney(best.final), bestIsBigWin ? 'storyBestSame' : 'storyBest', { tickets: fmtCount(best.tickets), staked: money(best.staked) });
   const fall = notable.fall;
-  if (fall) add('🎢', 'storyFallTitle', fall, `${fmtMoney(fall.peak)} → ${fmtMoney(fall.final)}`, t('storyFall', { week: fall.peakWeek + 1 }));
+  if (fall) add('🎢', 'storyFallTitle', fall, `${fmtMoney(fall.peak)} → ${fmtMoney(fall.final)}`, 'storyFall', { week: fall.peakWeek + 1, peak: fmtMoney(fall.peak), final: fmtMoney(fall.final) }, 'back-low');
   const dry = notable.drought;
-  if (dry) add('🧊', 'storyDroughtTitle', dry, t('inARow', { n: fmtCount(dry.longestLosing) }), t('storyDrought', { tickets: fmtCount(dry.tickets), won: fmtCount(dry.wonTickets) }));
+  if (dry) add('🧊', 'storyDroughtTitle', dry, t('inARow', { n: fmtCount(dry.longestLosing) }), 'storyDrought', { streak: fmtCount(dry.longestLosing), tickets: fmtCount(dry.tickets), won: fmtCount(dry.wonTickets) }, 'back-low');
   const worst = notable.worst;
-  if (worst) add('💸', 'storyWorstTitle', worst, fmtMoney(worst.final), t('storyWorst', { staked: money(worst.staked), hours: fmtCount(-worst.final / MIN_WAGE_HOURLY) }));
+  if (worst) add('💸', 'storyWorstTitle', worst, fmtMoney(worst.final), 'storyWorst', { staked: money(worst.staked), max: money(worst.maxStake), hours: fmtCount(-worst.final / MIN_WAGE_HOURLY) });
+  const hot = notable.hotStreak;
+  if (hot?.longestWinning > 1) add('🔥', 'storyHotTitle', hot, t('inARowWon', { n: fmtCount(hot.longestWinning) }), 'storyHot', { tickets: fmtCount(hot.tickets), won: fmtCount(hot.wonTickets), final: fmtMoney(hot.final) });
+  const long = notable.longshot;
+  if (long?.longshotOdds > 1) add('🦄', 'storyLongshotTitle', long, `@ ${fmtOdds(long.longshotOdds)}`, 'storyLongshot', { week: long.longshotWeek + 1, stake: money(long.longshotStake), win: fmtMoney(long.longshotWin) });
+  const bad = notable.worstWeek;
+  if (bad?.worstWeek < 0) add('🌪️', 'storyBadWeekTitle', bad, fmtMoney(bad.worstWeek), 'storyBadWeek', { week: bad.worstWeekAt + 1, final: fmtMoney(bad.final) });
+  const busy = notable.mostTickets;
+  if (busy) add('🧾', 'storyBusyTitle', busy, t('ticketsN', { n: fmtCount(busy.tickets) }), 'storyBusy', { perWeek: (busy.tickets / stats.weeks).toFixed(1), staked: money(busy.staked), final: fmtMoney(busy.final) }, 'neutral');
+  const even = notable.closest;
+  if (even) add('⚖️', 'storyEvenTitle', even, fmtMoney(even.final), 'storyEven', { tickets: fmtCount(even.tickets), staked: money(even.staked) }, 'neutral');
+  const tax = notable.taxman;
+  if (tax?.taxPaid > 0) add('🏛️', 'storyTaxTitle', tax, money(tax.taxPaid), 'storyTax', { final: fmtMoney(tax.final) }, 'back-low');
   $('sim-stories').replaceChildren(
-    // Three stories by default; the rest with 詳細 on.
+    // Six stories by default; the rest with 詳細 on.
     ...stories.map((s, i) =>
-      el('li', { class: `story ${i >= 3 ? 'detail-only' : ''}` }, [
-        el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
-        el('p', { class: 'story-title' }, [document.createTextNode(`${s.title} `), el('span', { class: 'story-serial', text: s.serial })]),
-        el('p', { class: `story-big ${s.big.startsWith('−') ? 'back-low' : 'back-high'}`, text: s.big }),
-        el('p', { class: 'story-text', text: s.line })
+      el('li', { class: `story ${i >= 6 ? 'detail-only' : ''}` }, [
+        el('div', { class: 'story-head' }, [
+          el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
+          el('div', {}, [el('p', { class: 'story-title', text: s.title }), el('p', { class: 'story-serial', text: s.serial })])
+        ]),
+        el('p', { class: `story-big ${s.tone}`, text: s.big }),
+        el('div', { class: 'player-tags' }, s.tags.map(tag => el('span', { class: 'habit-tag', text: tag }))),
+        el('p', { class: 'story-text', text: s.text })
       ])
     )
   );
   const truths = [];
-  if (crowd.winnings > 0) truths.push(factItem(`NT$${(crowd.losses / crowd.winnings).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })}`, t('truthRatio')));
-  truths.push(crowd.top1 > 0 ? factItem(fmtMoney(crowd.top1), t('truthTop', { period })) : factItem(fmtMoney(crowd.top1), t('truthTopLosing', { period })));
-  if (crowd.neverWonShare > 0) truths.push(factItem(fmtChance(crowd.neverWonShare), t('truthNeverWon', { period })));
-  truths.push(factItem(null, t('truthSameOdds')));
+  if (crowd.winnings > 0) {
+    truths.push(factItem(`NT$${(crowd.losses / crowd.winnings).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })}`, t('truthRatio'), t('truthRatioWhy', { n: fmtCount(SIM_PLAYERS_SHOWN), win: money(crowd.winnings), loss: money(crowd.losses) })));
+  }
+  truths.push(crowd.top1 > 0 ? factItem(fmtMoney(crowd.top1), t('truthTop', { period }), t('truthTopWhy', { top01: fmtMoney(crowd.top01) })) : factItem(fmtMoney(crowd.top1), t('truthTopLosing', { period })));
+  if (crowd.neverWonShare > 0) truths.push(factItem(fmtChance(crowd.neverWonShare), t('truthNeverWon', { period }), t('truthNeverWonWhy', { n: fmtCount(crowd.neverWonShare * SIM_PLAYERS) })));
+  if (crowd.firstWonShare > 0) truths.push(factItem(fmtShare(crowd.firstWonLostShare), t('truthFirstWin'), t('truthFirstWinWhy', { share: fmtShare(crowd.firstWonShare) })));
+  truths.push(factItem(null, t('truthSameOdds'), t('truthSameOddsWhy')));
   $('sim-truths').replaceChildren(...truths);
 }
 
