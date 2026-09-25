@@ -137,15 +137,13 @@ test('the chaser doubles after a losing week and stays under the cap', () => {
   assert.ok([400, 800, 1600, 3000].includes(run.maxStake));
 });
 
-test('riders put their winnings on the next ticket, within the ticket limit', () => {
+test('riders keep betting their winnings, within the ticket limit', () => {
   const pools = habitPools(examplePool());
   const ride = key => simulateHabit({ habit: habit(key), pools, weeks: 260, random: seededRandom(5) });
   const flat = key => simulateHabit({ habit: { ...habit(key), ride: false }, pools, weeks: 260, random: seededRandom(5) });
   for (const key of ['dreamer', 'underdog']) {
     const [r, f] = [ride(key), flat(key)];
-    // Same tickets, same results; only the stakes grow after a win.
-    assert.equal(r.tickets, f.tickets);
-    assert.equal(r.wonTickets, f.wonTickets);
+    assert.ok(r.tickets >= f.tickets, key);
     assert.ok(r.staked > f.staked, key);
     assert.ok(r.maxStake > 3000 && r.maxStake <= 100_000 && r.maxStake % 10 === 0, `${key} ${r.maxStake}`);
   }

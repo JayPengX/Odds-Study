@@ -369,8 +369,12 @@ export function seededRandom(seed) {
 // chosen by `pick`. Most tickets are a few hundred NT$ (`stakes`); a `big`
 // share of them are NT$1,000-3,000. A chaser starts at `stakes[0]`, doubles
 // after a losing week up to `chaseCap`, and drops back after a winning one.
-// A `ride` player lets it ride: a winning ticket's profit (after tax) goes on
-// top of the next ticket's stake, up to the lottery's per-ticket limit.
+// A `ride` player lets it ride: a winning ticket's whole payout (after tax)
+// goes back in from the next week (this week's results are already decided).
+// While any is left they bet every week: it tops up their ticket, and what's
+// over the lottery's per-ticket limit goes on extra tickets (at most 30), so a
+// big win keeps being bet until it's lost.
+const RIDE_EXTRA_TICKETS = 30;
 export const BIG_STAKES = [1000, 2000, 3000];
 export const HABITS = [
   { key: 'casual', perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any' },
@@ -578,8 +582,11 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
     // Poisson number of tickets this week (none when there's nothing to bet on).
     let count = 0;
     if (pick) for (let p = random(); p > noTicket; p *= random()) count++;
+    const riding = () => habit.ride && pick && st.pot >= SLIP_RULES.minTicket;
+    if (count === 0 && riding()) count = 1;
     let week = 0;
-    for (let i = 0; i < count; i++) {
+    let winnings = 0;
+    for (let i = 0; i < count || (riding() && i < count + RIDE_EXTRA_TICKETS); i++) {
       const want = Math.min(lo + Math.floor(random() * legSpan), pick.games);
       let legs = 0;
       let won = true;
@@ -610,14 +617,19 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         if (result < c.lo[j] || result >= c.hi[j]) won = false;
       }
       if (legs === 0) continue;
-      let stake = habit.chaseCap
-        ? st.chaseStake
-        : random() < habit.big
-          ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
-          : habit.stakes[Math.floor(random() * habit.stakes.length)];
+      // Extra tickets are the winnings alone.
+      let stake =
+        i >= count
+          ? 0
+          : habit.chaseCap
+            ? st.chaseStake
+            : random() < habit.big
+              ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
+              : habit.stakes[Math.floor(random() * habit.stakes.length)];
       if (st.pot > 0) {
-        stake = Math.min(SLIP_RULES.maxTicket, stake + Math.floor(st.pot / SLIP_RULES.unit) * SLIP_RULES.unit);
-        st.pot = 0;
+        const ride = Math.min(Math.floor(st.pot / SLIP_RULES.unit) * SLIP_RULES.unit, SLIP_RULES.maxTicket - stake);
+        stake += ride;
+        st.pot -= ride;
       }
       const gross = stake * odds;
       const result = won ? afterTax(gross) - stake : -stake;
@@ -627,7 +639,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       week += result;
       if (stake > st.maxStake) st.maxStake = stake;
       if (won) {
-        if (habit.ride) st.pot = result;
+        if (habit.ride) winnings += afterTax(gross);
         st.wonTickets++;
         st.losing = 0;
         if (++st.winning > st.longestWinning) st.longestWinning = st.winning;
@@ -650,6 +662,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         if (++st.losing > st.longestLosing) st.longestLosing = st.losing;
       }
     }
+    st.pot += winnings;
     if (week < st.worstWeek) {
       st.worstWeek = week;
       st.worstWeekAt = w;
