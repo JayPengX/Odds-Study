@@ -511,19 +511,20 @@ button.pick:active { transform: scale(0.98); }
 .math-step p { color: var(--text-secondary); font-size: 0.84rem; }
 
 /* ---- Loading screen ------------------------------------------------------------------ */
-.loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: var(--hero); color: #fff; padding: 16px; }
+.loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: #fff; color: var(--text-primary); padding: 16px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .loading { background: #000; } }
+:root[data-theme='dark'] .loading { background: #000; }
 .loading-box { width: min(360px, 100%); text-align: center; display: grid; justify-items: center; gap: 12px; }
-.loading-logo { width: 72px; height: 72px; border-radius: 18px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+.loading-logo { width: 72px; height: 72px; border-radius: 18px; box-shadow: var(--shadow); }
 .loading-title { font-weight: 800; font-size: 1.2rem; }
-.loading-box p { color: rgba(255, 255, 255, 0.88); font-size: 0.9rem; }
-.spinner { width: 30px; height: 30px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; animation: spin 0.9s linear infinite; }
+.loading-box p { color: var(--text-secondary); font-size: 0.9rem; }
+.spinner { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--grid); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner, .icon-button:disabled svg { animation-duration: 3s; } }
-.loading-bar { width: 100%; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
-.loading-bar span { display: block; height: 100%; width: 0; background: #fff; transition: width 0.25s; }
-.loading-box .loading-eta { font-size: 0.78rem; color: rgba(255, 255, 255, 0.7); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+.loading-bar { width: 100%; height: 6px; border-radius: 3px; background: var(--surface-sunken); overflow: hidden; }
+.loading-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s; }
+.loading-box .loading-eta { font-size: 0.78rem; color: var(--text-muted); min-height: 1.2em; font-variant-numeric: tabular-nums; }
 .loading-error { display: grid; gap: 10px; justify-items: center; }
-.loading .ghost-button { color: var(--text-primary); }
 
 /* ---- Ticket analysis ------------------------------------------------------------ */
 .pick-wrap { display: grid; gap: 0; min-width: 0; }
