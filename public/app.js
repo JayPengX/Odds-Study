@@ -849,11 +849,23 @@ function crowdKey(pool, weeks) {
   return JSON.stringify([weeks, pool.map(b => [b.gameId, b.fairChance, b.odds])]);
 }
 
-function showLoading(text, progress = null) {
-  $('loading').hidden = false;
+// Loading screen progress. At start-up it spans both stages, odds (first 35%)
+// then the simulation; later only the simulation. The time left is estimated
+// from the pace so far.
+const BOOT_ODDS_SHARE = 0.35;
+const loadingClock = { start: 0, key: '' };
+
+function showLoading(text, progress = 0, stage = 'boot') {
+  const box = $('loading');
+  if (box.hidden || loadingClock.key !== stage) Object.assign(loadingClock, { start: performance.now(), key: stage });
+  box.hidden = false;
+  $('loading-error').hidden = true;
+  $('loading-spinner').hidden = false;
   $('loading-text').textContent = text;
-  $('loading-fill').style.width = progress == null ? '0%' : `${Math.round(progress * 100)}%`;
-  $('loading-bar').hidden = progress == null;
+  $('loading-fill').style.width = `${Math.round(progress * 100)}%`;
+  const elapsed = (performance.now() - loadingClock.start) / 1000;
+  const left = progress > 0.08 && progress < 1 ? Math.ceil((elapsed / progress) * (1 - progress)) : null;
+  $('loading-eta').textContent = left == null ? '' : state.t('loadingEta', { pct: Math.round(progress * 100), s: left });
 }
 
 function hideLoading() {
@@ -872,7 +884,9 @@ function crowdStats(pool, weeks) {
     crowdJob.reject(new Error('cancelled'));
   }
   const label = () => state.t('loadingSim', { n: fmtCount(SIM_PLAYERS_SHOWN), period: state.t(`period_${weeks}`) });
-  showLoading(label(), 0);
+  // At start-up the simulation is the second stage of one bar.
+  const report = p => (state.booting ? showLoading(label(), BOOT_ODDS_SHARE + (1 - BOOT_ODDS_SHARE) * p) : showLoading(label(), p, 'sim'));
+  report(0);
   let resolve;
   let reject;
   const promise = new Promise((res, rej) => ((resolve = res), (reject = rej)));
@@ -888,7 +902,7 @@ function crowdStats(pool, weeks) {
     worker.onmessage = ({ data }) => {
       if (data.id !== key) return;
       if (data.stats) done(data.stats);
-      else showLoading(label(), data.progress);
+      else report(data.progress);
     };
     worker.onerror = () => {
       worker = null;
@@ -953,6 +967,7 @@ function drawSim(stats, weeks) {
   renderPlayers(characters);
   renderHabits(summaries, period);
   renderFacts(totals, characters, summaries, period);
+  renderStories(stats, period);
   renderSimTable(bands, characters, weeks);
 }
 
@@ -1047,6 +1062,48 @@ function renderFacts(totals, characters, summaries, period) {
   }
   facts.push(t(totals.net < 0 ? 'factHouse' : 'factHouseWon', { total: fmtCount(SIM_PLAYERS_SHOWN), staked: fmtMoney(totals.staked, { sign: false }), net: fmtMoney(Math.abs(totals.net), { sign: false }), kept: fmtMoney((-totals.net / totals.staked) * 100, { sign: false }) }));
   $('sim-facts').replaceChildren(...facts.map(f => el('li', { text: f })));
+}
+
+// Record holders among the 100,000, by their number in the crowd, and the
+// crowd-wide truths behind them.
+function renderStories(stats, period) {
+  const t = state.t;
+  const { notable, crowd } = stats;
+  const money = v => fmtMoney(v, { sign: false });
+  const who = p => ({ serial: `#${fmtCount(p.serial)}`, habit: t(`habit_${p.habit.key}`) });
+  const stories = [];
+  const add = (icon, titleKey, textKey, p, vars) => p && stories.push({ icon, title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
+  const hours = v => (v / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: 0 });
+  add('🎯', 'storyBigWinTitle', 'storyBigWin', notable.biggestWin, notable.biggestWin && {
+    week: notable.biggestWin.biggestWinWeek + 1,
+    stake: money(notable.biggestWin.biggestWinStake),
+    legs: notable.biggestWin.biggestWinLegs,
+    odds: fmtOdds(notable.biggestWin.biggestWinOdds),
+    win: money(notable.biggestWin.biggestWin),
+    final: fmtMoney(notable.biggestWin.final)
+  });
+  // The biggest ticket often makes the biggest winner too, who without it
+  // would have been losing: say so when it's true.
+  const bestIsBigWin = notable.best?.serial === notable.biggestWin?.serial && notable.best.final - notable.best.biggestWin < 0;
+  add('🏆', 'storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
+  add('🎢', 'storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
+  add('🥶', 'storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
+  add('💸', 'storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
+  $('sim-stories').replaceChildren(
+    ...stories.map(s =>
+      el('li', { class: 'story' }, [
+        el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
+        el('p', { class: 'story-title' }, [document.createTextNode(`${s.title} `), el('span', { class: 'story-serial', text: s.serial })]),
+        el('p', { class: 'story-text', text: s.text })
+      ])
+    )
+  );
+  const truths = [];
+  if (crowd.winnings > 0) truths.push(t('truthRatio', { n: fmtCount(SIM_PLAYERS_SHOWN), win: money(crowd.winnings), loss: money(crowd.losses), ratio: (crowd.losses / crowd.winnings).toLocaleString(numberLocale(), { maximumFractionDigits: 1 }) }));
+  truths.push(crowd.top1 > 0 ? t('truthTop', { period, top1: fmtMoney(crowd.top1), top01: fmtMoney(crowd.top01) }) : t('truthTopLosing', { period, top1: fmtMoney(crowd.top1) }));
+  if (crowd.neverWonShare > 0) truths.push(t('truthNeverWon', { period, share: fmtChance(crowd.neverWonShare), n: fmtCount(crowd.neverWonShare * SIM_PLAYERS) }));
+  truths.push(t('truthSameOdds'));
+  $('sim-truths').replaceChildren(...truths.map(text => el('li', { text })));
 }
 
 function drawSimChart(container, bands, characters, weeks) {
@@ -1228,12 +1285,19 @@ function renderAll() {
   renderF1();
 }
 
+// Longest the loading screen waits at start-up; after that the page opens and
+// whatever is still loading finishes in the background.
+const BOOT_LIMIT_MS = 45_000;
+
 async function load() {
   renderStatus('loading');
-  if (state.booting) showLoading(state.t('loading'));
+  const booting = state.booting;
+  const onProgress = booting ? p => showLoading(state.t('loading'), BOOT_ODDS_SHARE * p) : undefined;
+  if (booting) onProgress(0);
+  const limit = booting ? setTimeout(() => ((state.booting = false), hideLoading()), BOOT_LIMIT_MS) : null;
   $('refresh').disabled = true;
   try {
-    state.data = await loadOdds();
+    state.data = await loadOdds(new Date(), onProgress);
     renderAll();
     // The page opens once the default simulation is ready too.
     if (state.booting) await renderSim();
@@ -1241,8 +1305,11 @@ async function load() {
     console.error(error);
     renderStatus('error');
   } finally {
-    state.booting = false;
-    hideLoading();
+    clearTimeout(limit);
+    if (booting) {
+      state.booting = false;
+      hideLoading();
+    }
     $('refresh').disabled = false;
   }
 }
@@ -1312,6 +1379,8 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
+// Tells the page's failsafe (in index.html) that the scripts loaded and started.
+window.__oddsStarted = true;
 renderStatic();
 renderTabs();
 load();

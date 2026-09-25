@@ -239,6 +239,10 @@ function playSeason(habit, list, weeks, random, path) {
   let wonTickets = 0;
   let staked = 0;
   let biggestWin = 0;
+  let biggestWinWeek = -1;
+  let biggestWinStake = 0;
+  let biggestWinLegs = 0;
+  let biggestWinOdds = 0;
   let losing = 0;
   let longestLosing = 0;
   let chaseStake = base;
@@ -280,7 +284,13 @@ function playSeason(habit, list, weeks, random, path) {
       if (won) {
         wonTickets++;
         losing = 0;
-        if (result > biggestWin) biggestWin = result;
+        if (result > biggestWin) {
+          biggestWin = result;
+          biggestWinWeek = w;
+          biggestWinStake = stake;
+          biggestWinLegs = legs;
+          biggestWinOdds = odds;
+        }
       } else if (++losing > longestLosing) longestLosing = losing;
     }
     if (habit.chaseCap && count > 0) chaseStake = week < 0 ? Math.min(chaseStake * 2, habit.chaseCap) : base;
@@ -292,7 +302,23 @@ function playSeason(habit, list, weeks, random, path) {
     }
     if (peak - profit > maxDrop) maxDrop = peak - profit;
   }
-  return { final: profit, tickets, wonTickets, staked, biggestWin, longestLosing, maxStake, peak, peakWeek, everAhead: peak > 0, maxDrop };
+  return {
+    final: profit,
+    tickets,
+    wonTickets,
+    staked,
+    biggestWin,
+    biggestWinWeek,
+    biggestWinStake,
+    biggestWinLegs,
+    biggestWinOdds,
+    longestLosing,
+    maxStake,
+    peak,
+    peakWeek,
+    everAhead: peak > 0,
+    maxDrop
+  };
 }
 
 // One player's season with their full week-by-week path.
@@ -327,6 +353,14 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
   const finals = new Float64Array(total);
   const path = new Float64Array(weeks);
   const sums = HABITS.map(() => ({ staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 }));
+  // Record holders (by player index) and crowd-wide totals for the fun facts.
+  const records = { biggestWin: [-1, -Infinity], best: [-1, -Infinity], worst: [-1, Infinity], drought: [-1, -1], fall: [-1, -1] };
+  const beat = (key, index, value, higher = true) => {
+    if (higher ? value > records[key][1] : value < records[key][1]) records[key] = [index, value];
+  };
+  let winnings = 0;
+  let losses = 0;
+  let neverWon = 0;
   for (let h = 0; h < HABITS.length; h++) {
     const habit = HABITS[h];
     const list = pools[habit.pick];
@@ -349,7 +383,17 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
       sum.rr += returned * returned;
       sum.rs += returned * story.staked;
       sum.ss += story.staked * story.staked;
-      if (story.final > 0) sum.ahead++;
+      if (story.final > 0) {
+        sum.ahead++;
+        winnings += story.final;
+      } else losses -= story.final;
+      if (story.wonTickets === 0 && story.tickets > 0) neverWon++;
+      beat('biggestWin', index, story.biggestWin);
+      beat('best', index, story.final);
+      beat('worst', index, story.final, false);
+      beat('drought', index, story.longestLosing);
+      // Furthest ahead at some point, yet down at the end.
+      if (story.final < 0) beat('fall', index, story.peak);
       if (story.everAhead) sum.everAhead++;
       if (habit.chaseCap && story.maxStake >= habit.chaseCap) sum.capHits++;
       if (onProgress && index % 2000 === 1999) onProgress((index + 1) / total);
@@ -394,11 +438,13 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
     };
   });
   const order = Uint32Array.from({ length: total }, (_, i) => i).sort((a, b) => finals[a] - finals[b]);
-  const replay = q => {
-    const index = order[Math.round((total - 1) * q)];
+  // Replays one player exactly; `serial` is their 1-based number in the crowd.
+  const replayIndex = index => {
     const habit = HABITS[Math.floor(index / perHabit)];
-    return { habit, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, index) }) };
+    return { serial: index + 1, habit, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, index) }) };
   };
+  const replay = q => replayIndex(order[Math.round((total - 1) * q)]);
+  const finalAt = q => finals[order[Math.round((total - 1) * q)]];
   const sumOf = key => sums.reduce((t, s) => t + s[key], 0);
   return {
     weeks,
@@ -412,7 +458,10 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
       tickets: sumOf('tickets'),
       aheadShare: sumOf('ahead') / total,
       everAheadShare: sumOf('everAhead') / total
-    }
+    },
+    // Notable players, replayed in full, and crowd-wide numbers for the fun facts.
+    notable: Object.fromEntries(Object.entries(records).filter(([, [index]]) => index >= 0).map(([key, [index]]) => [key, replayIndex(index)])),
+    crowd: { winnings, losses, neverWonShare: neverWon / total, top1: finalAt(0.99), top01: finalAt(0.999) }
   };
 }
 

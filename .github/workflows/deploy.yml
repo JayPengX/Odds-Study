@@ -26,11 +26,11 @@ jobs:
           node-version: 22
       - name: Run tests
         run: npm test
-      - name: Cache-bust script and stylesheet
-        # GitHub Pages caches files for 10 minutes; a per-deploy query string
-        # makes browsers fetch the new code right away.
-        run: |
-          sed -i "s|src=\"./app.js\"|src=\"./app.js?v=${{ github.sha }}\"|; s|href=\"./styles.css\"|href=\"./styles.css?v=${{ github.sha }}\"|" public/index.html
+      - name: Cache-bust every script, module and stylesheet
+        # GitHub Pages caches files for 10 minutes; a per-deploy query string on
+        # every local file (module imports included) makes browsers fetch the
+        # new code right away and never mix it with cached older files.
+        run: node scripts/stamp-version.mjs ${{ github.sha }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -12,10 +12,39 @@
 <body>
 <div id="loading" class="loading" role="status" aria-live="polite">
   <div class="loading-box">
-    <p id="loading-text">賠率研究室 · Odds Study</p>
-    <div id="loading-bar" class="loading-bar" hidden><span id="loading-fill"></span></div>
+    <img class="loading-logo" src="./favicon.svg" alt="" width="64" height="64" />
+    <p class="loading-title">賠率研究室 · Odds Study</p>
+    <div id="loading-spinner" class="spinner" aria-hidden="true"></div>
+    <p id="loading-text"></p>
+    <div id="loading-bar" class="loading-bar"><span id="loading-fill"></span></div>
+    <p id="loading-eta" class="loading-eta"></p>
+    <div id="loading-error" class="loading-error" hidden>
+      <p id="loading-error-text"></p>
+      <div class="button-row">
+        <button id="loading-reload" class="ghost-button" type="button">重新整理 · Reload</button>
+        <button id="loading-skip" class="ghost-button" type="button">直接開啟 · Open anyway</button>
+      </div>
+    </div>
   </div>
 </div>
+<script>
+  // Failsafe that doesn't depend on the app's own scripts: if they fail to
+  // load or never start, offer a way out instead of an endless loading screen.
+  (function () {
+    var zh = /^zh/i.test(navigator.language || '');
+    function $(id) { return document.getElementById(id); }
+    window.__oddsFail = function (message) {
+      if ($('loading').hidden) return;
+      $('loading-error-text').textContent = message || (zh ? '頁面沒有正常啟動，可能是網路不穩。' : "The page didn't start, maybe a network hiccup.");
+      $('loading-error').hidden = false;
+      $('loading-spinner').hidden = true;
+    };
+    $('loading-reload').onclick = function () { location.reload(); };
+    $('loading-skip').onclick = function () { $('loading').hidden = true; };
+    window.addEventListener('error', function () { if (!window.__oddsStarted) window.__oddsFail(); });
+    setTimeout(function () { if (!window.__oddsStarted) window.__oddsFail(); }, 15000);
+  })();
+</script>
 <main class="page">
   <header class="masthead">
     <div>
@@ -104,6 +133,11 @@
       <h3 class="sub-title" data-t="habitsTitle"></h3>
       <p id="habits-intro" class="intro"></p>
       <ol id="sim-habits" class="ranking-list"></ol>
+      <h3 class="sub-title" data-t="storiesTitle"></h3>
+      <p class="intro" data-t="storiesIntro"></p>
+      <ul id="sim-stories" class="stories"></ul>
+      <h3 class="sub-title" data-t="truthsTitle"></h3>
+      <ul id="sim-truths" class="facts truths"></ul>
       <h3 class="sub-title" data-t="factsTitle"></h3>
       <ul id="sim-facts" class="facts"></ul>
       <details class="table-view">
@@ -122,6 +156,6 @@
 
   <footer><p id="footer" class="muted"></p></footer>
 </main>
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js" onerror="window.__oddsFail()"></script>
 </body>
 </html>

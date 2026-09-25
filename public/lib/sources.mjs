@@ -353,15 +353,20 @@ export function mergeGames(dkGames, pmGames) {
     .sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 }
 
-export async function loadOdds(now = new Date()) {
-  const results = await Promise.allSettled([
-    fetchEspnDays('mlb', 'baseball/mlb', mlbDays(now)),
-    fetchPolymarketEvents(POLYMARKET_TAG.mlb, 'polymarket-events'),
-    fetchEspnEpl(now),
-    fetchPolymarketEvents(POLYMARKET_TAG.epl, 'polymarket-events'),
-    fetchPolymarketEvents(POLYMARKET_TAG.f1),
-    fetchPolymarketEvents(POLYMARKET_TAG.nba, 'polymarket-events')
-  ]);
+// `onProgress(share)` is called as each source finishes (0 to 1).
+export async function loadOdds(now = new Date(), onProgress) {
+  let finished = 0;
+  const track = (promise, _, all) => promise.finally(() => onProgress?.(++finished / all.length));
+  const results = await Promise.allSettled(
+    [
+      fetchEspnDays('mlb', 'baseball/mlb', mlbDays(now)),
+      fetchPolymarketEvents(POLYMARKET_TAG.mlb, 'polymarket-events'),
+      fetchEspnEpl(now),
+      fetchPolymarketEvents(POLYMARKET_TAG.epl, 'polymarket-events'),
+      fetchPolymarketEvents(POLYMARKET_TAG.f1),
+      fetchPolymarketEvents(POLYMARKET_TAG.nba, 'polymarket-events')
+    ].map(track)
+  );
   if (results.every(r => r.status === 'rejected')) throw results[0].reason;
   const [mlbDk, mlbPm, eplDk, eplPm, f1, nbaPm] = results.map(r => (r.status === 'fulfilled' ? r.value : []));
   return {
