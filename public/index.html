@@ -170,14 +170,12 @@
           <h2 id="sim-title" class="section-heading"></h2>
           <p class="lede" data-t="simIntro"></p>
         </div>
-        <div id="sim-periods" class="segmented" role="group"></div>
-        <select id="sim-weeks" hidden>
-          <option value="4">4</option>
-          <option value="13">13</option>
-          <option value="26">26</option>
-          <option value="52" selected>52</option>
-          <option value="156">156</option>
-        </select>
+        <div class="period-picker">
+          <label class="period-head" for="sim-months"><span data-t="periodLabel"></span><strong id="period-value"></strong></label>
+          <input id="sim-months" type="range" min="1" max="60" step="1" value="12" />
+          <div id="sim-periods" class="period-presets" role="group"></div>
+        </div>
+        <input id="sim-weeks" type="hidden" value="52" />
       </div>
       <div class="card hero-card">
         <div id="sim-headline" class="sim-headline" aria-live="polite"></div>
@@ -186,6 +184,10 @@
       <div class="card">
         <div id="sim-legend" class="legend"></div>
         <div id="sim-chart" class="chart"></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title" data-t="lapseTitle"></h3>
+        <div id="sim-lapse"></div>
       </div>
       <div id="sim-players" class="players"></div>
       <div class="two-col">
@@ -225,8 +227,9 @@
         <div class="card truth-card">
           <h3 class="card-title" data-t="truthsTitle"></h3>
           <ul id="sim-truths" class="facts truths"></ul>
+          <div id="sim-buys" class="buys"></div>
         </div>
-        <div class="card detail-only">
+        <div class="card">
           <h3 class="card-title" data-t="factsTitle"></h3>
           <ul id="sim-facts" class="facts"></ul>
         </div>

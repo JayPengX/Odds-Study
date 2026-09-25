@@ -62,7 +62,10 @@ The choice is remembered.
   - **Where each NT$100 goes:** back to you, the lottery's cut and the tax.
   - **Every result:** the chance of k of n correct, what it pays, and which results make a profit.
   - **Each pick on its own:** the odds against the fair odds, its value per NT$100, and what the ticket returns without it. The costliest pick is flagged.
-  - **Every week for a year:** the chance of ending ahead, the typical result and 80% range, the average result, and how rare the top payout is (1 in N, about once every N years).
+  - **Every week for N weeks** (a slider, 1 week to 5 years; a year by default): the chance of ending ahead, the typical result and 80% range, the average result, and how rare the top payout is (1 in N, about once every N years).
+- **Grade:** a letter from the average back per NT$100 (a single game at the usual cut gets an A), a type from the chance of profit (steady to lottery ticket), the average loss per ticket in bubble teas, and how many tickets it takes on average to get paid once. With 詳細 on: what all-correct would pay at fair odds, and how much less the lottery pays.
+- **How hard is it to win?** The ticket's chances of all correct and of any profit, placed among well-known odds: a coin, a die, a stranger's birthday, 10 heads in a row, a royal flush, the Lotto 6/49 and Power Lottery jackpots.
+- **Try a draw:** opens the ticket with each pick drawn from its fair chance. One at a time, with the picks revealed one by one, or 10 or 100 at once. A running tally shows tickets opened, how many paid, the result so far with a small chart, the biggest ticket, and what the odds say that many tickets average.
 
 ### 模擬 Simulator
 
@@ -75,9 +78,12 @@ The choice is remembered.
 - **How often and how much:** calibrated on the closest published survey, the University of Hong Kong's 2021 government-commissioned gambling study. The median football bettor there bets once every two weeks and spends HK$201–500 a month; Taiwanese studies don't publish these figures.
   - In the simulation, habits range from about one ticket every three weeks (Careful) to one a week (Big fan). The average person buys about 2 tickets a month.
   - Most tickets are NT$100–500, now and then up to NT$3,000. Anything paying over NT$5,000 is taxed.
+- **Guess first:** for the quick-pick periods, the page first asks how many of 10 people end ahead, then shows the answer and how far off the guess was. Guesses are remembered on the device.
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;
+  - a time-lapse: 100 dots of 1,000 people each, lit while they're ahead, played week by week or scrubbed with a slider, with the week the most people were ahead;
+  - what the crowd's total loss would buy: bubble teas, bowls of beef noodles, iPhones and scooters;
   - the luckiest 10%, the middle player and the unluckiest 10%;
   - habits and fans ranked by money back;
   - record holders by their number in the crowd, each with their full story:
@@ -86,7 +92,7 @@ The choice is remembered.
     - the longest winning and losing streaks;
     - the longest shot that came in and the worst single week;
     - the most tickets, the closest to break-even and the most tax paid;
-  - the brutal truths and surprising facts, each one plain sentence with its numbers highlighted, then the explanation:
+  - the brutal truths and surprising facts (all shown, 詳細 or not), each one plain sentence with its numbers highlighted, then the explanation:
     - how much others lose for every NT$1 won;
     - the top-1% line and who never won once;
     - how often a first-ticket winner still loses;
@@ -101,9 +107,9 @@ The choice is remembered.
   - Sports keep their real number of distinct games per week.
   - With 24 races a year, F1 long shots come in only as rarely as they should.
   - Picks are weighted by each option's chance, so a 0.1% driver gets about 0.1% of the bets.
-- **Periods:** 1 month to 3 years. The seed is fixed, so the same period always gives the same result.
-  - The default 1-year run records 1, 3 and 6 months along the way, so switching to them is instant.
-  - 3 years carries every player on from week 52 and plays only the extra two years. Tests check it matches a straight 3-year run exactly.
+- **Periods:** a slider by the month from 1 month to 5 years, with quick picks (1 month, 6 months, 1, 2, 3 and 5 years). The seed is fixed, so the same period always gives the same result.
+  - Every run records the crowd at the end of each month along the way, so the default 1-year run answers every period up to a year at once.
+  - Longer periods carry every player on from the furthest week played so far and play only the extra weeks. Tests check this matches a straight run exactly.
 - **How it runs:** in a Web Worker, streaming weeks into histograms instead of keeping 100,000 paths. Tests prove this equals simulating everyone in full.
 
 ### 說明 Guide

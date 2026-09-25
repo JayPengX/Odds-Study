@@ -15,6 +15,7 @@ import {
   estimateLotteryOdds,
   evaluateSlip,
   analyzeSlip,
+  slipPayoutTable,
   expectedReturn,
   habitPools,
   lotteryTotalLines,
@@ -29,6 +30,8 @@ import {
   choose,
   seededRandom,
   simulateCrowd,
+  MONTH_WEEKS,
+  monthWeeks,
   replayPlayer,
   slipErrors,
   slipSizes,
@@ -69,6 +72,8 @@ const state = {
   // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
   slipSizes: new Set([2, 'all']),
   slipStake: 100,
+  // Weeks in a row for the slip's "every week" outlook.
+  slipWeeks: 52,
   day: null,
   // True until the first simulation is ready: the loading screen covers the page.
   booting: true,
@@ -547,7 +552,6 @@ function renderStatic() {
   $('notice').textContent = t('notice');
   $('refresh').setAttribute('aria-label', t('refresh'));
   $('refresh').title = t('refresh');
-  for (const option of $('sim-weeks').options) option.textContent = t(`period_${option.value}`);
   $('footer').textContent = t('footer');
   for (const [id, key] of [
     ['ranking-title', 'rankingTitle'],
@@ -1046,11 +1050,12 @@ function sizeName(k, n) {
 }
 
 // A deep look at the ticket, all computed exactly from each pick's fair chance.
-function slipAnalysisView(a, legs, ranges) {
+function slipAnalysisView(a, legs, ranges, extra) {
   const t = state.t;
   const money = v => fmtMoney(v, { sign: false });
   const n = legs.length;
   const cards = [];
+  cards.push(gradeCard(a));
 
   // Key numbers.
   cards.push(
@@ -1063,9 +1068,11 @@ function slipAnalysisView(a, legs, ranges) {
         statTile(t('slipProfit'), fmtChance(a.profit), a.profit < 0.5 ? 'back-low' : '', ranges.profit, false, '📈'),
         statTile(t('slipTakeTax'), fmtPct(1 - a.expectedNet / a.cost), 'back-low', ranges.take, true, '🏦')
       ]),
+      extra.fairTop > a.top.gross ? el('p', { class: 'note detail-only', text: t('anaFairTop', { fair: money(extra.fairTop), real: money(a.top.gross), cut: fmtPct(1 - a.top.gross / extra.fairTop) }) }) : null,
       el('details', { class: 'info detail-only' }, [el('summary', { text: t('slipRangeTitle') }), el('p', { text: t('slipRangeNote') })])
     ])
   );
+  cards.push(drawCard(legs, a, extra.sig));
 
   // Where each NT$100 goes.
   const { take, tax, back } = a.per100;
@@ -1100,6 +1107,8 @@ function slipAnalysisView(a, legs, ranges) {
     ])
   );
 
+  cards.push(rareCard(a));
+
   // Each pick on its own.
   cards.push(
     el('div', { class: 'card' }, [
@@ -1130,6 +1139,7 @@ function slipAnalysisView(a, legs, ranges) {
   cards.push(
     el('div', { class: 'card' }, [
       el('h3', { class: 'card-title', text: t('anaYearTitle', { n: y.weeks }) }),
+      yearSlider(y.weeks),
       el('div', { class: 'kpis' }, [
         statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high', null, false, '🏁'),
         statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) }), false, '🧍'),
@@ -1140,6 +1150,201 @@ function slipAnalysisView(a, legs, ranges) {
     ])
   );
   return cards;
+}
+
+// ---- Bet slip extras: a grade, how rare a win is, and trying a draw ----------
+
+// Things everyone knows the odds of, to measure a ticket's chances against.
+const RARE_EVENTS = [
+  { key: 'coin', p: 1 / 2, icon: '🪙' },
+  { key: 'dice', p: 1 / 6, icon: '🎲' },
+  { key: 'birthday', p: 1 / 365, icon: '🎂' },
+  { key: 'tenHeads', p: 1 / 1024, icon: '🪙' },
+  { key: 'royal', p: 1 / 649_740, icon: '🃏' },
+  { key: 'lotto', p: 1 / 13_983_816, icon: '🎱' },
+  { key: 'power', p: 1 / 22_085_448, icon: '🎱' }
+];
+const TICKET_TYPES = [
+  { key: 'steady', min: 0.4, icon: '🐢' },
+  { key: 'balanced', min: 0.15, icon: '⚖️' },
+  { key: 'thrill', min: 0.03, icon: '🎢' },
+  { key: 'dream', min: 0.002, icon: '🌈' },
+  { key: 'lottery', min: 0, icon: '🎰' }
+];
+
+// A school grade from the average back per NT$100 (a single game at the
+// lottery's usual cut gets about 87, an A), and a type from the chance of profit.
+function slipGrade(a) {
+  const b = a.backPer100;
+  const grade = b >= 100 ? 'S' : b >= 85 ? 'A' : b >= 72 ? 'B' : b >= 62 ? 'C' : b >= 50 ? 'D' : 'F';
+  return { grade, type: TICKET_TYPES.find(x => a.profit >= x.min) };
+}
+
+function gradeCard(a) {
+  const t = state.t;
+  const { grade, type } = slipGrade(a);
+  const loss = a.cost - a.expectedNet;
+  return el('div', { class: 'card grade-card' }, [
+    el('div', { class: `grade-letter grade-${grade}`, text: grade, 'aria-label': t('gradeTitle') }),
+    el('div', { class: 'grade-main' }, [
+      el('p', { class: 'grade-kicker', text: t('gradeTitle') }),
+      el('p', { class: 'grade-type' }, [el('span', { 'aria-hidden': 'true', text: type.icon }), document.createTextNode(` ${t(`type_${type.key}`)}`)]),
+      el('p', { class: 'grade-note', text: `${t(`typeNote_${type.key}`)} · ${t(`gradeNote_${grade}`)}` }),
+      el('div', { class: 'grade-lines' }, [
+        loss > 0 ? el('span', { text: t('gradeLoss', { loss: fmtMoney(loss, { sign: false }), cups: (loss / BOBA_PRICE).toLocaleString(numberLocale(), { maximumFractionDigits: 1 }) }) }) : null,
+        a.paid > 0 ? el('span', { text: t('gradeEvery', { n: (1 / a.paid).toLocaleString(numberLocale(), { maximumFractionDigits: 1 }) }) }) : null
+      ])
+    ])
+  ]);
+}
+
+function fmtOneIn(p) {
+  return t => t('anaOneIn', { n: fmtCount(1 / Math.max(p, 1e-12)) });
+}
+
+// The ticket's chances placed among well-known odds, rarest at the bottom.
+function rareCard(a) {
+  const t = state.t;
+  const same = Math.abs(a.profit - a.top.chance) < 1e-12;
+  const mine = [{ key: same ? 'mineBoth' : 'mineTop', p: a.top.chance, icon: '🎫', mine: true }];
+  if (!same && a.profit > 0) mine.push({ key: 'mineProfit', p: a.profit, icon: '💰', mine: true });
+  const all = [...RARE_EVENTS, ...mine].sort((x, y) => y.p - x.p);
+  // Keep the neighbours of the ticket's rows: one well-known event above and below.
+  const idx = all.map((r, i) => (r.mine ? i : -1)).filter(i => i >= 0);
+  const rows = all.slice(Math.max(0, idx[0] - 1), Math.min(all.length, idx.at(-1) + 2));
+  const rarest = Math.max(...rows.map(r => -Math.log10(r.p)));
+  const coins = Math.round(Math.log2(1 / Math.max(a.top.chance, 1e-15)));
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('rareTitle') }),
+    el('ol', { class: 'rare-list' },
+      rows.map(r =>
+        el('li', { class: r.mine ? 'rare-mine' : '' }, [
+          el('span', { class: 'rare-icon', 'aria-hidden': 'true', text: r.icon }),
+          el('span', { class: 'rare-name', text: t(`rare_${r.key}`) }),
+          el('span', { class: 'rare-track' }, [el('span', { class: 'rare-bar', style: `width:${Math.max(3, (-Math.log10(r.p) / rarest) * 100)}%` })]),
+          el('strong', { class: 'rare-odds', text: r.p >= 0.5 ? fmtChance(r.p) : fmtOneIn(r.p)(t) })
+        ])
+      )
+    ),
+    coins >= 2 ? el('p', { class: 'note', text: t('rareCoins', { n: coins }) }) : null
+  ]);
+}
+
+// Opens the ticket for real: every pick drawn from its fair chance. One at a
+// time with each pick revealed in turn, or 10 or 100 at once, with a running tally.
+function drawCard(legs, a, sig) {
+  const t = state.t;
+  const money = v => fmtMoney(v, { sign: false });
+  if (state.draws?.sig !== sig) state.draws = { sig, n: 0, spent: 0, back: 0, best: 0, wins: 0, path: [], last: null, busy: false };
+  const d = state.draws;
+  const box = el('div', { class: 'card draw-card' });
+  const drawOne = () => legs.reduce((won, b, i) => (Math.random() < b.fairChance ? won | (1 << i) : won), 0);
+  const record = won => {
+    const pay = a.net[won];
+    d.n++;
+    d.spent += a.cost;
+    d.back += pay;
+    if (pay > 0) d.wins++;
+    d.best = Math.max(d.best, pay);
+    d.path.push(d.back - d.spent);
+    return pay;
+  };
+  const openOne = () => {
+    if (d.busy) return;
+    d.busy = true;
+    d.last = { won: drawOne(), shown: 0 };
+    paint();
+    const step = () => {
+      if (state.draws !== d || !box.isConnected) return (d.busy = false);
+      d.last.shown++;
+      if (d.last.shown >= legs.length) {
+        d.last.pay = record(d.last.won);
+        d.busy = false;
+      } else setTimeout(step, 380);
+      paint();
+    };
+    setTimeout(step, 380);
+  };
+  const openMany = k => {
+    if (d.busy) return;
+    let pays = 0;
+    let wins = 0;
+    for (let i = 0; i < k; i++) {
+      const pay = record(drawOne());
+      pays += pay;
+      if (pay > 0) wins++;
+    }
+    d.last = { batch: k, pays, wins };
+    paint();
+  };
+  const reset = () => {
+    state.draws = null;
+    box.replaceWith(drawCard(legs, a, sig));
+  };
+  function paint() {
+    const last = d.last;
+    const parts = [
+      el('h3', { class: 'card-title', text: t('drawTitle') }),
+      el('p', { class: 'lede', text: t('drawNote') }),
+      el('div', { class: 'draw-buttons' }, [
+        el('button', { class: 'primary-button', type: 'button', text: t('drawOne'), disabled: d.busy ? '' : null, onclick: openOne }),
+        el('button', { class: 'ghost-button', type: 'button', text: t('drawMany', { n: 10 }), disabled: d.busy ? '' : null, onclick: () => openMany(10) }),
+        el('button', { class: 'ghost-button', type: 'button', text: t('drawMany', { n: 100 }), disabled: d.busy ? '' : null, onclick: () => openMany(100) }),
+        d.n > 0 && !d.busy ? el('button', { class: 'link-button', type: 'button', text: t('drawReset'), onclick: reset }) : null
+      ])
+    ];
+    if (last && last.batch == null) {
+      const done = last.shown >= legs.length;
+      parts.push(
+        el('ul', { class: 'draw-legs' },
+          legs.map((b, i) => {
+            const shown = i < last.shown;
+            const hit = (last.won >> i) & 1;
+            return el('li', { class: shown ? (hit ? 'hit' : 'miss') : 'wait' }, [
+              el('span', { class: 'draw-mark', 'aria-hidden': 'true', text: shown ? (hit ? '✓' : '✗') : '?' }),
+              el('span', { class: 'draw-leg', text: b.shortLabel }),
+              el('small', { text: fmtPctShort(b.fairChance) })
+            ]);
+          })
+        )
+      );
+      if (done) {
+        const pay = last.pay;
+        const text = pay <= 0 ? t('drawLost', { cost: money(a.cost) }) : pay > a.cost ? t('drawWon', { v: money(pay), profit: money(pay - a.cost) }) : t('drawBackSome', { v: money(pay), loss: money(a.cost - pay) });
+        parts.push(el('p', { class: `draw-result ${pay > a.cost ? 'win' : 'lose'}`, text }));
+      }
+    } else if (last) {
+      parts.push(el('p', { class: 'draw-result', text: t('drawBatch', { n: last.batch, w: last.wins, v: money(last.pays), cost: money(last.batch * a.cost) }) }));
+    }
+    if (d.n > 0) {
+      const net = d.back - d.spent;
+      parts.push(
+        el('div', { class: 'kpis draw-tally' }, [
+          statTile(t('drawOpened'), fmtCount(d.n), '', null, false, '🎫'),
+          statTile(t('drawWins'), `${fmtCount(d.wins)} (${fmtShare(d.wins / d.n)})`, '', null, false, '🎯'),
+          statTile(t('drawNet'), fmtMoney(net), net < 0 ? 'back-low' : 'back-high', null, false, '💵'),
+          statTile(t('drawBest'), d.best > 0 ? money(d.best) : '—', '', null, false, '🏆')
+        ]),
+        d.path.length > 1 ? sparkline(d.path) : null,
+        el('p', { class: 'note', text: t('drawExpected', { n: fmtCount(d.n), v: fmtMoney(d.n * (a.expectedNet - a.cost)) }) })
+      );
+    }
+    box.replaceChildren(...parts);
+  }
+  paint();
+  return box;
+}
+
+// How many weeks in a row the same ticket is bought: 1 to 260 (5 years).
+function yearSlider(weeks) {
+  const t = state.t;
+  const input = el('input', { type: 'range', min: '1', max: '260', step: '1', value: String(weeks), 'aria-label': t('anaYearTitle', { n: weeks }) });
+  input.addEventListener('input', () => (input.closest('.card').querySelector('.card-title').textContent = t('anaYearTitle', { n: input.value })));
+  input.addEventListener('change', () => {
+    state.slipWeeks = Number(input.value);
+    setTimeout(renderParlay);
+  });
+  return el('div', { class: 'range-row' }, [el('span', { text: '1' }), input, el('span', { text: '260' })]);
 }
 
 function renderParlay() {
@@ -1269,7 +1474,7 @@ function renderParlay() {
 
   let results = [];
   if (sizes.length && !errors.includes('stakeUnit')) {
-    const a = analyzeSlip({ legs: slip, sizes, stake });
+    const a = analyzeSlip({ legs: slip, sizes, stake, weeks: state.slipWeeks });
     // Range if every fair chance and estimated price is off by its margin, all
     // the same way (the realistic worst and best case).
     const shifted = dir =>
@@ -1289,6 +1494,11 @@ function renderParlay() {
       any: range(low.anyPayout, high.anyPayout, fmtChance),
       profit: range(low.profit, high.profit, fmtChance),
       take: range(1 - high.expectedNet / a.cost, 1 - low.expectedNet / a.cost, fmtPct)
+    }, {
+      // Pre-tax top payout if every price were fair (odds = 1 / chance).
+      fairTop: slipPayoutTable({ legs: slip.map(l => ({ ...l, odds: 1 / l.fairChance })), sizes, stake }).gross[(1 << n) - 1],
+      // A new ticket starts a new tally of draws.
+      sig: JSON.stringify([slip, sizes, stake])
     });
   }
   body.replaceChildren(el('div', { class: 'slip has-legs' }, [el('div', { class: 'card ticket' }, ticket), el('div', { class: 'slip-results' }, results)]));
@@ -1389,7 +1599,7 @@ function crowdStats(sportBets, weeks) {
     worker = null;
     crowdJob.reject(new Error('cancelled'));
   }
-  const label = () => state.t('loadingSim', { n: fmtCount(SIM_PLAYERS_SHOWN), period: state.t(`period_${weeks}`) });
+  const label = () => state.t('loadingSim', { n: fmtCount(SIM_PLAYERS_SHOWN), period: periodName(weeks) });
   // At start-up the simulation is the second stage of one bar.
   const report = p => (state.booting ? showLoading(label(), BOOT_ODDS_SHARE + (1 - BOOT_ODDS_SHARE) * p) : showLoading(label(), p, 'sim'));
   report(0);
@@ -1422,7 +1632,7 @@ function crowdStats(sportBets, weeks) {
   // No worker (very old browser): run here after the loading screen paints.
   function runHere() {
     const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
-    const checkpoints = [...$('sim-weeks').options].map(o => Number(o.value)).filter(w => w <= weeks);
+    const checkpoints = [...MONTH_WEEKS.filter(w => w <= weeks), weeks];
     setTimeout(() => done(simulateCrowd({ sportPools, startWeek, weeks, checkpoints, perGroup: PER_GROUP, seed: SIM_SEED }).results), 30);
   }
   return promise;
@@ -1450,11 +1660,11 @@ function renderSim() {
 
 function drawSim(stats, weeks) {
   const t = state.t;
-  const period = t(`period_${weeks}`);
+  const period = periodName(weeks);
   const { bands, summaries, totals } = stats;
   const characters = CHARACTERS.map(c => ({ ...c, player: stats.characters[c.key] }));
 
-  renderSimHeadline(totals, period);
+  renderSimHeadline(totals, period, weeks);
   const back = totals.staked > 0 ? ((totals.staked + totals.net) / totals.staked) * 100 : 100;
   $('sim-stats').replaceChildren(
     statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : '', null, false, '🧍'),
@@ -1469,6 +1679,8 @@ function drawSim(stats, weeks) {
     ...characters.map(c => el('span', {}, [el('span', { class: 'legend-key thick', style: `background:${c.color}` }), document.createTextNode(t(c.name))]))
   );
   drawSimChart($('sim-chart'), bands, characters, weeks);
+  renderLapse(bands, weeks);
+  renderBuys(totals, period);
   renderPlayers(characters);
   renderHabits(summaries);
   renderFans(stats.fanSummaries);
@@ -1480,8 +1692,18 @@ function drawSim(stats, weeks) {
   renderSimTable(bands, characters, weeks);
 }
 
-function renderSimHeadline(totals, period) {
+function renderSimHeadline(totals, period, weeks) {
   const t = state.t;
+  state.guesses ??= loadGuesses();
+  // Asked for the quick-pick periods only, so moving the slider doesn't keep asking.
+  const asks = PERIOD_PRESETS.some(m => monthWeeks(m) === weeks);
+  const guess = asks ? state.guesses[weeks] : undefined;
+  const hero = $('sim-headline').closest('.hero-card');
+  hero.classList.toggle('guessing', asks && guess == null);
+  if (asks && guess == null) {
+    $('sim-headline').replaceChildren(...guessView(weeks, period, () => renderSimHeadline(totals, period, weeks)));
+    return;
+  }
   const share = totals.aheadShare;
   const { staked, net } = totals;
   const tickets = totals.tickets / SIM_PLAYERS;
@@ -1502,6 +1724,7 @@ function renderSimHeadline(totals, period) {
       document.createTextNode(t('simHeadlinePost'))
     ]),
     el('div', { class: 'people', role: 'img', 'aria-label': t('simHeadlineShare', { n: inTen }) }, Array.from({ length: 10 }, (_, i) => person(i < inTen))),
+    guess != null ? guessVerdict(guess, inTen) : null,
     el('p', {
       class: 'headline-sub',
       text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked / SIM_PLAYERS, { sign: false }), back: fmtMoney(back, { sign: false }) })
@@ -1641,6 +1864,138 @@ function renderFacts(stats, totals, characters, summaries, period) {
 
 const BOBA_PRICE = 65;
 
+// ---- Simulator extras: guess first, a time-lapse, what the losses buy -------
+
+const GUESS_KEY = 'oddsStudy.guesses';
+function loadGuesses() {
+  try {
+    return JSON.parse(localStorage.getItem(GUESS_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+function saveGuess(weeks, guess) {
+  state.guesses[weeks] = guess;
+  try {
+    localStorage.setItem(GUESS_KEY, JSON.stringify(state.guesses));
+  } catch {}
+}
+
+// Before the answer: of 10 people, how many does the viewer think end ahead?
+// Asked once per period, remembered on this device.
+function guessView(weeks, period, onGuess) {
+  const t = state.t;
+  return [
+    el('p', { class: 'headline-label', text: t('guessLabel') }),
+    el('p', { class: 'headline-big', text: t('guessQ', { period }) }),
+    el('div', { class: 'guess-buttons', role: 'group', 'aria-label': t('guessQ', { period }) },
+      Array.from({ length: 11 }, (_, g) => el('button', { type: 'button', text: String(g), onclick: () => (saveGuess(weeks, g), onGuess()) }))
+    ),
+    el('p', { class: 'headline-sub', text: t('guessHint') })
+  ];
+}
+
+function guessVerdict(guess, inTen) {
+  const t = state.t;
+  const d = guess - inTen;
+  const text = d === 0 ? t('guessRight') : d > 0 ? t('guessHigh', { d }) : t('guessLow', { d: -d });
+  return el('p', { class: `guess-verdict ${d === 0 ? 'right' : ''}`, text: `${t('guessYou', { g: guess })} ${text}` });
+}
+
+// Week by week: 100 dots, each 1,000 people, lit while they're ahead.
+function renderLapse(bands, weeks) {
+  const t = state.t;
+  const box = $('sim-lapse');
+  if (!box) return;
+  const random = seededRandom(3);
+  const order = Array.from({ length: 100 }, (_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const rank = new Array(100);
+  order.forEach((dot, r) => (rank[dot] = r));
+  const dots = Array.from({ length: 100 }, () => el('span', { class: 'lapse-dot' }));
+  const week = el('strong', { class: 'lapse-week' });
+  const ahead = el('strong', { class: 'lapse-ahead' });
+  const median = el('strong');
+  const slider = el('input', { type: 'range', min: '1', max: String(weeks), value: String(weeks), 'aria-label': t('lapseWeek', { w: '' }) });
+  const play = el('button', { class: 'primary-button lapse-play', type: 'button' });
+  let timer = null;
+  const set = w => {
+    const b = bands[w - 1];
+    const share = b.ahead / SIM_PLAYERS;
+    const lit = Math.round(share * 100);
+    dots.forEach((dot, i) => dot.classList.toggle('up', rank[i] < lit));
+    week.textContent = t('lapseWeek', { w });
+    ahead.textContent = fmtShare(share);
+    median.textContent = fmtMoney(b.q50);
+    median.className = b.q50 < 0 ? 'back-low' : 'back-high';
+    slider.value = String(w);
+  };
+  const stop = () => {
+    clearInterval(timer);
+    timer = null;
+    play.textContent = `▶ ${t('lapsePlay')}`;
+  };
+  play.addEventListener('click', () => {
+    if (timer) return stop();
+    let w = Number(slider.value) >= weeks ? 1 : Number(slider.value);
+    set(w);
+    play.textContent = `⏸ ${t('lapsePause')}`;
+    timer = setInterval(() => {
+      if (!box.contains(play)) return clearInterval(timer);
+      w++;
+      set(w);
+      if (w >= weeks) stop();
+    }, Math.max(45, Math.round(6000 / weeks)));
+  });
+  slider.addEventListener('input', () => (stop(), set(Number(slider.value))));
+  let peak = 0;
+  bands.forEach((b, i) => b.ahead > bands[peak].ahead && (peak = i));
+  box.replaceChildren(
+    el('div', { class: 'lapse' }, [
+      el('div', { class: 'lapse-grid', role: 'img', 'aria-label': t('lapseLegend') }, dots),
+      el('div', { class: 'lapse-side' }, [
+        week,
+        el('p', { class: 'lapse-line' }, [el('span', { text: t('lapseAhead') }), ahead]),
+        el('p', { class: 'lapse-line' }, [el('span', { text: t('youMedian') }), median]),
+        el('div', { class: 'lapse-controls' }, [play, slider]),
+        el('p', { class: 'note', text: t('lapseLegend') }),
+        el('p', { class: 'note', text: t('lapsePeak', { w: peak + 1, v: fmtShare(bands[peak].ahead / SIM_PLAYERS) }) })
+      ])
+    ])
+  );
+  stop();
+  set(weeks);
+}
+
+// What the crowd's total loss would have bought instead.
+const BUYS = [
+  { key: 'boba', price: BOBA_PRICE, icon: '🧋' },
+  { key: 'noodles', price: 200, icon: '🍜' },
+  { key: 'iphone', price: 30_000, icon: '📱' },
+  { key: 'scooter', price: 80_000, icon: '🛵' }
+];
+function renderBuys(totals, period) {
+  const t = state.t;
+  const loss = -totals.net * (SIM_PLAYERS_SHOWN / SIM_PLAYERS);
+  const box = $('sim-buys');
+  if (loss <= 0) return box.replaceChildren();
+  box.replaceChildren(
+    el('p', { class: 'fact-line', text: t('buysTitle', { period, n: fmtCount(SIM_PLAYERS_SHOWN), v: fmtMoney(loss, { sign: false }) }) }),
+    el('div', { class: 'buys-grid' },
+      BUYS.map(b =>
+        el('div', { class: 'buy' }, [
+          el('span', { class: 'buy-icon', 'aria-hidden': 'true', text: b.icon }),
+          el('strong', { text: fmtCount(loss / b.price) }),
+          el('small', { text: t(`buy_${b.key}`, { price: fmtCount(b.price) }) })
+        ])
+      )
+    )
+  );
+}
+
 // How a group of about 3,334 people with one habit and one kind of fan did.
 function renderYou() {
   const t = state.t;
@@ -1658,7 +2013,7 @@ function renderYou() {
   const g = stats.groupStats.find(x => x.habit === habitSelect.value && x.fan === fanSelect.value);
   if (!g) return;
   const money = v => fmtMoney(v, { sign: false });
-  const period = t(`period_${stats.weeks}`);
+  const period = periodName(stats.weeks);
   $('you-result').replaceChildren(
     el('p', { class: 'you-headline' }, [
       document.createTextNode(t('youAheadPre', { n: fmtCount(g.players), period })),
@@ -1772,7 +2127,7 @@ function renderStories(stats, period) {
   const fall = notable.fall;
   if (fall) add('🎢', 'storyFallTitle', fall, `${fmtMoney(fall.peak)} → ${fmtMoney(fall.final)}`, 'storyFall', { week: fall.peakWeek + 1, peak: fmtMoney(fall.peak), final: fmtMoney(fall.final) }, 'back-low');
   const dry = notable.drought;
-  if (dry) add('🧊', 'storyDroughtTitle', dry, t('inARow', { n: fmtCount(dry.longestLosing) }), 'storyDrought', { streak: fmtCount(dry.longestLosing), tickets: fmtCount(dry.tickets), won: fmtCount(dry.wonTickets) }, 'back-low');
+  if (dry) add('🧊', 'storyDroughtTitle', dry, t('inARow', { n: fmtCount(dry.longestLosing) }), dry.wonTickets ? 'storyDrought' : 'storyDroughtNone', { streak: fmtCount(dry.longestLosing), tickets: fmtCount(dry.tickets), won: fmtCount(dry.wonTickets) }, 'back-low');
   const worst = notable.worst;
   if (worst) add('💸', 'storyWorstTitle', worst, fmtMoney(worst.final), 'storyWorst', { staked: money(worst.staked), max: money(worst.maxStake), hours: fmtCount(-worst.final / MIN_WAGE_HOURLY) });
   const hot = notable.hotStreak;
@@ -1788,9 +2143,8 @@ function renderStories(stats, period) {
   const tax = notable.taxman;
   if (tax?.taxPaid > 0) add('🏛️', 'storyTaxTitle', tax, money(tax.taxPaid), 'storyTax', { final: fmtMoney(tax.final) }, 'back-low');
   $('sim-stories').replaceChildren(
-    // Six stories by default; the rest with 詳細 on.
-    ...stories.map((s, i) =>
-      el('li', { class: `story ${i >= 6 ? 'detail-only' : ''}` }, [
+    ...stories.map(s =>
+      el('li', { class: 'story' }, [
         el('div', { class: 'story-head' }, [
           el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
           el('div', {}, [
@@ -2082,23 +2436,47 @@ $('detail-toggle').addEventListener('click', () => {
 });
 
 // The simulated period as pills; the hidden select keeps the value.
+// "1 個月", "半年", "1 年 3 個月", "5 年": a period of whole months.
+function periodName(weeks) {
+  const t = state.t;
+  const months = MONTH_WEEKS.indexOf(weeks) + 1 || Math.round((weeks * 12) / 52);
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  if (!y && m === 6) return t('periodHalf');
+  const part = (n, one, many) => (n === 1 ? t(one) : t(many, { n }));
+  return [y ? part(y, 'periodYear', 'periodYears') : '', m ? part(m, 'periodMonth', 'periodMonths') : ''].filter(Boolean).join(' ');
+}
+
+// Quick picks under the period slider.
+const PERIOD_PRESETS = [1, 6, 12, 24, 36, 60];
+
+// The period: a slider by the month up to 5 years, and a few quick picks.
+// The label follows the slider as it moves; the simulation runs on release.
 function renderPeriods() {
-  const select = $('sim-weeks');
+  const weeks = Number($('sim-weeks').value);
+  const months = MONTH_WEEKS.indexOf(weeks) + 1;
+  $('sim-months').value = String(months);
+  $('period-value').textContent = periodName(weeks);
   $('sim-periods').replaceChildren(
-    ...[...select.options].map(option =>
+    ...PERIOD_PRESETS.map(m =>
       el('button', {
         type: 'button',
-        'aria-pressed': String(option.value === select.value),
-        text: state.t(`periodShort_${option.value}`),
-        onclick: () => {
-          select.value = option.value;
-          renderPeriods();
-          renderSim();
-        }
+        'aria-pressed': String(m === months),
+        text: periodName(monthWeeks(m)),
+        onclick: () => setPeriod(m)
       })
     )
   );
 }
+
+function setPeriod(months) {
+  $('sim-weeks').value = String(monthWeeks(months));
+  renderPeriods();
+  renderSim();
+}
+
+$('sim-months').addEventListener('input', event => ($('period-value').textContent = periodName(monthWeeks(Number(event.target.value)))));
+$('sim-months').addEventListener('change', event => setPeriod(Number(event.target.value)));
 
 function showTab(tab) {
   state.tab = tab;
@@ -2127,7 +2505,6 @@ $('tabs').addEventListener('keydown', event => {
 }
 
 $('refresh').addEventListener('click', load);
-$('sim-weeks').addEventListener('change', renderSim);
 // Redraw only when the width changes: phones fire resize when the address bar
 // slides away, and that shouldn't reset the chart.
 let resizeTimer;

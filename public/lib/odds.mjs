@@ -682,6 +682,11 @@ function histogramShape(weeks) {
 
 // ---- Multi-sport calendar ----------------------------------------------------
 
+// Periods run month by month up to 5 years; a month is 52 / 12 weeks, rounded
+// (1 month = 4 weeks, 3 = 13, 6 = 26, 12 = 52).
+export const MAX_MONTHS = 60;
+export const monthWeeks = months => Math.round((months * 52) / 12);
+export const MONTH_WEEKS = Array.from({ length: MAX_MONTHS }, (_, i) => monthWeeks(i + 1));
 export const SPORTS = ['mlb', 'epl', 'nba', 'f1'];
 // Who bets on what. A fan of one sport bets on it while it's in season; in
 // its off-season, OFFSEASON_SWITCH of them bet on whatever else is on that
@@ -913,7 +918,8 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     const { finals, sums, records, crowd } = tally;
     const summaries = HABITS.map(habit => ({ habit, ...summarize(sums.filter((_, g) => groups[g].habit === habit)) }));
     const fanSummaries = sportPools ? FANS.map(fan => ({ fan, ...summarize(sums.filter((_, g) => groups[g].fan === fan)) })) : [];
-    const order = Uint32Array.from({ length: total }, (_, i) => i).sort((x, y) => finals[x] - finals[y]);
+    // Sorted results (a plain numeric sort, far quicker than sorting indexes).
+    const sorted = finals.slice().sort();
     // Replays one player exactly up to this checkpoint; `serial` is their
     // 1-based number in the crowd.
     const replayIndex = index => {
@@ -921,7 +927,21 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       const p = new Float64Array(m);
       return { serial: index + 1, habit: group.habit, fan: group.fan, path: p, ...playSeason(group.habit, group.weekPicker, m, playerRandom(seed, index), p, group.fallback, group.switchRate, group.legs) };
     };
-    const replay = q => replayIndex(order[Math.round((total - 1) * q)]);
+    // The player at rank r; among equal results, the lower number comes first.
+    const atRank = r => {
+      const v = sorted[r];
+      let lo = 0;
+      let hi = r;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (sorted[mid] < v) lo = mid + 1;
+        else hi = mid;
+      }
+      let k = r - lo;
+      for (let i = 0; i < total; i++) if (finals[i] === v && k-- === 0) return i;
+      return -1;
+    };
+    const replay = q => replayIndex(atRank(Math.round((total - 1) * q)));
     // Every habit x fan group on its own (its players are indexes
     // g * per ... g * per + per - 1): for "people like you".
     const groupStats = groups.map((group, g) => {
@@ -937,7 +957,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         q90: mine[Math.floor(per * 0.9)]
       };
     });
-    const finalAt = q => finals[order[Math.round((total - 1) * q)]];
+    const finalAt = q => sorted[Math.round((total - 1) * q)];
     const sumOf = key => sums.reduce((acc, x) => acc + x[key], 0);
     results[m] = {
       weeks: m,
@@ -1237,7 +1257,9 @@ export function analyzeSlip({ legs, sizes, stake, weeks = 52, seasons = 20_000, 
     paid,
     profit,
     profitFrom,
-    top: { chance: chance[all], net: net[all] },
+    top: { chance: chance[all], net: net[all], gross: gross[all] },
+    // After-tax payout for every result (bit i set: leg i won), for draws.
+    net,
     byHits,
     legs: legInfo,
     weakest,
