@@ -8,6 +8,7 @@ import {
   estimateF1LotteryOdds,
   estimateFuturesOdds,
   evaluateSlip,
+  houseTake,
   slipErrors,
   slipSizes,
   choose,
@@ -19,8 +20,8 @@ import {
   HABITS,
   habitPools,
   simulateHabit,
-  simulateCrowd,
-  summarizeCrowd,
+  simulateCrowdStats,
+  playerRandom,
   quantile,
   seededRandom,
   K_BOTH,
@@ -135,15 +136,32 @@ test('the chaser doubles after a losing week and stays under the cap', () => {
 
 test('each extra parlay leg takes the cut again, and a big crowd is stable', () => {
   const pools = habitPools(examplePool());
-  const crowd = seed => summarizeCrowd(simulateCrowd({ pools, weeks: 52, perHabit: 500, random: seededRandom(seed) }));
+  const crowd = seed => simulateCrowdStats({ pools, weeks: 52, perHabit: 2000, seed });
   const a = crowd(1);
-  const back = key => a.find(h => h.habit.key === key).back;
-  // 2 legs: (1 / 1.15)^2 = 75.6; 4-6 legs: about 50.
-  close(back('casual'), 75.6, 5);
-  assert.ok(back('dreamer') > 40 && back('dreamer') < 62, `${back('dreamer')}`);
-  // Another seed moves each habit's amount back by only a few NT$.
+  const back = key => a.summaries.find(h => h.habit.key === key).back;
+  // 2 legs: (1 / 1.15)^2 = 75.6 before tax; the occasional big ticket paying
+  // over NT$5,000 loses 20.4% to tax, so a bit less. 4-6 legs: about 50.
+  assert.ok(back('casual') > 66 && back('casual') < 76, `${back('casual')}`);
+  assert.ok(back('dreamer') > 38 && back('dreamer') < 60, `${back('dreamer')}`);
+  // Another seed moves each habit's amount back by about its margin at most.
   const b = crowd(2);
-  for (let i = 0; i < a.length; i++) close(a[i].back, b[i].back, 6);
+  for (let i = 0; i < a.summaries.length; i++) close(a.summaries[i].back, b.summaries[i].back, 3 * (a.summaries[i].backMargin + 0.5));
+  // Bands are ordered and every week is counted.
+  for (const w of a.bands) assert.ok(w.q10 <= w.q25 && w.q25 <= w.q50 && w.q50 <= w.q75 && w.q75 <= w.q90);
+  assert.equal(a.players, 2000 * HABITS.length);
+});
+
+test('the highlighted players are replayed exactly and sit at their rank', () => {
+  const pools = habitPools(examplePool());
+  const stats = simulateCrowdStats({ pools, weeks: 26, perHabit: 300, seed: 4 });
+  const { best, median, worst } = stats.characters;
+  assert.ok(worst.final <= median.final && median.final <= best.final);
+  assert.equal(best.path.length, 26);
+  assert.equal(best.path.at(-1), best.final);
+  // Same seed and index, same player.
+  const again = simulateHabit({ habit: best.habit, pools, weeks: 26, random: playerRandom(4, 0) });
+  const first = simulateHabit({ habit: best.habit, pools, weeks: 26, random: playerRandom(4, 0) });
+  assert.deepEqual(again, first);
 });
 
 test('quantile interpolates a sorted list', () => {
@@ -213,10 +231,35 @@ test('slip payouts, averages and chances are exact', () => {
   close(system.byHits[2].max, 360);
 });
 
-test('slip withholds 20% from each combination over NT$5,000 and caps a ticket', () => {
+test('slip withholds 20.4% from each combination over NT$5,000 and caps a ticket', () => {
   const big = evaluateSlip({ legs: [{ gameId: 1, odds: 3, fairChance: 1 }, { gameId: 2, odds: 3, fairChance: 1 }], sizes: [2], stake: 1000 });
   close(big.expected, 9000);
-  close(big.expectedNet, 7200);
+  close(big.expectedNet, 9000 * 0.796, 1e-9);
+  // At NT$5,000 or less nothing is withheld.
+  close(evaluateSlip({ legs: [{ gameId: 1, odds: 2.5, fairChance: 1 }, { gameId: 2, odds: 2, fairChance: 1 }], sizes: [2], stake: 1000 }).expectedNet, 5000);
   const huge = evaluateSlip({ legs: Array.from({ length: 12 }, (_, i) => ({ gameId: i, odds: 10, fairChance: 1 })), sizes: [12], stake: 100 });
   assert.equal(huge.best, 20_000_000);
+});
+
+test('house take is 1 - 1 / overround, with a margin from the prices', () => {
+  const at = p => 1 / (p * 1.15);
+  const { take, margin } = houseTake([at(0.6), at(0.4)], [0.022, 0.022]);
+  close(take, 1 - 1 / 1.15, 1e-12);
+  // Every price 2.2% off moves the overround 2.2%: take moves 2.2% / 1.15.
+  close(margin, 0.022 / 1.15, 1e-12);
+  assert.equal(houseTake([2, 2]).take, 0);
+});
+
+test('every text key exists in both languages', async () => {
+  globalThis.navigator ??= { language: 'en' };
+  const { makeT } = await import('../public/lib/i18n.mjs');
+  const { readFile } = await import('node:fs/promises');
+  const src = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')) + (await readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
+  const keys = new Set([...src.matchAll(/t\('([A-Za-z0-9_]+)'/g), ...src.matchAll(/data-t="([A-Za-z0-9_]+)"/g)].map(m => m[1]));
+  // Keys whose English text is the key itself.
+  const same = new Set(['win', 'worst', 'f1']);
+  for (const locale of ['zh', 'en']) {
+    const t = makeT(locale);
+    assert.deepEqual([...keys].filter(k => !same.has(k) && t(k) === k), [], locale);
+  }
 });

@@ -70,10 +70,18 @@ export function proxied(url, trim) {
   return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}${trim ? `&trim=${trim}` : ''}`;
 }
 
-async function getJson(url, trim) {
-  const res = await fetch(proxied(url, trim), { signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`${res.status} ${url}`);
-  return res.json();
+// One retry after a short pause: a dropped connection on a phone network
+// shouldn't lose a whole sport.
+async function getJson(url, trim, retries = 1) {
+  try {
+    const res = await fetch(proxied(url, trim), { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`${res.status} ${url}`);
+    return await res.json();
+  } catch (error) {
+    if (retries <= 0) throw error;
+    await new Promise(resolve => setTimeout(resolve, 800));
+    return getJson(url, trim, retries - 1);
+  }
 }
 
 function yyyymmdd(date) {

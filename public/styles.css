@@ -280,3 +280,13 @@ footer { margin-top: 24px; }
 .rank-value .margin { text-align: right; }
 .stat-range { margin: 2px 0 0; font-size: 0.75rem; color: var(--text-muted); }
 .margin-note { font-size: 0.8rem; margin-top: 6px; }
+.take-note { color: var(--text-secondary); }
+
+/* Loading screen: covers the page until the odds and the first simulation are ready. */
+.loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: var(--page); padding: 16px; }
+.loading[hidden] { display: none; }
+.loading-box { width: min(360px, 100%); text-align: center; }
+.loading-box p { margin: 0 0 12px; color: var(--text-secondary); font-size: 0.95rem; }
+.loading-bar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
+.loading-bar[hidden] { display: none; }
+.loading-bar span { display: block; height: 100%; width: 0; background: var(--series-1); transition: width 0.2s; }

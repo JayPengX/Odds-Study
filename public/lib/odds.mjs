@@ -133,6 +133,16 @@ export function overround(oddsList) {
   return oddsList.reduce((s, o) => s + 1 / o, 0);
 }
 
+// The house's take on a market: the share of all money bet it keeps when
+// bets come in balanced, 1 - 1 / sum(1 / odds). At every price = fair odds / 1.15
+// that's 13%. `rels` are each price's relative margin; the take's margin
+// follows from them (d take = d overround / overround^2).
+export function houseTake(odds, rels = []) {
+  const total = odds.reduce((s, o) => s + 1 / o, 0);
+  const spread = odds.reduce((s, o, i) => s + (rels[i] ?? 0) / o, 0);
+  return { take: 1 - 1 / total, margin: spread / total ** 2 };
+}
+
 // Legs are independent games, so chances and odds both multiply.
 export function combineParlay(legs) {
   return legs.reduce(
@@ -195,39 +205,35 @@ export function habitPools(pool) {
   return lists;
 }
 
-function poisson(mean, random) {
-  const limit = Math.exp(-mean);
-  let k = 0;
-  let p = random();
-  while (p > limit) {
-    k++;
-    p *= random();
+// Pools compiled to flat arrays (game index, fair chance, odds), so the inner
+// loop reads numbers and allocates nothing. Cached per list.
+const compiledLists = new WeakMap();
+function compile(list) {
+  let c = compiledLists.get(list);
+  if (!c) {
+    const games = new Map();
+    c = {
+      n: list.length,
+      game: Int32Array.from(list, b => (games.has(b.gameId) ? games.get(b.gameId) : games.set(b.gameId, games.size).get(b.gameId))),
+      fair: Float64Array.from(list, b => b.fairChance),
+      odds: Float64Array.from(list, b => b.odds)
+    };
+    compiledLists.set(list, c);
   }
-  return k;
+  return c;
 }
 
-function pickOne(list, random) {
-  return list[Math.floor(random() * list.length)];
-}
+// Games already on the ticket being built (at most 12 legs).
+const ticketGames = new Int32Array(16);
 
-// Up to `n` legs, each from a different game.
-function pickLegs(list, n, random) {
-  const legs = [];
-  const games = new Set();
-  for (let tries = 0; legs.length < n && tries < n * 20; tries++) {
-    const bet = pickOne(list, random);
-    if (games.has(bet.gameId)) continue;
-    games.add(bet.gameId);
-    legs.push(bet);
-  }
-  return legs;
-}
-
-// One player's `weeks` of betting with `habit`. `path` is the running profit
-// at the end of each week; the rest is the player's story.
-export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
-  const list = pools[habit.pick];
-  const path = new Array(weeks);
+// One player's `weeks` of betting with `habit`. Writes the running profit at
+// the end of each week into `path` (if given) and returns the player's story.
+function playSeason(habit, list, weeks, random, path) {
+  const c = compile(list);
+  const noTicket = Math.exp(-habit.perWeek);
+  const [lo, hi] = habit.legs;
+  const legSpan = hi - lo + 1;
+  const base = habit.stakes[0];
   let profit = 0;
   let tickets = 0;
   let wonTickets = 0;
@@ -235,26 +241,38 @@ export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
   let biggestWin = 0;
   let losing = 0;
   let longestLosing = 0;
-  let chaseStake = habit.stakes[0];
+  let chaseStake = base;
   let maxStake = 0;
   let peak = 0;
   let peakWeek = -1;
   let maxDrop = 0;
   for (let w = 0; w < weeks; w++) {
-    const count = poisson(habit.perWeek, random);
+    // Poisson number of tickets this week.
+    let count = 0;
+    for (let p = random(); p > noTicket; p *= random()) count++;
     let week = 0;
     for (let i = 0; i < count; i++) {
-      const [lo, hi] = habit.legs;
-      const legs = pickLegs(list, lo + Math.floor(random() * (hi - lo + 1)), random);
-      if (legs.length === 0) continue;
-      const stake = habit.chaseCap ? chaseStake : random() < habit.big ? pickOne(BIG_STAKES, random) : pickOne(habit.stakes, random);
+      const want = lo + Math.floor(random() * legSpan);
+      let legs = 0;
       let won = true;
       let odds = 1;
-      for (const leg of legs) {
-        odds *= leg.odds;
-        if (random() >= leg.fairChance) won = false;
+      for (let tries = 0; legs < want && tries < want * 20; tries++) {
+        const j = Math.floor(random() * c.n);
+        const game = c.game[j];
+        let dup = false;
+        for (let k = 0; k < legs; k++) if (ticketGames[k] === game) dup = true;
+        if (dup) continue;
+        ticketGames[legs++] = game;
+        odds *= c.odds[j];
+        if (random() >= c.fair[j]) won = false;
       }
-      const result = won ? stake * (odds - 1) : -stake;
+      if (legs === 0) continue;
+      const stake = habit.chaseCap
+        ? chaseStake
+        : random() < habit.big
+          ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
+          : habit.stakes[Math.floor(random() * habit.stakes.length)];
+      const result = won ? afterTax(stake * odds) - stake : -stake;
       tickets++;
       staked += stake;
       week += result;
@@ -265,49 +283,137 @@ export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
         if (result > biggestWin) biggestWin = result;
       } else if (++losing > longestLosing) longestLosing = losing;
     }
-    if (habit.chaseCap && count > 0) chaseStake = week < 0 ? Math.min(chaseStake * 2, habit.chaseCap) : habit.stakes[0];
+    if (habit.chaseCap && count > 0) chaseStake = week < 0 ? Math.min(chaseStake * 2, habit.chaseCap) : base;
     profit += week;
-    path[w] = profit;
+    if (path) path[w] = profit;
     if (profit > peak) {
       peak = profit;
       peakWeek = w;
     }
     if (peak - profit > maxDrop) maxDrop = peak - profit;
   }
-  return { path, final: profit, tickets, wonTickets, staked, biggestWin, longestLosing, maxStake, peak, peakWeek, everAhead: peak > 0, maxDrop };
+  return { final: profit, tickets, wonTickets, staked, biggestWin, longestLosing, maxStake, peak, peakWeek, everAhead: peak > 0, maxDrop };
 }
 
-// A crowd of `perHabit` players for every habit, all from one random stream.
-export function simulateCrowd({ pools, weeks, perHabit = 500, random = Math.random }) {
-  const players = [];
-  for (const habit of HABITS) for (let i = 0; i < perHabit; i++) players.push({ habit, ...simulateHabit({ habit, pools, weeks, random }) });
-  return players;
+// One player's season with their full week-by-week path.
+export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
+  const path = new Float64Array(weeks);
+  return { path, ...playSeason(habit, pools[habit.pick], weeks, random, path) };
 }
 
-// Per habit: average amount back per NT$100 staked, share still ahead at the
-// end, and the average total staked and result.
-export function summarizeCrowd(players) {
-  return HABITS.map(habit => {
-    const group = players.filter(p => p.habit === habit);
-    const staked = group.reduce((s, p) => s + p.staked, 0);
-    const net = group.reduce((s, p) => s + p.final, 0);
-    const back = staked > 0 ? (staked + net) / staked : 1;
-    const aheadShare = group.filter(p => p.final > 0).length / group.length;
+// Each player gets their own random stream, so any one of them can be
+// replayed exactly without storing everyone's path.
+export function playerRandom(seed, index) {
+  return seededRandom((Math.imul(seed, 0x9e3779b1) + Math.imul(index + 1, 0x85ebca6b)) >>> 0);
+}
+
+// Histogram bins for the weekly spread: about 2 million counters at most, and
+// a range wide enough for the worst chaser.
+function histogramShape(weeks) {
+  const bins = Math.min(20000, Math.floor(2_000_000 / weeks));
+  const half = 2500 * weeks + 20000;
+  return { bins, lo: -half, width: (2 * half) / bins };
+}
+
+// A crowd of `perHabit` players for every habit. Nothing per player is kept
+// but the final result: each week streams into a histogram (for the 10/25/50/
+// 75/90% bands) and each habit into running sums. The players at the top 10%,
+// middle and bottom 10% are replayed at the end for their full stories.
+export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onProgress }) {
+  const total = HABITS.length * perHabit;
+  const { bins, lo, width } = histogramShape(weeks);
+  const hist = new Uint32Array(weeks * bins);
+  const aheadByWeek = new Uint32Array(weeks);
+  const finals = new Float64Array(total);
+  const path = new Float64Array(weeks);
+  const sums = HABITS.map(() => ({ staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 }));
+  for (let h = 0; h < HABITS.length; h++) {
+    const habit = HABITS[h];
+    const list = pools[habit.pick];
+    const sum = sums[h];
+    for (let i = 0; i < perHabit; i++) {
+      const index = h * perHabit + i;
+      const story = playSeason(habit, list, weeks, playerRandom(seed, index), path);
+      finals[index] = story.final;
+      for (let w = 0; w < weeks; w++) {
+        const v = path[w];
+        let bin = Math.floor((v - lo) / width);
+        bin = bin < 0 ? 0 : bin >= bins ? bins - 1 : bin;
+        hist[w * bins + bin]++;
+        if (v > 0) aheadByWeek[w]++;
+      }
+      const returned = story.staked + story.final;
+      sum.staked += story.staked;
+      sum.net += story.final;
+      sum.tickets += story.tickets;
+      sum.rr += returned * returned;
+      sum.rs += returned * story.staked;
+      sum.ss += story.staked * story.staked;
+      if (story.final > 0) sum.ahead++;
+      if (story.everAhead) sum.everAhead++;
+      if (habit.chaseCap && story.maxStake >= habit.chaseCap) sum.capHits++;
+      if (onProgress && index % 2000 === 1999) onProgress((index + 1) / total);
+    }
+  }
+  // Weekly bands from the histogram (each value is its bin's middle).
+  const at = (w, q) => {
+    const target = q * (total - 1);
+    let seen = 0;
+    for (let b = 0; b < bins; b++) {
+      seen += hist[w * bins + b];
+      if (seen > target) return lo + (b + 0.5) * width;
+    }
+    return lo + (bins - 0.5) * width;
+  };
+  const bands = Array.from({ length: weeks }, (_, w) => ({
+    q10: at(w, 0.1),
+    q25: at(w, 0.25),
+    q50: at(w, 0.5),
+    q75: at(w, 0.75),
+    q90: at(w, 0.9),
+    ahead: aheadByWeek[w]
+  }));
+  const summaries = HABITS.map((habit, h) => {
+    const s = sums[h];
+    const n = perHabit;
+    const back = s.staked > 0 ? (s.staked + s.net) / s.staked : 1;
+    const aheadShare = s.ahead / n;
     // 95% sampling margins: a ratio estimate for the amount back, binomial for the share.
-    const n = group.length;
-    const meanStaked = staked / n;
-    const spread = group.reduce((s, p) => s + (p.staked + p.final - back * p.staked) ** 2, 0);
+    const spread = Math.max(0, s.rr - 2 * back * s.rs + back * back * s.ss);
+    const meanStaked = s.staked / n;
     return {
       habit,
       back: back * 100,
       backMargin: n > 1 && meanStaked > 0 ? (1.96 * Math.sqrt(spread / (n * (n - 1))) * 100) / meanStaked : 0,
       aheadShare,
       aheadMargin: 1.96 * Math.sqrt((aheadShare * (1 - aheadShare)) / n),
-      avgFinal: net / group.length,
-      avgStaked: staked / group.length,
-      avgTickets: group.reduce((s, p) => s + p.tickets, 0) / group.length
+      avgFinal: s.net / n,
+      avgStaked: s.staked / n,
+      avgTickets: s.tickets / n,
+      capShare: s.capHits / n
     };
   });
+  const order = Uint32Array.from({ length: total }, (_, i) => i).sort((a, b) => finals[a] - finals[b]);
+  const replay = q => {
+    const index = order[Math.round((total - 1) * q)];
+    const habit = HABITS[Math.floor(index / perHabit)];
+    return { habit, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, index) }) };
+  };
+  const sumOf = key => sums.reduce((t, s) => t + s[key], 0);
+  return {
+    weeks,
+    players: total,
+    bands,
+    summaries,
+    characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
+    totals: {
+      staked: sumOf('staked'),
+      net: sumOf('net'),
+      tickets: sumOf('tickets'),
+      aheadShare: sumOf('ahead') / total,
+      everAheadShare: sumOf('everAhead') / total
+    }
+  };
 }
 
 // Value at quantile q (0-1) of an ascending sorted array.
@@ -321,8 +427,8 @@ export function quantile(sorted, q) {
 
 // Taiwan Sports Lottery ticket rules: 1-12 games per ticket (never two picks
 // from one game), NT$10 units per combination, NT$100-100,000 per ticket,
-// payouts capped at NT$20 million per ticket, and 20% tax withheld from any
-// single combination paying over NT$5,000.
+// payouts capped at NT$20 million per ticket. Any single combination paying
+// over NT$5,000 has 20% income tax and 0.4% stamp duty withheld.
 export const SLIP_RULES = {
   maxLegs: 12,
   unit: 10,
@@ -330,8 +436,14 @@ export const SLIP_RULES = {
   maxTicket: 100_000,
   maxPayout: 20_000_000,
   taxFree: 5000,
-  taxRate: 0.2
+  taxRate: 0.2,
+  stampRate: 0.004
 };
+
+// What a winning combination actually pays out after Taiwan's withholding.
+export function afterTax(pay) {
+  return pay > SLIP_RULES.taxFree ? pay * (1 - SLIP_RULES.taxRate - SLIP_RULES.stampRate) : pay;
+}
 
 export function choose(n, k) {
   if (k < 0 || k > n) return 0;
@@ -400,7 +512,7 @@ export function evaluateSlip({ legs, sizes, stake }) {
       if (!sizeSet.has(size)) continue;
       const pay = stake * product;
       gross += pay;
-      net += pay > SLIP_RULES.taxFree ? pay * (1 - SLIP_RULES.taxRate) : pay;
+      net += afterTax(pay);
     }
     if (gross > SLIP_RULES.maxPayout) {
       net *= SLIP_RULES.maxPayout / gross;
