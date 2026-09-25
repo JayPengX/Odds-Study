@@ -858,3 +858,4 @@ details.market[open] > summary { margin-bottom: 6px; }
 }
 .buy strong { display: block; }
 .serial-pr { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.72rem; font-weight: 700; vertical-align: middle; white-space: nowrap; }
+.player-line small { color: var(--text-muted); font-size: 0.66rem; }

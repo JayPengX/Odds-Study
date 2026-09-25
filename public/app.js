@@ -2188,12 +2188,14 @@ function renderLookup(serial) {
   if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
   else if (!p.everAhead) tale = t('taleNever');
   else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
-  const line = (label, value, cls = '') => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { class: cls, text: value })]);
+  const line = (label, value, cls = '', note = null) =>
+    el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { class: cls, text: value }), note ? el('small', { text: note }) : null]);
   // Their highest and lowest running total, and the week of each.
   let hi = 0;
   let lo = 0;
   p.path.forEach((v, i) => (v > p.path[hi] && (hi = i), v < p.path[lo] && (lo = i)));
-  const point = i => `${fmtMoney(p.path[i])} · ${t('simWeekN', { n: fmtCount(i + 1) })}`;
+  // The amount, with its week on a small line underneath.
+  const point = (label, i, cls) => line(label, fmtMoney(p.path[i]), cls, t('simWeekN', { n: fmtCount(i + 1) }));
   // 百分位 (PR): the share of the crowd this player finished ahead of.
   const qs = stats.finalQuantiles;
   const pr = qs ? Math.max(1, Math.min(99, Math.floor((qs.filter(v => v < p.final).length / qs.length) * 100))) : null;
@@ -2209,8 +2211,8 @@ function renderLookup(serial) {
       el('div', { class: 'player-lines' }, [
         line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
         line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
-        line(t('playerPeak'), point(hi), p.path[hi] > 0 ? 'back-high' : 'back-low'),
-        line(t('playerLow'), point(lo), p.path[lo] < 0 ? 'back-low' : 'back-high'),
+        point(t('playerPeak'), hi, p.path[hi] > 0 ? 'back-high' : 'back-low'),
+        point(t('playerLow'), lo, p.path[lo] < 0 ? 'back-low' : 'back-high'),
         line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
         line(t('playerStreak'), t('inARow', { n: p.longestLosing }))
       ])
