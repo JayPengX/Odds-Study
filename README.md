@@ -27,12 +27,11 @@ The choice is remembered.
   - The Premier League's next matchweek, once its first game is within 3 days.
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
   - The next F1 race winner, with **every** driver the market prices.
-- **Filters:** by sport and by day.
+- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). The Premier League's lion is shown white on the league's colours.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
-  - the estimated lottery odds;
-  - the average amount back per NT$100;
-  - with 詳細 on: the odds' ± error and the fair chance.
+  - the estimated lottery odds, tinted green or red when a bet is unusually good or bad;
+  - with 詳細 on: the odds' ± error, the fair chance and the average back per NT$100 (usually just 100 minus the take).
 - **更多玩法 (more markets)** opens the other markets:
   - 大小分 (totals, 3 lines);
   - 讓分 (run lines, ±1.5 and ±2.5);
@@ -41,7 +40,7 @@ The choice is remembered.
 
   With 詳細 on, each market shows its own house take.
 - **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.
-- **Ranking:** a folded list of every bet of the day, least costly first.
+- **Best value of the day:** the top three bets as cards (a phone scrolls through them), each with its average back per NT$100 and a button to add it, then every bet ranked in a folded list.
 - **Boards:**
   - F1: drivers with team-coloured badges.
   - Championships (World Series, AL, NL, Premier League, NBA): team logos.

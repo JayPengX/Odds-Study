@@ -621,3 +621,74 @@ details.market[open] > summary { margin-bottom: 6px; }
 .sparkline .spark-bad { stroke: var(--bad-strong); }
 .link-button { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-weight: 800; text-align: left; }
 .link-button:hover { text-decoration: underline; }
+
+/* ---- Sport tiles and the day strip ---------------------------------------------- */
+#sport-filter, #day-filter { gap: 8px; padding-top: 4px; padding-bottom: 6px; }
+.sport-tile {
+  flex: none; min-width: 92px; display: grid; justify-items: center; gap: 3px; padding: 10px 14px 9px;
+  border: 1.5px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.sport-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.sport-tile:active { transform: scale(0.97); }
+.sport-tile[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-wash); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.logo-tile { width: 32px; height: 32px; }
+.all-icon rect { fill: var(--accent); opacity: 0.85; }
+.all-icon rect:nth-child(2), .all-icon rect:nth-child(3) { opacity: 0.45; }
+.tile-name { font-size: 0.86rem; font-weight: 700; white-space: nowrap; }
+.tile-count { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sport-tile[aria-pressed='true'] .tile-name { color: var(--accent); }
+
+.day-tile {
+  flex: none; min-width: 74px; display: grid; justify-items: center; gap: 0; padding: 8px 12px 9px;
+  border: 1.5px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s, background 0.15s, transform 0.1s; font-variant-numeric: tabular-nums;
+}
+.day-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.day-tile:active { transform: scale(0.97); }
+.day-week { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
+.day-num { font-size: 1.55rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+.day-month { font-size: 0.68rem; color: var(--text-muted); }
+.day-count { margin-top: 5px; font-size: 0.68rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); white-space: nowrap; }
+.day-tile[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent); }
+.day-tile[aria-pressed='true'] .day-week, .day-tile[aria-pressed='true'] .day-month { color: rgba(255, 255, 255, 0.85); }
+.day-tile[aria-pressed='true'] .day-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+
+/* Premier League: the lion in white on the league's colours. */
+.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #37003c 0%, #963cff 45%, #e90052 75%, #04f5ff 100%); }
+.league-epl.logo-xs { width: 18px; height: 18px; }
+.league-epl.logo-sm { width: 22px; height: 22px; }
+.league-epl.logo-tile { width: 32px; height: 32px; }
+.league-epl .logo { width: 72%; height: 72%; filter: brightness(0) invert(1); }
+.board-emblem .league-epl { width: 30px; height: 30px; }
+
+/* ---- Best value of the day: podium, then the full list ---------------------------- */
+.ranking-card { padding: 16px; }
+.ranking-head { margin-bottom: 12px; }
+.ranking-head h2 { font-size: 1.05rem; margin-bottom: 6px; }
+.ranking-head .lede { margin: 0; }
+.podium { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.podium-card { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border); position: relative; }
+.podium-card:first-child { background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 14%, var(--surface-raised)), var(--surface-raised) 70%); border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
+.podium-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.podium-medal { font-size: 1.3rem; line-height: 1; }
+.podium-pick { font-weight: 800; font-size: 0.98rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium-game { font-size: 0.74rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium-back { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.podium-back small { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; }
+.podium-back strong { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.01em; }
+.podium-odds { position: absolute; top: 10px; right: 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.podium-odds:hover { border-color: var(--accent); }
+.podium-odds.in-slip { background: var(--accent); border-color: var(--accent); color: #fff; }
+.podium-odds span { color: var(--accent); }
+.podium-odds.in-slip span { color: #fff; }
+.ranking-notes .tie-note { margin-top: 10px; }
+.ranking-more { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.ranking-more > summary { cursor: pointer; list-style: none; text-align: center; color: var(--accent); font-weight: 700; font-size: 0.86rem; padding: 4px; }
+.ranking-more > summary::-webkit-details-marker { display: none; }
+.ranking-more[open] > summary { margin-bottom: 8px; }
+@media (max-width: 720px) {
+  .podium { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
+  .podium::-webkit-scrollbar { display: none; }
+  .podium-card { flex: 0 0 78%; scroll-snap-align: start; }
+}

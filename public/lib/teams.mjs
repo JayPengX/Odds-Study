@@ -167,7 +167,8 @@ export function teamLogo(sport, name, dark = false) {
 // The league's own logo.
 export function leagueLogo(sport, dark = false) {
   const size = dark ? '500-dark' : '500';
-  if (sport === 'epl') return `https://a.espncdn.com/i/leaguelogos/soccer/${size}/23.png`;
+  // The lion alone (no wordmark); the page shows it white on the league's colours.
+  if (sport === 'epl') return 'https://r2.thesportsdb.com/images/media/league/badge/gasy9d1737743125.png/small';
   if (['mlb', 'nba', 'f1'].includes(sport)) return `https://a.espncdn.com/i/teamlogos/leagues/${size}/${sport}.png`;
   return null;
 }

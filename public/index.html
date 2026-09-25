@@ -77,10 +77,18 @@
     </div>
     <div id="legend" class="key-legend"></div>
 
-    <details id="ranking" class="card fold ranking-card">
-      <summary><h2 id="ranking-title"></h2><span class="summary-hint" data-t="rankingHint"></span></summary>
-      <ol id="ranking-list" class="ranking-list"></ol>
-    </details>
+    <section id="ranking" class="card ranking-card">
+      <div class="ranking-head">
+        <h2 id="ranking-title"></h2>
+        <p class="lede" data-t="rankingSub"></p>
+      </div>
+      <ol id="ranking-podium" class="podium"></ol>
+      <div id="ranking-notes" class="ranking-notes"></div>
+      <details class="ranking-more">
+        <summary id="ranking-more-label"></summary>
+        <ol id="ranking-list" class="ranking-list"></ol>
+      </details>
+    </section>
 
     <section id="games" aria-labelledby="games-title">
       <h2 id="games-title" class="section-heading"></h2>
