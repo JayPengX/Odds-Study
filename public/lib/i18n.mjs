@@ -1,5 +1,7 @@
 const STRINGS = {
   zh: {
+    detailLabel: '詳細',
+    detailHint: '顯示誤差範圍、公平機率、抽成和更多數字',
     anaNeverPaid: '有 {p} 的人連買 {n} 週，一毛都沒拿到。',
     anaTopWait: '每週買，平均約 {y} 年中一次',
     anaOneIn: '{n} 分之 1',
@@ -347,6 +349,8 @@ const STRINGS = {
     footer: '賠率每次開啟頁面時即時抓取，數字會隨時間變動。本站與台灣運彩無關。'
   },
   en: {
+    detailLabel: 'Details',
+    detailHint: 'Show margins of error, fair chances, house takes and more numbers',
     anaNeverPaid: '{p} of people get nothing at all in {n} weeks.',
     anaTopWait: 'about once every {y} years at one a week',
     anaOneIn: '1 in {n}',

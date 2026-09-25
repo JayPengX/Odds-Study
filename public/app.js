@@ -34,7 +34,7 @@ import {
 } from './lib/odds.mjs';
 import { loadOdds, taipeiDayKey } from './lib/sources.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { f1Driver, teamLogo } from './lib/teams.mjs';
+import { f1Driver, leagueLogo, teamLogo } from './lib/teams.mjs';
 
 const STAKE = 100;
 // Simulated players per habit. Big enough that the results barely move
@@ -50,8 +50,9 @@ const THIN_LIQUIDITY = 10_000;
 const TIE_BAND = 2;
 // Championship teams shown before the rest fold away.
 const FUTURES_SHOWN = 8;
-const SPORT_ICON = { all: '🏟️', mlb: '⚾', epl: '⚽', nba: '🏀', f1: '🏎️' };
-const HABIT_ICON = { casual: '🙂', fan: '📣', underdog: '🐶', dreamer: '🌈', chaser: '😤', careful: '🧮' };
+// One colour per betting habit, for its badge.
+const HABIT_COLOR = { casual: '#0ea5e9', fan: '#f59e0b', underdog: '#8b5cf6', dreamer: '#ec4899', chaser: '#ef4444', careful: '#10b981' };
+const DETAIL_KEY = 'oddsStudy.detail';
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
 
 const state = {
@@ -73,7 +74,9 @@ const state = {
   tab: 'games',
   // Game cards showing all their markets, and cards showing real-odds boxes.
   open: new Set(),
-  editing: new Set()
+  editing: new Set(),
+  // Off: only the odds and the average back. On: margins, chances, takes, extra stats.
+  detail: loadDetail()
 };
 state.t = makeT(state.locale);
 
@@ -103,6 +106,14 @@ function loadUserOdds() {
     return JSON.parse(localStorage.getItem(USER_ODDS_KEY)) || {};
   } catch {
     return {};
+  }
+}
+
+function loadDetail() {
+  try {
+    return localStorage.getItem(DETAIL_KEY) === '1';
+  } catch {
+    return false;
   }
 }
 
@@ -406,7 +417,7 @@ function rerenderFiltered() {
 
 function chip({ pressed, icon, text, count, onclick }) {
   return el('button', { class: 'chip', type: 'button', 'aria-pressed': String(pressed), onclick }, [
-    icon ? el('span', { class: 'chip-icon', 'aria-hidden': 'true', text: icon }) : null,
+    icon ?? null,
     el('span', { text }),
     count ? el('span', { class: 'chip-count', text: count }) : null
   ]);
@@ -421,7 +432,7 @@ function renderSportFilter() {
     ...sports.map(sport =>
       chip({
         pressed: sport === state.sport,
-        icon: SPORT_ICON[sport],
+        icon: sport === 'all' ? null : leagueImg(sport, 'logo-xs'),
         text: t(`sport_${sport}`),
         onclick: () => {
           state.sport = sport;
@@ -460,20 +471,35 @@ function backClass(back) {
   return '';
 }
 
+// A logo with its dark-background version, or `fallback()` if it fails.
+function logoPicture(light, dark, cls, fallback) {
+  if (!light) return fallback();
+  const img = el('img', { class: cls, src: light, alt: '', loading: 'lazy', decoding: 'async' });
+  const picture = el('picture', { class: 'logo-wrap' }, [dark ? el('source', { srcset: dark, media: '(prefers-color-scheme: dark)' }) : null, img]);
+  img.addEventListener('error', () => picture.replaceWith(fallback()), { once: true });
+  return picture;
+}
+
 // A team logo, or its initials in a circle when there's no logo (or it fails).
 function logoImg(sport, enName, label, size = '') {
   const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: (label || '?').slice(0, 2) });
-  const src = teamLogo(sport, enName);
-  if (!src) return fallback();
-  const img = el('img', { class: `logo ${size}`, src, alt: '', loading: 'lazy', width: '30', height: '30' });
-  img.addEventListener('error', () => img.replaceWith(fallback()), { once: true });
-  return img;
+  return logoPicture(teamLogo(sport, enName), teamLogo(sport, enName, true), `logo ${size}`, fallback);
+}
+
+// The league's logo; "all" and anything without one get a letter badge.
+function leagueImg(sport, size = '') {
+  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: sport === 'all' ? '∑' : sport.toUpperCase().slice(0, 3) });
+  return logoPicture(leagueLogo(sport), leagueLogo(sport, true), `logo league ${size}`, fallback);
+}
+
+// A round badge with a letter, in a group's colour.
+function badge(text, color, size = '') {
+  return el('span', { class: `badge ${size}`, style: `--badge:${color}`, 'aria-hidden': 'true', text });
 }
 
 // ---- Rendering: static text ------------------------------------------------
 
 // The guide's groups, in order: the odds math, then i18n's `guide` groups.
-const GUIDE_ICONS = ['🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '🎲', '⚖️', '📡'];
 
 function renderStatic() {
   const t = state.t;
@@ -499,6 +525,7 @@ function renderStatic() {
   for (const tab of TABS) $(`tab-${tab}`).querySelector('.tab-label').textContent = t(`tab_${tab}`);
   renderLegend();
   renderPeriods();
+  renderDetailToggle();
   // The guide: the odds math, then every habit, kind of fan, kind of bet, how
   // the simulators work, the rules and the data, each group folded.
   const groups = [[t('guideMathTitle'), t('mathSteps')], ...t('guide')];
@@ -506,7 +533,7 @@ function renderStatic() {
     ...groups.map(([title, items], i) =>
       el('details', { class: 'card fold guide-group' }, [
         el('summary', {}, [
-          el('span', { class: 'guide-icon', 'aria-hidden': 'true', text: GUIDE_ICONS[i] ?? '📘' }),
+          el('span', { class: 'guide-icon', 'aria-hidden': 'true', text: String(i + 1) }),
           el('span', {}, [el('span', { text: title }), el('span', { class: 'guide-count', text: ` · ${items.length}` })])
         ]),
         el('div', {}, items.map(([h, p]) => el('div', { class: 'math-step' }, [el('h3', { text: h }), el('p', { text: p })])))
@@ -520,10 +547,10 @@ function renderLegend() {
   const t = state.t;
   $('legend').replaceChildren(
     el('span', {}, [el('b', { text: '1.80' }), document.createTextNode(` ${t('legendOdds')}`)]),
-    el('span', {}, [el('b', { text: '52%' }), document.createTextNode(` ${t('legendFair')}`)]),
+    el('span', { class: 'detail-only' }, [el('b', { text: '52%' }), document.createTextNode(` ${t('legendFair')}`)]),
     el('span', {}, [el('b', { text: t('backTiny', { v: '87' }) }), document.createTextNode(` ${t('legendBack')}`)]),
     el('span', { text: t('legendTap') }),
-    el('details', {}, [el('summary', { text: t('marginsHelpTitle') }), el('p', { text: t('marginsHelp') })])
+    el('details', { class: 'detail-only' }, [el('summary', { text: t('marginsHelpTitle') }), el('p', { text: t('marginsHelp') })])
   );
 }
 
@@ -543,7 +570,7 @@ function betIcon(bet) {
   if (bet.kind === 'future') return logoImg(bet.sport, bet.teamEn, bet.shortLabel, 'logo-sm');
   const side = bet.side ?? (/\|(away|home)$/.exec(bet.id)?.[1] || /\|tt\|(away|home)\|/.exec(bet.id)?.[1]);
   if (bet.game && side) return logoImg(bet.sport, bet.game[side].en, teamName(bet.game[side]), 'logo-sm');
-  return el('span', { class: 'logo logo-sm', 'aria-hidden': 'true', text: SPORT_ICON[bet.sport] ?? '' });
+  return leagueImg(bet.sport, 'logo-sm');
 }
 
 function renderRanking() {
@@ -614,7 +641,7 @@ function gameCard(game, bets) {
     const bet = ml.find(b => b.side === side);
     const who =
       side === 'draw'
-        ? [el('span', { class: 'draw-icon', 'aria-hidden': 'true', text: '🤝' }), el('span', { class: 'team-name', text: t('draw') })]
+        ? [badge('=', 'var(--text-muted)'), el('span', { class: 'team-name', text: t('draw') })]
         : [
             logoImg(game.sport, game[side].en, teamName(game[side])),
             el('span', { class: 'team-name' }, [document.createTextNode(teamName(game[side])), el('small', { text: t(side === 'home' ? 'homeTag' : 'awayTag') })])
@@ -622,7 +649,6 @@ function gameCard(game, bets) {
     return el('div', { class: 'team-row' }, [...who, bet ? pickButton(bet, '', editing) : null]);
   });
   const others = bets.filter(b => b.kind !== 'ml');
-  const kinds = SECTIONS.filter(s => s.kind !== 'ml' && others.some(b => b.kind === s.kind)).map(s => t(s.short));
   const toggle = () => {
     if (state.open.has(game.id)) state.open.delete(game.id);
     else state.open.add(game.id);
@@ -630,15 +656,14 @@ function gameCard(game, bets) {
   };
   return el('article', { class: `game ${open ? 'open' : ''}` }, [
     el('div', { class: 'game-top' }, [
-      el('span', { class: 'sport-pill' }, [el('span', { 'aria-hidden': 'true', text: SPORT_ICON[game.sport] }), document.createTextNode(t(`sport_${game.sport}`))]),
+      leagueImg(game.sport, 'logo-xs'),
       el('span', { class: 'game-time', text: hhmm(game.startUtc) }),
-      ml.length ? el('span', { class: 'game-take' }, takePill(ml)) : null
+      ml.length ? el('span', { class: 'game-take detail-only' }, takePill(ml)) : null
     ]),
     el('div', { class: 'team-rows' }, rows),
     open ? gameMore(game, others, editing) : null,
-    el('button', { class: 'more-toggle', type: 'button', 'aria-expanded': String(open), onclick: toggle }, [
-      document.createTextNode(open ? t('lessMarkets') : t('moreMarkets')),
-      !open && kinds.length ? el('span', { class: 'more-kinds', text: kinds.join(' · ') }) : null
+    others.length === 0 ? null : el('button', { class: 'more-toggle', type: 'button', 'aria-expanded': String(open), onclick: toggle }, [
+      document.createTextNode(open ? t('lessMarkets') : t('moreMarkets'))
     ])
   ]);
 }
@@ -693,11 +718,11 @@ function editToggle(id, rerender) {
 // One section per kind of bet, each market of it with its own take. The
 // inning market's ten results take a whole row.
 const SECTIONS = [
-  { kind: 'ml', title: 'secMoneyline', short: 'secMoneyline' },
-  { kind: 'total', title: 'secTotal', short: 'secTotal' },
-  { kind: 'runline', title: 'secRunLine', short: 'secRunLine' },
-  { kind: 'teamtotal', title: 'secTeamTotal', short: 'secTeamTotal' },
-  { kind: 'inning', title: 'secTopInning', short: 'secTopInningShort', wide: true }
+  { kind: 'ml', title: 'secMoneyline' },
+  { kind: 'total', title: 'secTotal' },
+  { kind: 'runline', title: 'secRunLine' },
+  { kind: 'teamtotal', title: 'secTeamTotal' },
+  { kind: 'inning', title: 'secTopInning', wide: true }
 ];
 
 function takePill(bets) {
@@ -710,7 +735,7 @@ function fmtPctShort(p) {
 
 // "52% · 回 87": the fair chance and the average back per NT$100.
 function pickSub(bet) {
-  return [document.createTextNode(`${fmtPctShort(bet.fairChance)} · `), el('b', { text: state.t('backTiny', { v: Math.round(betReturn(bet)) }) })];
+  return [el('span', { class: 'detail-only', text: `${fmtPctShort(bet.fairChance)} · ` }), el('b', { text: state.t('backTiny', { v: Math.round(betReturn(bet)) }) })];
 }
 
 function pickTitle(bet) {
@@ -740,7 +765,7 @@ function pickButton(bet, name, editing) {
     name ? el('span', { class: 'pick-name', text: name }) : null,
     el('span', { class: 'pick-odds' }, [
       document.createTextNode(fmtOdds(effectiveOdds(bet))),
-      el('small', { text: hasRealOdds(bet) ? t('tagReal') : `±${fmtOdds(bet.estOdds * err.rel)}` })
+      el('small', { class: hasRealOdds(bet) ? '' : 'detail-only', text: hasRealOdds(bet) ? t('tagReal') : `±${fmtOdds(bet.estOdds * err.rel)}` })
     ]),
     el('span', { class: 'pick-sub', 'data-back': bet.id }, pickSub(bet))
   ];
@@ -848,9 +873,9 @@ function board({ emblem, title, sub, bets, rows, id, notes = [], shown = Infinit
   const rest = entries.slice(shown);
   return el('article', { class: 'board' }, [
     el('div', { class: 'board-head' }, [
-      el('span', { class: 'board-emblem', 'aria-hidden': 'true', text: emblem }),
+      el('span', { class: 'board-emblem' }, leagueImg(emblem)),
       el('div', {}, [el('p', { class: 'board-title', text: title }), el('p', { class: 'board-sub', text: sub })]),
-      takePill(bets)
+      el('span', { class: 'detail-only board-take' }, takePill(bets))
     ]),
     el('div', { class: 'entries' }, entries.slice(0, shown)),
     rest.length ? el('details', { class: 'board-more' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'entries' }, rest)]) : null,
@@ -872,7 +897,7 @@ function renderFutures() {
       if (sport === 'nba') notes.push(t('futureNbaNote'));
       if (sport === 'epl') notes.push(t('futureEplNote'));
       return board({
-        emblem: '🏆',
+        emblem: sport,
         title: matchup,
         sub: `${t('futureSettles')} ${t(`futureSettle_${market}`)}`,
         bets,
@@ -923,9 +948,9 @@ function slipLegs() {
   return { legs: legs.filter(b => !started(b)), dropped: live.length };
 }
 
-function statTile(label, value, extraClass = '', range = null, icon = null) {
-  return el('div', { class: 'stat' }, [
-    icon ? el('p', { class: 'stat-icon', 'aria-hidden': 'true', text: icon }) : null,
+// A number with its label; `detail` tiles show only with 詳細 on.
+function statTile(label, value, extraClass = '', range = null, detail = false) {
+  return el('div', { class: `stat ${detail ? 'detail-only' : ''}` }, [
     el('p', { class: `stat-value ${extraClass}`, text: value }),
     el('p', { class: 'stat-label', text: label }),
     range ? el('p', { class: 'stat-range', text: state.t('rangeLabel', { range }) }) : null
@@ -944,6 +969,15 @@ function sizeName(k, n) {
   return k === n ? state.t('slipAll') : state.t('slipSize', { k });
 }
 
+function ticketIcon() {
+  const svg = svgEl('svg', { class: 'empty-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true' });
+  svg.append(
+    svgEl('path', { d: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 0 0 4v0a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v0a2 2 0 0 0 0-4v-3a2 2 0 0 0 0-4z' }),
+    svgEl('path', { d: 'M9 8h6M9 12h6M9 16h4' })
+  );
+  return svg;
+}
+
 // A deep look at the ticket, all computed exactly from each pick's fair chance.
 function slipAnalysisView(a, legs, ranges) {
   const t = state.t;
@@ -955,14 +989,14 @@ function slipAnalysisView(a, legs, ranges) {
   cards.push(
     el('div', { class: 'card' }, [
       el('div', { class: 'kpis' }, [
-        statTile(t('slipCost'), money(a.cost), '', null, '💵'),
-        statTile(t('slipBest'), money(a.top.net), 'back-high', null, '🚀'),
-        statTile(t('slipExpected'), money(a.expectedNet), a.backPer100 < 100 ? 'back-low' : 'back-high', ranges.expected, '⚖️'),
-        statTile(t('slipAny'), fmtChance(a.paid), '', ranges.any, '🎯'),
-        statTile(t('slipProfit'), fmtChance(a.profit), a.profit < 0.5 ? 'back-low' : '', ranges.profit, '📈'),
-        statTile(t('slipTakeTax'), fmtPct(1 - a.expectedNet / a.cost), 'back-low', ranges.take, '🏦')
+        statTile(t('slipCost'), money(a.cost)),
+        statTile(t('slipBest'), money(a.top.net), 'back-high'),
+        statTile(t('slipExpected'), money(a.expectedNet), a.backPer100 < 100 ? 'back-low' : 'back-high', ranges.expected),
+        statTile(t('slipAny'), fmtChance(a.paid), '', ranges.any, true),
+        statTile(t('slipProfit'), fmtChance(a.profit), a.profit < 0.5 ? 'back-low' : '', ranges.profit),
+        statTile(t('slipTakeTax'), fmtPct(1 - a.expectedNet / a.cost), 'back-low', ranges.take, true)
       ]),
-      el('details', { class: 'info' }, [el('summary', { text: t('slipRangeTitle') }), el('p', { text: t('slipRangeNote') })])
+      el('details', { class: 'info detail-only' }, [el('summary', { text: t('slipRangeTitle') }), el('p', { text: t('slipRangeNote') })])
     ])
   );
 
@@ -971,7 +1005,7 @@ function slipAnalysisView(a, legs, ranges) {
   const seg = (cls, v) => el('span', { class: `split-seg ${cls}`, style: `flex:${Math.max(0, v)}` });
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `💰 ${t('anaSplitTitle')}` }),
+      el('h3', { class: 'card-title', text: t('anaSplitTitle') }),
       el('div', { class: 'split-bar', 'aria-hidden': 'true' }, [seg('split-back', back), seg('split-take', take), seg('split-tax', tax)]),
       el('div', { class: 'split-legend' }, [
         el('span', {}, [el('i', { class: 'split-back' }), document.createTextNode(`${t('anaBack')} ${money(back)}`)]),
@@ -985,7 +1019,7 @@ function slipAnalysisView(a, legs, ranges) {
   const scale = Math.max(...a.byHits.map(r => r.chance));
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `📊 ${t('anaResultsTitle')}` }),
+      el('h3', { class: 'card-title', text: t('anaResultsTitle') }),
       el('ol', { class: 'run-bars' },
         [...a.byHits].reverse().map(r =>
           el('li', { class: r.profit ? 'row-profit' : '' }, [
@@ -1002,7 +1036,7 @@ function slipAnalysisView(a, legs, ranges) {
   // Each pick on its own.
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `🔍 ${t('anaLegsTitle')}` }),
+      el('h3', { class: 'card-title', text: t('anaLegsTitle') }),
       el('ul', { class: 'leg-analysis' },
         legs.map((b, i) => {
           const info = a.legs[i];
@@ -1014,7 +1048,7 @@ function slipAnalysisView(a, legs, ranges) {
             ]),
             el('span', { class: 'leg-value' }, [
               el('strong', { class: backClass(info.value), text: money(info.value) }),
-              info.without != null && n > 1 ? el('small', { text: t('anaWithout', { v: money(info.without) }) }) : null
+              info.without != null && n > 1 ? el('small', { class: 'detail-only', text: t('anaWithout', { v: money(info.without) }) }) : null
             ])
           ]);
         })
@@ -1028,12 +1062,12 @@ function slipAnalysisView(a, legs, ranges) {
   const everyYears = a.top.chance > 0 ? 1 / (a.top.chance * y.weeks) : Infinity;
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `📅 ${t('anaYearTitle', { n: y.weeks })}` }),
+      el('h3', { class: 'card-title', text: t('anaYearTitle', { n: y.weeks }) }),
       el('div', { class: 'kpis' }, [
-        statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high', null, '🏁'),
-        statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) }), '🧍'),
-        statTile(t('anaYearExpected'), fmtMoney(y.expected), y.expected < 0 ? 'back-low' : 'back-high', null, '📉'),
-        statTile(t('anaTopOdds'), t('anaOneIn', { n: fmtCount(1 / Math.max(a.top.chance, 1e-12)) }), '', everyYears > 1 ? t('anaTopWait', { y: everyYears < 10 ? everyYears.toFixed(1) : fmtCount(everyYears) }) : null, '🎰')
+        statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high'),
+        statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) })),
+        statTile(t('anaYearExpected'), fmtMoney(y.expected), y.expected < 0 ? 'back-low' : 'back-high', null, true),
+        statTile(t('anaTopOdds'), t('anaOneIn', { n: fmtCount(1 / Math.max(a.top.chance, 1e-12)) }), '', everyYears > 1 ? t('anaTopWait', { y: everyYears < 10 ? everyYears.toFixed(1) : fmtCount(everyYears) }) : null)
       ]),
       y.neverPaid > 0.01 ? el('p', { class: 'note', text: t('anaNeverPaid', { p: fmtChance(y.neverPaid), n: y.weeks }) }) : null
     ])
@@ -1058,7 +1092,7 @@ function renderParlay() {
   if (n === 0) {
     body.replaceChildren(
       el('div', { class: 'card slip-empty' }, [
-        el('div', { class: 'big-emoji', 'aria-hidden': 'true', text: '🎫' }),
+        ticketIcon(),
         el('p', { text: t('parlayEmpty') }),
         dropped ? el('p', { class: 'back-low', text: t('slipDroppedLive', { n: dropped }) }) : null,
         el('button', { class: 'primary-button', type: 'button', text: t('goPick'), onclick: () => showTab('games') })
@@ -1070,7 +1104,7 @@ function renderParlay() {
   // Left: the ticket itself. Right: what it can pay and what it costs on average.
   const ticket = [
     el('div', { class: 'ticket-head' }, [
-      el('strong', { text: `🎫 ${t('slipLegs', { n })}` }),
+      el('strong', { text: t('slipLegs', { n }) }),
       el('button', {
         class: 'ghost-button',
         type: 'button',
@@ -1224,9 +1258,9 @@ function niceStep(range, target) {
 const MIN_WAGE_HOURLY = 196;
 // Each character is the real simulated player at that point of the ranking.
 const CHARACTERS = [
-  { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)', icon: '🍀' },
-  { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)', icon: '🙂' },
-  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)', icon: '😵' }
+  { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)' },
+  { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)' },
+  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)' }
 ];
 
 function fmtShare(p) {
@@ -1352,10 +1386,10 @@ function drawSim(stats, weeks) {
   renderSimHeadline(totals, period);
   const back = totals.staked > 0 ? ((totals.staked + totals.net) / totals.staked) * 100 : 100;
   $('sim-stats').replaceChildren(
-    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : '', null, '🧍'),
-    statTile(t('simBackPer100'), fmtMoney(back, { sign: false }), back < 100 ? 'back-low' : '', null, '💸'),
-    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, '📈'),
-    statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '', null, '🏁')
+    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : ''),
+    statTile(t('simBackPer100'), fmtMoney(back, { sign: false }), back < 100 ? 'back-low' : ''),
+    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, true),
+    statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '')
   );
   $('sim-legend').replaceChildren(
     el('span', {}, [el('span', { class: 'legend-key band-outer' }), document.createTextNode(t('simBand80'))]),
@@ -1398,27 +1432,24 @@ function renderSimHeadline(totals, period) {
       class: 'headline-sub',
       text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked / SIM_PLAYERS, { sign: false }), back: fmtMoney(back, { sign: false }) })
     }),
-    el('p', { class: 'margin-note', text: t('simMarginNote', { share: fmtShare(share), n: fmtCount(SIM_PLAYERS_SHOWN), margin: (shareMargin * 100).toFixed(1) }) })
+    el('p', { class: 'margin-note detail-only', text: t('simMarginNote', { share: fmtShare(share), n: fmtCount(SIM_PLAYERS_SHOWN), margin: (shareMargin * 100).toFixed(1) }) })
   );
 }
 
 function renderPlayers(characters) {
   const t = state.t;
   $('sim-players').replaceChildren(
-    ...characters.map(({ name, rank, color, icon, player: p }) => {
+    ...characters.map(({ name, rank, color, player: p }) => {
       let tale;
       if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
       else if (!p.everAhead) tale = t('taleNever');
       else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
       const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
       return el('article', { class: 'player', style: `--player:${color}` }, [
-        el('div', { class: 'player-head' }, [
-          el('span', { class: 'avatar', 'aria-hidden': 'true', text: icon }),
-          el('div', {}, [el('p', { class: 'player-name', text: t(name) }), el('p', { class: 'player-rank', text: t(rank) })])
-        ]),
+        el('div', { class: 'player-head' }, [el('p', { class: 'player-name', text: t(name) }), el('p', { class: 'player-rank', text: t(rank) })]),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
         el('p', { class: 'player-tale', text: tale }),
-        el('div', { class: 'player-lines' }, [
+        el('div', { class: 'player-lines detail-only' }, [
           line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
           line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
           line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
@@ -1427,9 +1458,9 @@ function renderPlayers(characters) {
           line(t('playerDrop'), fmtMoney(-p.maxDrop))
         ]),
         el('div', { class: 'player-tags' }, [
-          p.fan ? el('span', { class: 'habit-tag', text: `${SPORT_ICON[p.fan.key] ?? ''} ${t(`fan_${p.fan.key}`)}` }) : null,
-          el('span', { class: 'habit-tag', text: `${HABIT_ICON[p.habit.key] ?? ''} ${t(`habit_${p.habit.key}`)}` }),
-          el('span', { class: 'habit-tag', text: `${t('playerMaxStake')} ${fmtMoney(p.maxStake, { sign: false })}` })
+          p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null,
+          el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) }),
+          el('span', { class: 'habit-tag detail-only', text: `${t('playerMaxStake')} ${fmtMoney(p.maxStake, { sign: false })}` })
         ])
       ]);
     })
@@ -1439,14 +1470,14 @@ function renderPlayers(characters) {
 // One row per group: avatar, name, bar to break-even, average back per NT$100.
 function barItem({ icon, name, desc, back, margin, meta, scaleMax }) {
   return el('li', { class: 'bar-item', title: desc }, [
-    el('span', { class: 'avatar', 'aria-hidden': 'true', text: icon }),
+    icon,
     el('span', { class: 'bar-name', text: name }),
     el('span', { class: `rank-value ${backClass(back)}` }, [document.createTextNode(fmtMoney(back, { sign: false })), marginEl(`±${margin.toFixed(1)}`)]),
     el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
       el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
       el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
     ]),
-    el('span', { class: 'habit-meta', text: meta })
+    el('span', { class: 'habit-meta detail-only', text: meta })
   ]);
 }
 
@@ -1457,7 +1488,7 @@ function renderHabits(summaries) {
   $('sim-habits').replaceChildren(
     ...sorted.map(h =>
       barItem({
-        icon: HABIT_ICON[h.habit.key],
+        icon: badge(t(`habit_${h.habit.key}`).slice(0, 1), HABIT_COLOR[h.habit.key]),
         name: t(`habit_${h.habit.key}`),
         desc: t(`habitDesc_${h.habit.key}`),
         back: h.back,
@@ -1477,7 +1508,7 @@ function renderFans(fans) {
   $('sim-fans').replaceChildren(
     ...sorted.map(f =>
       barItem({
-        icon: SPORT_ICON[f.fan.key],
+        icon: f.fan.key === 'all' ? badge('∑', 'var(--accent)') : leagueImg(f.fan.key, 'logo-sm'),
         name: t(`fan_${f.fan.key}`),
         desc: t(`fanDesc_${f.fan.key}`),
         back: f.back,
@@ -1515,9 +1546,9 @@ function renderStories(stats, period) {
   const money = v => fmtMoney(v, { sign: false });
   const who = p => ({ serial: `#${fmtCount(p.serial)}`, habit: p.fan ? `${t(`fan_${p.fan.key}`)}・${t(`habit_${p.habit.key}`)}` : t(`habit_${p.habit.key}`) });
   const stories = [];
-  const add = (icon, titleKey, textKey, p, vars) => p && stories.push({ icon, title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
+  const add = (titleKey, textKey, p, vars) => p && stories.push({ title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
   const hours = v => (v / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: 0 });
-  add('🎯', 'storyBigWinTitle', 'storyBigWin', notable.biggestWin, notable.biggestWin && {
+  add('storyBigWinTitle', 'storyBigWin', notable.biggestWin, notable.biggestWin && {
     week: notable.biggestWin.biggestWinWeek + 1,
     stake: money(notable.biggestWin.biggestWinStake),
     legs: notable.biggestWin.biggestWinLegs,
@@ -1528,15 +1559,16 @@ function renderStories(stats, period) {
   // The biggest ticket often makes the biggest winner too, who without it
   // would have been losing: say so when it's true.
   const bestIsBigWin = notable.best?.serial === notable.biggestWin?.serial && notable.best.final - notable.best.biggestWin < 0;
-  add('🏆', 'storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
-  add('🎢', 'storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
-  add('🥶', 'storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
-  add('💸', 'storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
+  add('storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
+  add('storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
+  add('storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
+  add('storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
   $('sim-stories').replaceChildren(
-    ...stories.map(s =>
-      el('li', { class: 'story' }, [
-        el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
-        el('p', { class: 'story-title' }, [document.createTextNode(`${s.title} `), el('span', { class: 'story-serial', text: s.serial })]),
+    // Three stories by default; the rest with 詳細 on.
+    ...stories.map((s, i) =>
+      el('li', { class: `story ${i >= 3 ? 'detail-only' : ''}` }, [
+        el('p', { class: 'story-serial', text: s.serial }),
+        el('p', { class: 'story-title', text: s.title }),
         el('p', { class: 'story-text', text: s.text })
       ])
     )
@@ -1702,7 +1734,7 @@ function renderF1() {
   const drivers = state.bets.filter(b => b.kind === 'f1');
   $('f1-body').replaceChildren(
     board({
-      emblem: '🏁',
+      emblem: 'f1',
       title: f1.title,
       sub: fmtTime(f1.startUtc),
       bets: drivers,
@@ -1786,6 +1818,24 @@ function renderTabs() {
     $(`panel-${tab}`).hidden = tab !== state.tab;
   }
 }
+
+// 詳細: shows the margins, chances, takes and extra stats everywhere. The
+// page marks those with .detail-only, so switching needs no redraw.
+function renderDetailToggle() {
+  const button = $('detail-toggle');
+  document.body.classList.toggle('detail', state.detail);
+  button.setAttribute('aria-pressed', String(state.detail));
+  button.querySelector('span').textContent = state.t('detailLabel');
+  button.title = state.t('detailHint');
+}
+
+$('detail-toggle').addEventListener('click', () => {
+  state.detail = !state.detail;
+  try {
+    localStorage.setItem(DETAIL_KEY, state.detail ? '1' : '0');
+  } catch {}
+  renderDetailToggle();
+});
 
 // The simulated period as pills; the hidden select keeps the value.
 function renderPeriods() {

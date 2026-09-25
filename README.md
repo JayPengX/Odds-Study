@@ -10,6 +10,16 @@ An educational app about the math of the Taiwan Sports Lottery (台灣運彩): w
 
 Four tabs. On phones they sit in a bottom bar; on desktop they're in the top bar.
 
+Logos come from ESPN, with dark-background versions in dark mode: the leagues on the filters, cards and boards, and the teams on the games.
+
+The **詳細 (Details)** switch in the top bar starts off. Off, the page shows the odds and the average back per NT$100. On, it adds:
+
+- the ± margins of error;
+- fair chances and house takes;
+- the extra stats and notes.
+
+The choice is remembered.
+
 ### 賽事 Games
 
 - **What's listed** follows the lottery's own schedule:
@@ -18,23 +28,24 @@ Four tabs. On phones they sit in a bottom bar; on desktop they're in the top bar
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
   - The next F1 race winner, with **every** driver the market prices.
 - **Filters:** by sport and by day.
-- **Game cards** show team logos (from ESPN) and the win picks.
+- **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
-  - the estimated lottery odds (± their error);
-  - the fair chance;
-  - the average amount back per NT$100.
+  - the estimated lottery odds;
+  - the average amount back per NT$100;
+  - with 詳細 on: the odds' ± error and the fair chance.
 - **更多玩法 (more markets)** opens the other markets:
   - 大小分 (totals, 3 lines);
   - 讓分 (run lines, ±1.5 and ±2.5);
   - 單隊大小 (team totals);
   - 得分最高單局 (top-scoring inning).
 
-  Each market shows its own house take.
+  With 詳細 on, each market shows its own house take.
 - **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.
 - **Ranking:** a folded list of every bet of the day, least costly first.
 - **Boards:**
   - F1: drivers with team-coloured badges.
   - Championships (World Series, AL, NL, Premier League, NBA): team logos.
+  - Each board carries its league's logo.
 
   Both can go on the bet slip too.
 

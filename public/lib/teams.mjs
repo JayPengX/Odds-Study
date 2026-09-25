@@ -150,15 +150,25 @@ const EPL_ESPN_ID = {
   'west ham united': 371, 'wolverhampton wanderers': 380, wolves: 380
 };
 
-// Logo URL for a team (English name as the sources write it), or null.
-export function teamLogo(sport, name) {
+// Logo URL for a team (English name as the sources write it), or null. ESPN
+// has a version of every logo for dark backgrounds (`dark`).
+export function teamLogo(sport, name, dark = false) {
   const base = 'https://a.espncdn.com/i/teamlogos';
-  if (sport === 'mlb') return MLB_ABBR[name] ? `${base}/mlb/500/${MLB_ABBR[name]}.png` : null;
-  if (sport === 'nba') return NBA_ABBR[name] ? `${base}/nba/500/${NBA_ABBR[name]}.png` : null;
+  const size = dark ? '500-dark' : '500';
+  if (sport === 'mlb') return MLB_ABBR[name] ? `${base}/mlb/${size}/${MLB_ABBR[name]}.png` : null;
+  if (sport === 'nba') return NBA_ABBR[name] ? `${base}/nba/${size}/${NBA_ABBR[name]}.png` : null;
   if (sport === 'epl') {
     const id = EPL_ESPN_ID[normalizeTeamName(name)];
-    return id ? `${base}/soccer/500/${id}.png` : null;
+    return id ? `${base}/soccer/${size}/${id}.png` : null;
   }
+  return null;
+}
+
+// The league's own logo.
+export function leagueLogo(sport, dark = false) {
+  const size = dark ? '500-dark' : '500';
+  if (sport === 'epl') return `https://a.espncdn.com/i/leaguelogos/soccer/${size}/23.png`;
+  if (['mlb', 'nba', 'f1'].includes(sport)) return `https://a.espncdn.com/i/teamlogos/leagues/${size}/${sport}.png`;
   return null;
 }
 
