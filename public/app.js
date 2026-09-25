@@ -1217,7 +1217,7 @@ function rareCard(a) {
 }
 
 // Opens the ticket for real: every pick drawn from its fair chance. One at a
-// time with each pick revealed in turn, or 10 or 100 at once, with a running tally.
+// time with each pick revealed in turn, with a running tally.
 function drawCard(legs, a, sig) {
   const t = state.t;
   const money = v => fmtMoney(v, { sign: false });
@@ -1251,18 +1251,13 @@ function drawCard(legs, a, sig) {
     };
     setTimeout(step, 380);
   };
-  const reset = () => {
-    state.draws = null;
-    box.replaceWith(drawCard(legs, a, sig));
-  };
   function paint() {
     const last = d.last;
     const parts = [
       el('h3', { class: 'card-title', text: t('drawTitle') }),
       el('p', { class: 'lede', text: t('drawNote') }),
       el('div', { class: 'draw-buttons' }, [
-        el('button', { class: 'primary-button', type: 'button', text: t('drawOne'), disabled: d.busy ? '' : null, onclick: openOne }),
-        d.n > 0 && !d.busy ? el('button', { class: 'link-button', type: 'button', text: t('drawReset'), onclick: reset }) : null
+        el('button', { class: 'primary-button', type: 'button', text: t(d.n > 0 ? 'drawAgain' : 'drawStart'), disabled: d.busy ? '' : null, onclick: openOne })
       ])
     ];
     if (last && last.batch == null) {
@@ -1299,7 +1294,7 @@ function drawCard(legs, a, sig) {
         el('p', { class: 'note', text: t('drawExpected', { n: fmtCount(d.n), v: fmtMoney(d.n * (a.expectedNet - a.cost)) }) })
       );
     }
-    box.replaceChildren(...parts);
+    box.replaceChildren(...parts.filter(Boolean));
   }
   paint();
   return box;

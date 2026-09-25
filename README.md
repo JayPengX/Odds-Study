@@ -66,7 +66,7 @@ The choice is remembered.
   - **One pick short:** the chance of missing by exactly one pick, how many times likelier that is than winning outright, and for each pick the chance it's the only one that lost. The pick most likely to let the ticket down is flagged.
 - **Grade:** a letter from the average back per NT$100 (a single game at the usual cut gets an A), a type from the chance of profit (steady to lottery ticket), the average loss per ticket in bubble teas, and how many tickets it takes on average to get paid once. With 詳細 on: what all-correct would pay at fair odds, and how much less the lottery pays.
 - **How hard is it to win?** The ticket's chances of all correct and of any profit, placed among well-known odds: a coin, a die, a stranger's birthday, 10 heads in a row, a royal flush, the Lotto 6/49 and Power Lottery jackpots.
-- **Try a draw:** opens the ticket with each pick drawn from its fair chance. One ticket at a time, the picks revealed one by one. A running tally shows tickets opened, how many paid, the result so far with a small chart, the biggest ticket, and what the odds say that many tickets average.
+- **Try a draw:** opens the ticket with each pick drawn from its fair chance. One ticket at a time, the picks revealed one by one; the button reads 開始 (Start), then 再開一張 (Restart) once a ticket is done. A running tally shows tickets opened, how many paid, the result so far with a small chart, the biggest ticket, and what the odds say that many tickets average.
 
 ### 模擬 Simulator
 
