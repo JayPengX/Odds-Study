@@ -12,6 +12,7 @@ import {
   evaluateSlip,
   expectedReturn,
   habitPools,
+  lotteryTotalLines,
   median,
   quantile,
   SLIP_RULES,
@@ -171,17 +172,25 @@ function buildBets(data) {
       });
     }
     const total = game.total;
-    if (total && total.line % 1 !== 0) {
+    // MLB: the lottery's three lines, modelled from DraftKings' one line (any
+    // line, whole or half). Premier League: DraftKings' own half-goal line only.
+    const lines =
+      !total ? [] : game.sport === 'mlb' ? lotteryTotalLines(total.line, total.overFair) : total.line % 1 !== 0 ? [{ line: total.line, over: total.overFair, main: true }] : [];
+    for (const { line, over, main } of lines) {
       for (const side of ['over', 'under']) {
-        const p = side === 'over' ? total.overFair : 1 - total.overFair;
+        const p = side === 'over' ? over : 1 - over;
         bets.push({
           ...base,
-          id: `${game.id}|tot|${side}`,
+          id: `${game.id}|tot|${line}|${side}`,
           kind: 'total',
-          fairMargin: null,
-          errKey: game.sport,
-          label: `${matchup} ${t(side)} ${total.line}`,
-          shortLabel: `${t(side)} ${total.line}`,
+          totalLine: line,
+          mainLine: main,
+          // The main line's margin is the usual source gap (filled in below);
+          // the lines either side add the model's error, ~1-3 points.
+          fairMargin: main ? null : 0.02,
+          errKey: game.sport === 'mlb' ? 'mlbTotal' : game.sport,
+          label: `${matchup} ${t(side)} ${line}`,
+          shortLabel: `${t(side)} ${line}`,
           fairChance: p,
           estOdds: estimateLotteryOdds(p, K_DRAFTKINGS)
         });
@@ -447,7 +456,7 @@ function renderGames() {
         const meta = `${t(`sport_${game.sport}`)} · ${fmtTime(game.startUtc)} · ${t(sourceKey)}${thin ? ` · ${t('thin')}` : ''}`;
         const notes = [];
         if (game.sport === 'epl') notes.push(el('p', { class: 'note', text: t('soccerUnverified') }));
-        if (game.total && game.total.line % 1 === 0) {
+        if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) {
           notes.push(el('p', { class: 'note', text: t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }) }));
         }
         return el('article', { class: 'game' }, [
@@ -458,7 +467,8 @@ function renderGames() {
           betTable(bets),
           takeNote([
             takeText(bets.filter(b => b.kind === 'ml'), 'takeMoneyline'),
-            ...(bets.some(b => b.kind === 'total') ? [takeText(bets.filter(b => b.kind === 'total'), 'takeTotal')] : [])
+            // Each total line is its own market; they share one take, so show the first.
+            ...(bets.some(b => b.kind === 'total') ? [takeText(bets.filter(b => b.kind === 'total' && b.totalLine === bets.find(x => x.kind === 'total').totalLine), 'takeTotal')] : [])
           ]),
           ...notes
         ]);
@@ -807,7 +817,8 @@ function renderParlay() {
 function simPool() {
   const onlyF1 = state.sport === 'f1';
   return state.bets
-    .filter(b => inSport(b.sport) && (onlyF1 || b.kind !== 'f1'))
+    // One total line per game (the main one), like the lottery's own balance of bets.
+    .filter(b => inSport(b.sport) && (onlyF1 || b.kind !== 'f1') && (b.kind !== 'total' || b.mainLine))
     .map(b => ({ gameId: b.gameId, fairChance: b.fairChance, odds: effectiveOdds(b) }));
 }
 

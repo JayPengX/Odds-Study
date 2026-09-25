@@ -8,6 +8,7 @@ import {
   estimateF1LotteryOdds,
   estimateFuturesOdds,
   evaluateSlip,
+  lotteryTotalLines,
   houseTake,
   slipErrors,
   slipSizes,
@@ -261,5 +262,21 @@ test('every text key exists in both languages', async () => {
   for (const locale of ['zh', 'en']) {
     const t = makeT(locale);
     assert.deepEqual([...keys].filter(k => !same.has(k) && t(k) === k), [], locale);
+  }
+});
+
+test('MLB total lines reproduce the lottery from one DraftKings line', () => {
+  const am = a => (a > 0 ? 100 / (a + 100) : -a / (-a + 100));
+  const devig = (o, u) => am(o) / (am(o) + am(u));
+  const priced = lines => lines.map(l => [l.line, 1 / (l.over * 1.15), 1 / ((1 - l.over) * 1.15)]);
+  // Cubs @ Red Sox, DraftKings 6.5 at -105/-115; lottery 5.5/6.5/7.5 (2026-09-25).
+  const cubs = priced(lotteryTotalLines(6.5, devig(-105, -115)));
+  const cubsReal = [[5.5, 1.53, 1.97], [6.5, 1.78, 1.72], [7.5, 2.2, 1.42]];
+  // Mets @ Nationals, DraftKings 8 (whole) at -107/-112; lottery 6.5/7.5/8.5.
+  const mets = priced(lotteryTotalLines(8, devig(-107, -112)));
+  const metsReal = [[6.5, 1.38, 2.33], [7.5, 1.63, 1.87], [8.5, 1.87, 1.63]];
+  for (const [est, real] of [[cubs, cubsReal], [mets, metsReal]]) {
+    assert.deepEqual(est.map(l => l[0]), real.map(l => l[0]));
+    for (let i = 0; i < 3; i++) for (const j of [1, 2]) assert.ok(Math.abs(est[i][j] - real[i][j]) / real[i][j] < 0.1, `${est[i]} vs ${real[i]}`);
   }
 });

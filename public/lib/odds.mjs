@@ -103,6 +103,7 @@ export function expectedReturn(fairChance, odds, stake = 100) {
 // error against real lottery prices). `checked: false` marks a guess.
 export const ODDS_ERROR = {
   mlb: { rel: 0.022, checked: true }, // 28 prices, 14 games: ~0.04 on ~1.8
+  mlbTotal: { rel: 0.02, checked: true }, // 12 total-line prices, 2 games (model)
   epl: { rel: 0.1, checked: false }, // soccer never checked
   f1: { rel: 0.08, checked: true }, // 9 prices
   f1Longshot: { rel: 0.35, checked: true }, // 325 vs 500 can't be told apart
@@ -126,6 +127,60 @@ export function median(values) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   return quantile(sorted, 0.5);
+}
+
+// MLB total runs (大小分). The lottery centres its total lines on the half-run
+// line closest to 50/50 and adds one run either side, at its usual ~13% take.
+// Total runs are modelled as negative binomial (mean mu, dispersion r): fitted
+// to DraftKings' one line, it reproduced the lottery's other lines within ~1
+// point of chance on average (12 prices, 2 games, 2026-09-25; r = 5 fit best).
+export const MLB_TOTAL_DISPERSION = 5;
+
+// P(total runs <= k) for each k up to kMax.
+function runsCdf(mu, r, kMax) {
+  const p = r / (r + mu);
+  const out = new Float64Array(kMax + 1);
+  let pmf = p ** r;
+  let sum = 0;
+  for (let k = 0; k <= kMax; k++) {
+    sum += pmf;
+    out[k] = sum;
+    pmf *= ((k + r) / (k + 1)) * (1 - p);
+  }
+  return out;
+}
+
+// Chance the total goes over a half-run line (e.g. 7.5).
+export function totalOverChance(line, mu, r = MLB_TOTAL_DISPERSION) {
+  return 1 - runsCdf(mu, r, Math.floor(line))[Math.floor(line)];
+}
+
+// Mean runs matching a line's fair over chance. On a whole line (8) the chance
+// is over given no push, as a book prices it.
+export function fitTotalRuns(line, overFair, r = MLB_TOTAL_DISPERSION) {
+  const over = mu => {
+    if (line % 1 !== 0) return totalOverChance(line, mu, r);
+    const cdf = runsCdf(mu, r, line);
+    const push = cdf[line] - (line > 0 ? cdf[line - 1] : 0);
+    return (1 - cdf[line]) / (1 - push);
+  };
+  let lo = 0.3;
+  let hi = 40;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (over(mid) < overFair) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// The lottery's three total lines for a game, from one line and its fair over
+// chance: [{ line, over, main }], main = the half-line closest to 50/50.
+export function lotteryTotalLines(line, overFair, r = MLB_TOTAL_DISPERSION) {
+  const mu = fitTotalRuns(line, overFair, r);
+  const candidates = [Math.floor(line) - 0.5, Math.floor(line) + 0.5, Math.ceil(line) + 0.5].filter((l, i, all) => all.indexOf(l) === i && l > 0);
+  const main = candidates.reduce((best, l) => (Math.abs(totalOverChance(l, mu, r) - 0.5) < Math.abs(totalOverChance(best, mu, r) - 0.5) ? l : best));
+  return [main - 1, main, main + 1].filter(l => l > 0).map(l => ({ line: l, over: totalOverChance(l, mu, r), main: l === main }));
 }
 
 // Implied chances of every outcome in a market, summed. 1.15 means a 15% overround.

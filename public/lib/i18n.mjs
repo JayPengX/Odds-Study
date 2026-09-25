@@ -216,6 +216,7 @@ const STRINGS = {
       ['4. 期望值', '平均拿回 = 公平機率 × 賠率 × 100。例如 0.502 × 1.80 × 100 = NT$90.4：長期每下 NT$100 平均虧約 NT$10。大於 100 才值得下，運彩幾乎從來不會。'],
       ['模仿運彩的公式', 'MLB：運彩賠率 ≈ 1 ÷（公平機率 × 1.15）。用 2026/9/25 的 14 場真實價格比對，平均誤差約 0.04。F1：運彩賠率 ≈ 1 ÷ 公平機率^0.69，冷門車手被抽得更多；機率不到 1% 的車手，運彩直接開固定的 65、325 或 500。'],
       ['足球的和局', '英超有三種結果：主勝、和局、客勝。三個公平機率加起來是 100%，所以一樣可以用「公平機率 × 賠率」算平均拿回。足球的抽成還沒有用運彩真實價格驗證。'],
+      ['MLB 大小分的三條線', '運彩每場開三條大小分線：最接近五五波的那條，再加上下各一分（例如 5.5、6.5、7.5）。我們只有 DraftKings 的一條線，所以用「總得分」的機率分布（負二項分布）去配合那條線，再算出其他線的機率。用 2026/9/25 兩場共 12 個真實價格比對，平均只差約 1 個百分點。'],
       ['為什麼幾乎都是虧', '如果每個賠率都是公平賠率 ÷ 1.15，那麼 公平機率 × 賠率 ≈ 1 ÷ 1.15 ≈ 0.87。不管選哪一隊，每 NT$100 平均都只拿回約 NT$87。']
     ],
     footer: '賠率每次開啟頁面時即時抓取，數字會隨時間變動。本站與台灣運彩無關。'
@@ -437,6 +438,7 @@ const STRINGS = {
       ['4. Expected value', 'Average back = fair chance × odds × 100. For example 0.502 × 1.80 × 100 = NT$90.4: you lose about NT$10 per NT$100 over time. A bet is only worth it above 100; the lottery almost never gets there.'],
       ['The copying formula', 'MLB: lottery odds ≈ 1 ÷ (fair chance × 1.15). Checked against 14 real games on 2026-09-25, the average error is about 0.04. F1: lottery odds ≈ 1 ÷ fair chance^0.69, which charges longshots more; drivers under 1% get one of the lottery\'s fixed prices, 65, 325 or 500.'],
       ['Soccer draws', "Premier League matches have three results: home win, draw, away win. Their fair chances add up to 100%, so fair chance × odds works the same way. The lottery's soccer cut hasn't been verified against real prices yet."],
+      ['MLB totals: three lines', 'The lottery posts three total-runs lines per game: the one closest to 50/50 plus one run either side (say 5.5, 6.5, 7.5). DraftKings gives only one line, so the page fits a distribution of total runs (negative binomial) to it and reads the other lines off that. Against 12 real lottery prices from two games on 2026-09-25, it was off by about 1 percentage point on average.'],
       ['Why nearly everything loses', 'If every price is the fair odds ÷ 1.15, then fair chance × odds ≈ 1 ÷ 1.15 ≈ 0.87. Whichever team you pick, you get back about NT$87 per NT$100 on average.']
     ],
     footer: 'Odds are fetched live each time the page opens and change over time. Not affiliated with Taiwan Sports Lottery.'
