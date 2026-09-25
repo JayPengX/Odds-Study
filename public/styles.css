@@ -579,3 +579,17 @@ body:not(.detail) .detail-only, body:not(.detail) .margin, body:not(.detail) .st
 .stat-value { white-space: nowrap; }
 .hero-card .stat-icon { background: rgba(255, 255, 255, 0.14); }
 .badge.emoji { font-size: 1rem; }
+details.market > summary { list-style: none; cursor: pointer; }
+details.market > summary::-webkit-details-marker { display: none; }
+details.market > summary .market-title::after { content: ' ▸'; color: var(--text-muted); }
+details.market[open] > summary .market-title::after { content: ' ▾'; }
+details.market[open] > summary { margin-bottom: 6px; }
+.story { grid-template-columns: 46px 1fr; }
+.story-big { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.25; }
+.story-title { color: var(--text-secondary); font-size: 0.82rem; font-weight: 600; }
+.story-title .story-serial { font-size: 0.82rem; font-weight: 700; }
+.story-text { font-size: 0.78rem; color: var(--text-muted); }
+.fact { display: grid; gap: 1px; }
+.fact-value { font-size: 1.05rem; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.truths .fact-value { color: var(--bad-strong); }
+.fact-text { font-size: 0.8rem; color: var(--text-secondary); }

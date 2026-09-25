@@ -680,11 +680,15 @@ function gameMore(game, bets, editing) {
   for (const s of SECTIONS.filter(s => s.kind !== 'ml')) {
     for (const options of groupBy(bets.filter(b => b.kind === s.kind), b => b.market).values()) {
       const label = options[0].marketLabel ? `${t(s.title)} ${options[0].marketLabel}` : t(s.title);
+      // Without 詳細: the main total line and the 1.5 run line only.
+      const extra = (s.kind === 'total' && !options[0].mainLine) || (s.kind === 'runline' && options[0].market !== 'rl|1.5');
+      const head = el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: label }), el('span', { class: 'detail-only market-take' }, takePill(options))]);
+      const picks = el('div', { class: 'market-picks' }, options.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)));
+      // The ten-way inning market folds away.
       markets.push(
-        el('div', { class: `market ${s.wide ? 'wide' : ''}` }, [
-          el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: label }), takePill(options)]),
-          el('div', { class: 'market-picks' }, options.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)))
-        ])
+        s.wide
+          ? el('details', { class: 'market wide' }, [el('summary', {}, head), picks])
+          : el('div', { class: `market ${extra ? 'detail-only' : ''}` }, [head, picks])
       );
     }
   }
@@ -697,9 +701,9 @@ function gameMore(game, bets, editing) {
   return el('div', { class: 'game-more' }, [
     markets.length ? el('div', { class: 'markets' }, markets) : null,
     el('div', { class: 'game-foot' }, [
-      el('span', { text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }),
+      el('span', { class: 'detail-only', text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }),
       editToggle(game.id, renderGames),
-      notes.length ? el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
+      notes.length ? el('details', { class: 'info detail-only' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
     ])
   ]);
 }
@@ -1520,66 +1524,71 @@ function renderFans(fans) {
   );
 }
 
-function renderFacts(totals, characters, summaries, period) {
-  const t = state.t;
-  const facts = [];
-  const by = key => summaries.find(h => h.habit.key === key);
-  facts.push(t('factParlay', { two: fmtMoney(by('casual').back, { sign: false }), many: fmtMoney(by('dreamer').back, { sign: false }) }));
-  if (totals.everAheadShare > totals.aheadShare) facts.push(t('factEverAhead', { ever: fmtShare(totals.everAheadShare), ended: fmtShare(totals.aheadShare) }));
-  const chaser = by('chaser');
-  if (chaser.capShare > 0) facts.push(t('factChaser', { share: fmtShare(chaser.capShare), cap: fmtMoney(chaser.habit.chaseCap, { sign: false }), staked: fmtMoney(chaser.avgStaked, { sign: false }), final: fmtMoney(chaser.avgFinal) }));
-  const lucky = characters[0].player;
-  if (lucky.biggestWin > 0) facts.push(t('factLucky', { win: fmtMoney(lucky.biggestWin, { sign: false }), streak: lucky.longestLosing }));
-  const avgLoss = -totals.net / SIM_PLAYERS;
-  if (avgLoss > 0) {
-    facts.push(t('factWage', { period, loss: fmtMoney(avgLoss, { sign: false }), hours: (avgLoss / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: avgLoss < 10 * MIN_WAGE_HOURLY ? 1 : 0 }), wage: MIN_WAGE_HOURLY }));
-  }
-  facts.push(t(totals.net < 0 ? 'factHouse' : 'factHouseWon', { total: fmtCount(SIM_PLAYERS_SHOWN), staked: fmtMoney(totals.staked, { sign: false }), net: fmtMoney(Math.abs(totals.net), { sign: false }), kept: fmtMoney((-totals.net / totals.staked) * 100, { sign: false }) }));
-  $('sim-facts').replaceChildren(...facts.map(f => el('li', { text: f })));
+// A fact as a big number and a short caption.
+function factItem(value, caption) {
+  return el('li', { class: 'fact' }, [value ? el('strong', { class: 'fact-value', text: value }) : null, el('span', { class: 'fact-text', text: caption })]);
 }
 
-// Record holders among the 100,000, by their number in the crowd, and the
-// crowd-wide truths behind them.
+function renderFacts(totals, characters, summaries, period) {
+  const t = state.t;
+  const money = v => fmtMoney(v, { sign: false });
+  const facts = [];
+  const by = key => summaries.find(h => h.habit.key === key);
+  facts.push(factItem(`${money(by('casual').back)} → ${money(by('dreamer').back)}`, t('factParlay')));
+  if (totals.everAheadShare > totals.aheadShare) facts.push(factItem(`${fmtShare(totals.everAheadShare)} → ${fmtShare(totals.aheadShare)}`, t('factEverAhead')));
+  const chaser = by('chaser');
+  if (chaser.capShare > 0) facts.push(factItem(fmtShare(chaser.capShare), t('factChaser', { cap: money(chaser.habit.chaseCap) })));
+  const lucky = characters[0].player;
+  if (lucky.biggestWin > 0) facts.push(factItem(t('inARow', { n: lucky.longestLosing }), t('factLucky')));
+  const avgLoss = -totals.net / SIM_PLAYERS;
+  if (avgLoss > 0) {
+    const hours = (avgLoss / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: avgLoss < 10 * MIN_WAGE_HOURLY ? 1 : 0 });
+    facts.push(factItem(t('hoursN', { n: hours }), t('factWage', { period, loss: money(avgLoss) })));
+  }
+  if (totals.net < 0) facts.push(factItem(money((-totals.net / totals.staked) * 100), t('factHouse')));
+  else facts.push(factItem(null, t('factHouseWon')));
+  $('sim-facts').replaceChildren(...facts);
+}
+
+// Record holders among the 100,000, by their number in the crowd: a big key
+// number and one short line each. Then the crowd-wide truths behind them.
 function renderStories(stats, period) {
   const t = state.t;
   const { notable, crowd } = stats;
   const money = v => fmtMoney(v, { sign: false });
-  const who = p => ({ serial: `#${fmtCount(p.serial)}`, habit: p.fan ? `${t(`fan_${p.fan.key}`)}・${t(`habit_${p.habit.key}`)}` : t(`habit_${p.habit.key}`) });
+  const who = p => (p.fan ? `${t(`fan_${p.fan.key}`)} · ${t(`habit_${p.habit.key}`)}` : t(`habit_${p.habit.key}`));
   const stories = [];
-  const add = (icon, titleKey, textKey, p, vars) => p && stories.push({ icon, title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
-  const hours = v => (v / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: 0 });
-  add('🎯', 'storyBigWinTitle', 'storyBigWin', notable.biggestWin, notable.biggestWin && {
-    week: notable.biggestWin.biggestWinWeek + 1,
-    stake: money(notable.biggestWin.biggestWinStake),
-    legs: notable.biggestWin.biggestWinLegs,
-    odds: fmtOdds(notable.biggestWin.biggestWinOdds),
-    win: money(notable.biggestWin.biggestWin),
-    final: fmtMoney(notable.biggestWin.final)
-  });
+  const add = (icon, titleKey, p, big, line) => p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, big, line: `${who(p)} · ${line}` });
+  const w = notable.biggestWin;
+  if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), t('storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds) }));
+  const best = notable.best;
   // The biggest ticket often makes the biggest winner too, who without it
   // would have been losing: say so when it's true.
-  const bestIsBigWin = notable.best?.serial === notable.biggestWin?.serial && notable.best.final - notable.best.biggestWin < 0;
-  add('🏆', 'storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
-  add('🎢', 'storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
-  add('🧊', 'storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
-  add('💸', 'storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
+  const bestIsBigWin = best?.serial === w?.serial && best.final - best.biggestWin < 0;
+  if (best) add('🏆', 'storyBestTitle', best, fmtMoney(best.final), t(bestIsBigWin ? 'storyBestSame' : 'storyBest', { tickets: fmtCount(best.tickets), staked: money(best.staked) }));
+  const fall = notable.fall;
+  if (fall) add('🎢', 'storyFallTitle', fall, `${fmtMoney(fall.peak)} → ${fmtMoney(fall.final)}`, t('storyFall', { week: fall.peakWeek + 1 }));
+  const dry = notable.drought;
+  if (dry) add('🧊', 'storyDroughtTitle', dry, t('inARow', { n: fmtCount(dry.longestLosing) }), t('storyDrought', { tickets: fmtCount(dry.tickets), won: fmtCount(dry.wonTickets) }));
+  const worst = notable.worst;
+  if (worst) add('💸', 'storyWorstTitle', worst, fmtMoney(worst.final), t('storyWorst', { staked: money(worst.staked), hours: fmtCount(-worst.final / MIN_WAGE_HOURLY) }));
   $('sim-stories').replaceChildren(
     // Three stories by default; the rest with 詳細 on.
     ...stories.map((s, i) =>
       el('li', { class: `story ${i >= 3 ? 'detail-only' : ''}` }, [
         el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
-        el('p', { class: 'story-serial', text: s.serial }),
-        el('p', { class: 'story-title', text: s.title }),
-        el('p', { class: 'story-text', text: s.text })
+        el('p', { class: 'story-title' }, [document.createTextNode(`${s.title} `), el('span', { class: 'story-serial', text: s.serial })]),
+        el('p', { class: `story-big ${s.big.startsWith('−') ? 'back-low' : 'back-high'}`, text: s.big }),
+        el('p', { class: 'story-text', text: s.line })
       ])
     )
   );
   const truths = [];
-  if (crowd.winnings > 0) truths.push(t('truthRatio', { n: fmtCount(SIM_PLAYERS_SHOWN), win: money(crowd.winnings), loss: money(crowd.losses), ratio: (crowd.losses / crowd.winnings).toLocaleString(numberLocale(), { maximumFractionDigits: 1 }) }));
-  truths.push(crowd.top1 > 0 ? t('truthTop', { period, top1: fmtMoney(crowd.top1), top01: fmtMoney(crowd.top01) }) : t('truthTopLosing', { period, top1: fmtMoney(crowd.top1) }));
-  if (crowd.neverWonShare > 0) truths.push(t('truthNeverWon', { period, share: fmtChance(crowd.neverWonShare), n: fmtCount(crowd.neverWonShare * SIM_PLAYERS) }));
-  truths.push(t('truthSameOdds'));
-  $('sim-truths').replaceChildren(...truths.map(text => el('li', { text })));
+  if (crowd.winnings > 0) truths.push(factItem(`NT$${(crowd.losses / crowd.winnings).toLocaleString(numberLocale(), { maximumFractionDigits: 1 })}`, t('truthRatio')));
+  truths.push(crowd.top1 > 0 ? factItem(fmtMoney(crowd.top1), t('truthTop', { period })) : factItem(fmtMoney(crowd.top1), t('truthTopLosing', { period })));
+  if (crowd.neverWonShare > 0) truths.push(factItem(fmtChance(crowd.neverWonShare), t('truthNeverWon', { period })));
+  truths.push(factItem(null, t('truthSameOdds')));
+  $('sim-truths').replaceChildren(...truths);
 }
 
 function drawSimChart(container, bands, characters, weeks) {
