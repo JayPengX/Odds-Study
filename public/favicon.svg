@@ -1,1 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#2a78d6"/><path d="M7 22 L13 15 L18 19 L25 10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="oddsstudy-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fbbf24"/><stop offset="1" stop-color="#c2410c"/></linearGradient>
+    <radialGradient id="oddsstudy-hl" cx="0.25" cy="0.18" r="0.8"><stop offset="0" stop-color="#fff" stop-opacity="0.32"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="oddsstudy-disc" cx="0.38" cy="0.32" r="0.75"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9ecf5"/></radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#oddsstudy-bg)"/>
+  <rect width="512" height="512" rx="116" fill="url(#oddsstudy-hl)"/>
+  <g transform="translate(256 256) scale(0.92) translate(-256 -256)">
+  <path d="M -222 0 A 222 150 0 0 1 222 0" transform="translate(256 256) rotate(-24)" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="14"/>
+  <circle cx="256" cy="256" r="128" fill="url(#oddsstudy-disc)"/>
+  
+    <circle cx="208" cy="208" r="34" stroke="#c2410c" stroke-width="22" fill="none"/>
+    <circle cx="304" cy="304" r="34" stroke="#c2410c" stroke-width="22" fill="none"/>
+    <path d="M318 184 L194 328" stroke="#c2410c" stroke-width="24" stroke-linecap="round"/>
+  <path d="M 222 0 A 222 150 0 0 1 -222 0" transform="translate(256 256) rotate(-24)" fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="0" cy="0" r="26" fill="#fff" transform="translate(256 256) rotate(-24) translate(189 -78)"/>
+  </g>
+</svg>
