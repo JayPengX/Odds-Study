@@ -419,7 +419,6 @@ function rerenderFiltered() {
   renderRanking();
   renderGames();
   renderFutures();
-  renderSim();
   renderF1();
 }
 
@@ -1630,16 +1629,31 @@ function renderSim() {
   const chart = $('sim-chart');
   const sportBets = simSportBets();
   const weeks = Number($('sim-weeks').value);
-  const cached = crowdCache.get(crowdKey(sportBets, weeks));
+  const key = crowdKey(sportBets, weeks);
+  const cached = crowdCache.get(key);
+  // Drawn only when the tab shows (opening it draws it): the simulator is a
+  // big page, and redrawing it hidden made every tap elsewhere slow. At
+  // start-up the default run still happens in the background.
+  if (state.tab !== 'sim') {
+    if (cached || !state.booting) return Promise.resolve();
+    return crowdStats(sportBets, weeks).then(
+      () => {},
+      () => {}
+    );
+  }
+  // Already showing exactly this (same run, width and language): nothing to do.
+  const drawn = `${key}|${window.innerWidth}|${state.locale}`;
   if (cached) {
-    drawSim(cached, weeks);
+    if (state.simDrawn !== drawn) drawSim(cached, weeks);
+    state.simDrawn = drawn;
     return Promise.resolve();
   }
-  // Only run when someone will see it: on the simulator tab (or at start-up).
-  if (state.tab !== 'sim' && !state.booting) return Promise.resolve();
   return crowdStats(sportBets, weeks).then(
     stats => {
-      if (Number($('sim-weeks').value) === weeks) drawSim(stats, weeks);
+      if (Number($('sim-weeks').value) === weeks && state.tab === 'sim') {
+        drawSim(stats, weeks);
+        state.simDrawn = drawn;
+      }
     },
     () => {}
   );
@@ -2631,42 +2645,43 @@ window.addEventListener('resize', () => {
   phone.addEventListener('change', place);
 }
 
-// Big numbers on one line: each of these shrinks its font (down to 60%) until
-// it fits its box, instead of wrapping onto a second row on phones. Checked
-// when its text changes and when its box resizes (which also covers a tab or
-// the 詳細 switch showing it for the first time).
+// Big numbers on one line: each of these shrinks its font (down to 60%) to
+// fit its box, instead of wrapping onto a second row on phones. Checked when
+// its text changes and when its box resizes (which also covers a tab or the
+// 詳細 switch showing it for the first time). Only the slip and simulator
+// have such numbers. All reads, then all writes, so the page lays out once.
 const FIT_SELECTOR = '.stat-value, .player-line strong, .lapse-stats strong, .story-big, .buy strong, .you-end';
-function fitNumber(node) {
-  node.style.fontSize = '';
-  if (!node.clientWidth) return;
-  const full = parseFloat(getComputedStyle(node).fontSize);
-  let size = full;
-  while (node.scrollWidth > node.clientWidth + 0.5 && size > full * 0.6) {
-    size -= 0.5;
-    node.style.fontSize = `${size}px`;
-  }
+function fitNumbers(nodes) {
+  for (const node of nodes) node.style.fontSize = '';
+  const sizes = nodes.map(node => {
+    const box = node.clientWidth;
+    const need = node.scrollWidth;
+    if (!box || need <= box + 0.5) return null;
+    const full = parseFloat(getComputedStyle(node).fontSize);
+    return Math.max(full * 0.6, Math.floor(((full * box) / need) * 10) / 10);
+  });
+  nodes.forEach((node, i) => sizes[i] && (node.style.fontSize = `${sizes[i]}px`));
 }
 if ('ResizeObserver' in window) {
   const fitted = new WeakSet();
-  const resized = new ResizeObserver(entries => entries.forEach(entry => fitNumber(entry.target)));
-  const check = node => {
-    if (!fitted.has(node)) {
+  const resized = new ResizeObserver(entries => fitNumbers(entries.map(entry => entry.target)));
+  const watch = new MutationObserver(mutations => {
+    const found = new Set();
+    for (const m of mutations) {
+      const target = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      if (!target) continue;
+      const own = target.closest(FIT_SELECTOR);
+      if (own) found.add(own);
+      else for (const node of target.querySelectorAll(FIT_SELECTOR)) found.add(node);
+    }
+    for (const node of found) {
+      if (fitted.has(node)) continue;
       fitted.add(node);
       resized.observe(node);
     }
-    fitNumber(node);
-  };
-  new MutationObserver(mutations => {
-    const seen = new Set();
-    for (const m of mutations) {
-      const target = m.target.nodeType === 1 ? m.target : m.target.parentElement;
-      if (!target || seen.has(target)) continue;
-      seen.add(target);
-      const own = target.closest(FIT_SELECTOR);
-      if (own) check(own);
-      else for (const node of target.querySelectorAll(FIT_SELECTOR)) check(node);
-    }
-  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    if (found.size) fitNumbers([...found]);
+  });
+  for (const id of ['panel-slip', 'panel-sim']) watch.observe($(id), { childList: true, subtree: true, characterData: true });
 }
 
 // Tells the page's failsafe (in index.html) that the scripts loaded and started.
