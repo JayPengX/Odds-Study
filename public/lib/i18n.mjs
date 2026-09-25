@@ -401,7 +401,7 @@ const STRINGS = {
     simUnluckyRank: '排名後 10% 的那一位',
     simTypicalRank: '排名正中間的那一位',
     simLuckyRank: '排名前 10% 的那一位',
-    simEverAhead: '曾經贏過錢的人',
+    simEverAhead: '曾經贏錢過的人',
     simAhead: '最後還在贏的人',
     simAheadNow: '此刻贏錢的人',
     simWeekN: '第 {n} 週',
