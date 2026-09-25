@@ -492,8 +492,8 @@ button.pick:active { transform: scale(0.98); }
 .story-text { color: var(--text-secondary); font-size: 0.82rem; }
 .facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 0.86rem; color: var(--text-secondary); }
 .facts li { position: relative; padding-left: 22px; }
-.facts li::before { content: ''; position: absolute; left: 4px; top: 0.55em; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-.truths li::before { background: var(--bad-strong); }
+.facts li::before { content: '💡'; position: absolute; left: 0; top: 0; font-size: 0.85rem; }
+.truths li::before { content: '⚠️'; }
 .truth-card { border-top: 4px solid var(--bad-strong); }
 
 /* ---- Guide ------------------------------------------------------------------------- */
@@ -567,5 +567,7 @@ body:not(.detail) .detail-only, body:not(.detail) .margin, body:not(.detail) .st
 .board-emblem { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
 .board-emblem .logo { width: 28px; height: 28px; }
 .empty-icon { width: 56px; height: 56px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.guide-icon { font-weight: 800; color: var(--accent); font-size: 1rem; }
+.guide-icon { font-size: 1.25rem; }
+.story-icon { margin-right: 8px; font-size: 1.15rem; }
+.notice::before { content: '⚠️'; flex: none; }
 .game-top .logo-wrap, .game-top > .logo { margin-right: 2px; }

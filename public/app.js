@@ -511,16 +511,16 @@ function renderStatic() {
   $('refresh').title = t('refresh');
   for (const option of $('sim-weeks').options) option.textContent = t(`period_${option.value}`);
   $('footer').textContent = t('footer');
-  for (const [id, key] of [
-    ['ranking-title', 'rankingTitle'],
-    ['games-title', 'gamesTitle'],
-    ['futures-title', 'futuresTitle'],
-    ['parlay-title', 'parlayTitle'],
-    ['sim-title', 'simTitle'],
-    ['f1-title', 'f1Title'],
-    ['math-title', 'mathTitle']
+  for (const [id, key, icon] of [
+    ['ranking-title', 'rankingTitle', '🏅'],
+    ['games-title', 'gamesTitle', '📅'],
+    ['futures-title', 'futuresTitle', '🏆'],
+    ['parlay-title', 'parlayTitle', '🎫'],
+    ['sim-title', 'simTitle', '🎲'],
+    ['f1-title', 'f1Title', '🏁'],
+    ['math-title', 'mathTitle', '📘']
   ])
-    $(id).textContent = t(key);
+    $(id).textContent = `${icon} ${t(key)}`;
   for (const node of document.querySelectorAll('[data-t]')) node.textContent = t(node.dataset.t);
   for (const tab of TABS) $(`tab-${tab}`).querySelector('.tab-label').textContent = t(`tab_${tab}`);
   renderLegend();
@@ -533,7 +533,7 @@ function renderStatic() {
     ...groups.map(([title, items], i) =>
       el('details', { class: 'card fold guide-group' }, [
         el('summary', {}, [
-          el('span', { class: 'guide-icon', 'aria-hidden': 'true', text: String(i + 1) }),
+          el('span', { class: 'guide-icon', 'aria-hidden': 'true', text: GUIDE_ICONS[i] ?? '📘' }),
           el('span', {}, [el('span', { text: title }), el('span', { class: 'guide-count', text: ` · ${items.length}` })])
         ]),
         el('div', {}, items.map(([h, p]) => el('div', { class: 'math-step' }, [el('h3', { text: h }), el('p', { text: p })])))
@@ -541,6 +541,10 @@ function renderStatic() {
     )
   );
 }
+
+// One icon per guide group, in order: the odds math, habits, fans, kinds of
+// bet, the simulators, rules and tax, data and margins.
+const GUIDE_ICONS = ['🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '🎲', '⚖️', '📡'];
 
 // What the numbers on a pick mean, in one line, with the ± explained on tap.
 function renderLegend() {
@@ -969,15 +973,6 @@ function sizeName(k, n) {
   return k === n ? state.t('slipAll') : state.t('slipSize', { k });
 }
 
-function ticketIcon() {
-  const svg = svgEl('svg', { class: 'empty-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true' });
-  svg.append(
-    svgEl('path', { d: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 0 0 4v0a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v0a2 2 0 0 0 0-4v-3a2 2 0 0 0 0-4z' }),
-    svgEl('path', { d: 'M9 8h6M9 12h6M9 16h4' })
-  );
-  return svg;
-}
-
 // A deep look at the ticket, all computed exactly from each pick's fair chance.
 function slipAnalysisView(a, legs, ranges) {
   const t = state.t;
@@ -1005,7 +1000,7 @@ function slipAnalysisView(a, legs, ranges) {
   const seg = (cls, v) => el('span', { class: `split-seg ${cls}`, style: `flex:${Math.max(0, v)}` });
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: t('anaSplitTitle') }),
+      el('h3', { class: 'card-title', text: `💰 ${t('anaSplitTitle')}` }),
       el('div', { class: 'split-bar', 'aria-hidden': 'true' }, [seg('split-back', back), seg('split-take', take), seg('split-tax', tax)]),
       el('div', { class: 'split-legend' }, [
         el('span', {}, [el('i', { class: 'split-back' }), document.createTextNode(`${t('anaBack')} ${money(back)}`)]),
@@ -1019,7 +1014,7 @@ function slipAnalysisView(a, legs, ranges) {
   const scale = Math.max(...a.byHits.map(r => r.chance));
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: t('anaResultsTitle') }),
+      el('h3', { class: 'card-title', text: `📊 ${t('anaResultsTitle')}` }),
       el('ol', { class: 'run-bars' },
         [...a.byHits].reverse().map(r =>
           el('li', { class: r.profit ? 'row-profit' : '' }, [
@@ -1036,7 +1031,7 @@ function slipAnalysisView(a, legs, ranges) {
   // Each pick on its own.
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: t('anaLegsTitle') }),
+      el('h3', { class: 'card-title', text: `🔍 ${t('anaLegsTitle')}` }),
       el('ul', { class: 'leg-analysis' },
         legs.map((b, i) => {
           const info = a.legs[i];
@@ -1062,7 +1057,7 @@ function slipAnalysisView(a, legs, ranges) {
   const everyYears = a.top.chance > 0 ? 1 / (a.top.chance * y.weeks) : Infinity;
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: t('anaYearTitle', { n: y.weeks }) }),
+      el('h3', { class: 'card-title', text: `📅 ${t('anaYearTitle', { n: y.weeks })}` }),
       el('div', { class: 'kpis' }, [
         statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high'),
         statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) })),
@@ -1092,7 +1087,7 @@ function renderParlay() {
   if (n === 0) {
     body.replaceChildren(
       el('div', { class: 'card slip-empty' }, [
-        ticketIcon(),
+        el('div', { class: 'big-emoji', 'aria-hidden': 'true', text: '🎫' }),
         el('p', { text: t('parlayEmpty') }),
         dropped ? el('p', { class: 'back-low', text: t('slipDroppedLive', { n: dropped }) }) : null,
         el('button', { class: 'primary-button', type: 'button', text: t('goPick'), onclick: () => showTab('games') })
@@ -1104,7 +1099,7 @@ function renderParlay() {
   // Left: the ticket itself. Right: what it can pay and what it costs on average.
   const ticket = [
     el('div', { class: 'ticket-head' }, [
-      el('strong', { text: t('slipLegs', { n }) }),
+      el('strong', { text: `🎫 ${t('slipLegs', { n })}` }),
       el('button', {
         class: 'ghost-button',
         type: 'button',
@@ -1258,9 +1253,9 @@ function niceStep(range, target) {
 const MIN_WAGE_HOURLY = 196;
 // Each character is the real simulated player at that point of the ranking.
 const CHARACTERS = [
-  { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)' },
-  { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)' },
-  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)' }
+  { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)', icon: '🍀' },
+  { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)', icon: '🙂' },
+  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)', icon: '💀' }
 ];
 
 function fmtShare(p) {
@@ -1439,14 +1434,14 @@ function renderSimHeadline(totals, period) {
 function renderPlayers(characters) {
   const t = state.t;
   $('sim-players').replaceChildren(
-    ...characters.map(({ name, rank, color, player: p }) => {
+    ...characters.map(({ name, rank, color, icon, player: p }) => {
       let tale;
       if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
       else if (!p.everAhead) tale = t('taleNever');
       else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
       const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
       return el('article', { class: 'player', style: `--player:${color}` }, [
-        el('div', { class: 'player-head' }, [el('p', { class: 'player-name', text: t(name) }), el('p', { class: 'player-rank', text: t(rank) })]),
+        el('div', { class: 'player-head' }, [el('p', { class: 'player-name', text: `${icon} ${t(name)}` }), el('p', { class: 'player-rank', text: t(rank) })]),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
         el('p', { class: 'player-tale', text: tale }),
         el('div', { class: 'player-lines detail-only' }, [
@@ -1546,9 +1541,9 @@ function renderStories(stats, period) {
   const money = v => fmtMoney(v, { sign: false });
   const who = p => ({ serial: `#${fmtCount(p.serial)}`, habit: p.fan ? `${t(`fan_${p.fan.key}`)}・${t(`habit_${p.habit.key}`)}` : t(`habit_${p.habit.key}`) });
   const stories = [];
-  const add = (titleKey, textKey, p, vars) => p && stories.push({ title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
+  const add = (icon, titleKey, textKey, p, vars) => p && stories.push({ icon, title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
   const hours = v => (v / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: 0 });
-  add('storyBigWinTitle', 'storyBigWin', notable.biggestWin, notable.biggestWin && {
+  add('🎯', 'storyBigWinTitle', 'storyBigWin', notable.biggestWin, notable.biggestWin && {
     week: notable.biggestWin.biggestWinWeek + 1,
     stake: money(notable.biggestWin.biggestWinStake),
     legs: notable.biggestWin.biggestWinLegs,
@@ -1559,15 +1554,15 @@ function renderStories(stats, period) {
   // The biggest ticket often makes the biggest winner too, who without it
   // would have been losing: say so when it's true.
   const bestIsBigWin = notable.best?.serial === notable.biggestWin?.serial && notable.best.final - notable.best.biggestWin < 0;
-  add('storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
-  add('storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
-  add('storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
-  add('storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
+  add('🏆', 'storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
+  add('🎢', 'storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
+  add('🥶', 'storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
+  add('💸', 'storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
   $('sim-stories').replaceChildren(
     // Three stories by default; the rest with 詳細 on.
     ...stories.map((s, i) =>
       el('li', { class: `story ${i >= 3 ? 'detail-only' : ''}` }, [
-        el('p', { class: 'story-serial', text: s.serial }),
+        el('p', { class: 'story-serial' }, [el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }), document.createTextNode(s.serial)]),
         el('p', { class: 'story-title', text: s.title }),
         el('p', { class: 'story-text', text: s.text })
       ])
