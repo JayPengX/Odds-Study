@@ -1699,7 +1699,7 @@ function drawSim(stats, weeks) {
   $('sim-stats').replaceChildren(
     statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : '', null, false, '🧍'),
     statTile(t('simBackPer100'), fmtMoney(back, { sign: false }), back < 100 ? 'back-low' : '', null, false, '💸'),
-    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, true, '📈'),
+    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, false, '📈'),
     statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '', null, false, '🏁')
   );
   $('sim-legend').replaceChildren(
