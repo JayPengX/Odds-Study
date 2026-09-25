@@ -24,6 +24,7 @@ import {
   habitPools,
   simulateHabit,
   simulateCrowdStats,
+  groupSize,
   playerRandom,
   quantile,
   seededRandom,
@@ -365,9 +366,12 @@ test('the streaming crowd equals simulating everyone in full', () => {
   const seed = 9;
   const stats = simulateCrowdStats({ pools, weeks, perHabit, seed });
   const players = [];
-  HABITS.forEach((habit, h) => {
-    for (let i = 0; i < perHabit; i++) players.push({ index: h * perHabit + i, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, h * perHabit + i), seed }) });
-  });
+  let start = 0;
+  for (const habit of HABITS) {
+    const n = groupSize(habit, perHabit);
+    for (let i = 0; i < n; i++) players.push({ index: start + i, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, start + i), seed }) });
+    start += n;
+  }
   // Totals match to the cent.
   close(stats.totals.staked, players.reduce((s, p) => s + p.staked, 0), 1e-6);
   close(stats.totals.net, players.reduce((s, p) => s + p.final, 0), 1e-6);

@@ -108,7 +108,7 @@ const STRINGS = {
     youMedian: '一般人的結果',
     youAheadPost: ' 最後還在贏。',
     youAheadPre: '{n} 位這樣的人玩了{period}，',
-    youIntro: '選一種下注習慣和球迷類型，看看約 3,334 個跟你一樣的人玩下來怎麼樣。',
+    youIntro: '選一種下注習慣和球迷類型，看看跟你一樣的那群人玩下來怎麼樣。',
     youTitle: '像你這樣的人',
     factPerDayWhy: '{total} 人的總虧損平均到每一天。',
     factPerDay: '運彩每天從這群人身上賺走 {v}',
@@ -214,7 +214,7 @@ const STRINGS = {
         ['F1 分站冠軍', '猜哪位車手贏這一站。熱門車手照曲線估，機率很小的車手運彩直接開 65、325 或 500。']
       ]],
       ['模擬怎麼做', [
-        ['10 萬人', '6 種習慣 × 5 種球迷，每組約 3,334 人，共 100,020 人。每個人有自己的編號和亂數種子，同樣的編號每次都會重演一模一樣的人生。'],
+        ['10 萬人', '6 種習慣 × 5 種球迷，共 100,020 人。各種習慣的人數照真實世界的比例：小試身手 38%、重注球迷 20%、串關夢想家 15%、精算派 10%、爆冷獵人 9%、追輸族 8%（每種球迷都一樣）。每個人有自己的編號和亂數種子，同樣的編號每次都會重演一模一樣的人生。'],
         ['未來的比賽', '今天看得到的比賽只是樣本：每週照各聯盟的真實行事曆決定有幾場、哪些運動在打，從樣本裡抽出這週的比賽（今天沒有的運動用一般比賽的機率分布）。'],
         ['準不準', '同樣設定換不同亂數種子，頁面上的數字幾乎不動（例如「還在贏的比例」只差約 0.2 個百分點）。每個人都完整模擬到每一張彩券；為了省電不存每個人每週的數字，但測試證明結果和全部存下來算一模一樣。'],
         ['同一個世界', '10 萬人都活在同一個世界：每週每場比賽、每站 F1 只有一個真正的結果，押同一場的人一起中、一起輸。所以一年 24 站 F1，機率 0.25% 的冷門車手整年贏到一站的機會只有約 6%；真的爆冷時，押他的人會一起中。每個人挑注的方式也照機率：越可能贏的選項越多人押，0.1% 的冷門只分到約 0.1% 的注，不會跟熱門一樣常被選到。'],
@@ -582,7 +582,7 @@ const STRINGS = {
     youMedian: 'Typical result',
     youAheadPost: ' are still ahead.',
     youAheadPre: 'Of {n} people like this, after {period} ',
-    youIntro: 'Pick a betting habit and a kind of fan to see how the ~3,334 people just like that did.',
+    youIntro: 'Pick a betting habit and a kind of fan to see how the people just like that did.',
     youTitle: 'People like you',
     factPerDayWhy: 'The {total} people\'s total loss, spread over each day.',
     factPerDay: 'The lottery makes {v} a day from this crowd',
@@ -688,7 +688,7 @@ const STRINGS = {
         ['F1 race winner', 'Which driver wins the race. Front-runners follow a curve; long shots get the lottery\'s fixed 65, 325 or 500.']
       ]],
       ['How the simulator works', [
-        ['100,000 people', '6 habits × 5 kinds of fan, about 3,334 in each group, 100,020 in all. Each person has a number and a random seed, so the same number always replays the exact same year.'],
+        ['100,000 people', '6 habits × 5 kinds of fan, 100,020 in all. How many follow each habit mirrors the real world: Casual 38%, Big fan 20%, Parlay dreamer 15%, Careful 10%, Upset hunter 9%, Chaser 8% (the same for every kind of fan). Each person has a number and a random seed, so the same number always replays the exact same year.'],
         ['Future games', 'Today\'s board is only a sample: each week follows each league\'s real calendar for how many games there are and which sports are on, drawn from the sample (a typical game for sports with nothing on today).'],
         ['How accurate', 'Change the random seed and the numbers barely move (the share still ahead shifts about 0.2 points). Everyone is simulated ticket by ticket; to save power, week-by-week numbers aren\'t stored for everyone, but tests prove the results are exactly the same as storing them all.'],
         ['One shared world', 'All 100,000 people live in the same world: each week every game and every F1 race has one real result, and everyone who bet on it wins or loses together. So with 24 races a year, a 0.25% driver wins any race at all only about 6% of years; when a long shot does come in, everyone who backed them cashes together. People also pick like real bettors, in proportion to each option\'s chance: a 0.1% driver gets about 0.1% of the bets on the race, not as many as the favourite.'],

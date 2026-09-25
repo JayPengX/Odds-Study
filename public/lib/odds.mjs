@@ -384,14 +384,20 @@ export function seededRandom(seed) {
 // Boosted stakes stay within NT$3,000.
 const RIDE_EXTRA_TICKETS = 30;
 const BOOST_MAX = 3000;
+// `share`: how much of the crowd bets this way. Most bettors are casual:
+// in the University of Hong Kong's 2021 study the median football bettor
+// bets about once every two weeks, a small amount, and probable problem or
+// at-risk gamblers (the chasing kind) are under a tenth of bettors. Big fans
+// come next, then parlay dreamers (Taiwan's lottery pushes 串關: most games
+// need 2+ legs), with the careful, the upset hunters and the chasers fewest.
 export const BIG_STAKES = [1000, 2000, 3000];
 export const HABITS = [
-  { key: 'casual', perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any', satisfied: 1, quitStreak: [6, 4] },
-  { key: 'fan', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite', hotHand: true },
-  { key: 'underdog', perWeek: 0.5, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog', ride: true },
-  { key: 'dreamer', perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any', ride: true, nearMiss: true },
-  { key: 'chaser', perWeek: 0.75, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000, burnout: 4 },
-  { key: 'careful', perWeek: 0.35, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best', stopLoss: [1000, 6] }
+  { key: 'casual', share: 0.38, perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any', satisfied: 1, quitStreak: [6, 4] },
+  { key: 'fan', share: 0.2, perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite', hotHand: true },
+  { key: 'underdog', share: 0.09, perWeek: 0.5, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog', ride: true },
+  { key: 'dreamer', share: 0.15, perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any', ride: true, nearMiss: true },
+  { key: 'chaser', share: 0.08, perWeek: 0.75, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000, burnout: 4 },
+  { key: 'careful', share: 0.1, perWeek: 0.35, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best', stopLoss: [1000, 6] }
 ];
 
 // Splits a pool of bets ({gameId, fairChance, odds}) into the lists each
@@ -863,9 +869,39 @@ function multiSportGroups(sportPools, startWeek, weeks) {
   return groups;
 }
 
+// Players in a group of `habit`, for `per` players per group on average:
+// each habit's share of the crowd (at least 1).
+export function groupSize(habit, per) {
+  return Math.max(1, Math.round(per * HABITS.length * habit.share));
+}
+
+// Where each group starts in the crowd's numbering, and the crowd's size.
+function layout(groups, per) {
+  const starts = [];
+  let total = 0;
+  for (const group of groups) {
+    starts.push(total);
+    total += groupSize(group.habit, per);
+  }
+  // The group player `index` belongs to.
+  const groupOf = index => {
+    if (index < 0 || index >= total) return -1;
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= index) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  return { starts, total, groupOf, size: g => groupSize(groups[g].habit, per) };
+}
+
 // A crowd of players in groups: with `sportPools`, every habit x fan type on
 // the multi-sport calendar starting at week `startWeek`; with `pools`, one
-// group per habit on the same bets every week. `perGroup` players each.
+// group per habit on the same bets every week. `perGroup` players per group
+// on average, each habit by its share of the crowd.
 // Nothing per player is kept but the final result: each week streams into a
 // histogram (for the 10/25/50/75/90% bands) and each group into running sums.
 // Record holders and the players at the top 10%, middle and bottom 10% are
@@ -885,7 +921,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         return { habit, fan: null, weekPicker: () => pick, fallback: null, switchRate: 0, legs: null };
       });
   const per = perGroup ?? perHabit ?? 500;
-  const total = groups.length * per;
+  const { starts, total, groupOf, size } = layout(groups, per);
   const from = resume?.weeks ?? 0;
   const marks = [...new Set(checkpoints)].filter(c => c > from && c <= weeks).sort((x, y) => x - y);
   const { bins, lo, width } = histogramShape(weeks);
@@ -959,8 +995,8 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
   };
   for (let g = 0; g < groups.length; g++) {
     const group = groups[g];
-    for (let i = 0; i < per; i++) {
-      const index = g * per + i;
+    for (let i = 0; i < size(g); i++) {
+      const index = starts[g] + i;
       const random = resume ? seededRandom(resume.rngs[index]) : playerRandom(seed, index);
       const st = resume ? { ...resume.states[index] } : freshState(group.habit);
       playSeason(group.habit, group.weekPicker, weeks, random, path, group.fallback, group.switchRate, group.legs, {
@@ -1042,7 +1078,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     // Replays one player exactly up to this checkpoint; `serial` is their
     // 1-based number in the crowd.
     const replayIndex = index => {
-      const group = groups[Math.floor(index / per)];
+      const group = groups[groupOf(index)];
       const p = new Float64Array(m);
       return { serial: index + 1, habit: group.habit, fan: group.fan, path: p, ...playSeason(group.habit, group.weekPicker, m, playerRandom(seed, index), p, group.fallback, group.switchRate, group.legs) };
     };
@@ -1062,18 +1098,19 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     };
     const replay = q => replayIndex(atRank(Math.round((total - 1) * q)));
     // Every habit x fan group on its own (its players are indexes
-    // g * per ... g * per + per - 1): for "people like you".
+    // starts[g] ... starts[g] + size(g) - 1): for "people like you".
     const groupStats = groups.map((group, g) => {
-      const mine = finals.slice(g * per, (g + 1) * per).sort();
+      const n = size(g);
+      const mine = finals.slice(starts[g], starts[g] + n).sort();
       return {
         habit: group.habit.key,
         fan: group.fan?.key ?? null,
         ...summarize([sums[g]]),
-        median: mine[Math.floor(per / 2)],
-        best: mine[per - 1],
+        median: mine[Math.floor(n / 2)],
+        best: mine[n - 1],
         worst: mine[0],
-        q10: mine[Math.floor(per * 0.1)],
-        q90: mine[Math.floor(per * 0.9)]
+        q10: mine[Math.floor(n * 0.1)],
+        q90: mine[Math.floor(n * 0.9)]
       };
     });
     const finalAt = q => sorted[Math.round((total - 1) * q)];
@@ -1124,7 +1161,7 @@ export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup
         return { habit, fan: null, weekPicker: () => pick, fallback: null, switchRate: 0, legs: null };
       });
   const per = perGroup ?? perHabit ?? 500;
-  const group = groups[Math.floor(index / per)];
+  const group = groups[layout(groups, per).groupOf(index)];
   if (!group) return null;
   const path = new Float64Array(weeks);
   return { serial: index + 1, habit: group.habit, fan: group.fan, path, ...playSeason(group.habit, group.weekPicker, weeks, playerRandom(seed, index), path, group.fallback, group.switchRate, group.legs) };

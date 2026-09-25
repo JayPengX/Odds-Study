@@ -71,7 +71,7 @@ The choice is remembered.
 ### 模擬 Simulator
 
 - **The crowd:** 100,000 people, made of 6 betting habits × 5 kinds of fan.
-  - Habits: Casual, Big fan, Upset hunter, Parlay dreamer, Chaser, Careful.
+  - Habits, in real-world proportions (the same for every kind of fan): Casual 38%, Big fan 20%, Parlay dreamer 15%, Careful 10%, Upset hunter 9%, Chaser 8%. Most bettors bet small now and then (the University of Hong Kong's 2021 study), and chasers, the problem-gambling kind, are under a tenth.
   - Fans: MLB, Premier League, NBA, F1, and people who bet on everything.
 - **The calendar:** time runs forward from this week on each league's real schedule. From the published 2026/27 schedules: 2,430 MLB games (25 March to 26 September) plus about 40 in the postseason; 380 Premier League games (22 August to 30 May, no games in the international breaks, Boxing Day week doubled); 1,230 NBA games (20 October to 11 April) plus about 90 in the play-in and playoffs; and the 24 races of the 2027 F1 calendar.
   - In a sport's off-season, 30% of its fans bet on something else.
@@ -105,7 +105,7 @@ The choice is remembered.
     - the top-1% line and who never won once;
     - how often a first-ticket winner still loses;
     - the hit rate, the tax collected and what the lottery makes per day.
-- **People like you:** pick a habit and a kind of fan to see that group of about 3,334 people. It shows:
+- **People like you:** pick a habit and a kind of fan to see that group (its size follows the habit's share of the crowd). It shows:
   - how many are still ahead;
   - the typical result, the average back, the tickets bought and the total bet (averages);
   - the group's range from its biggest loser to its biggest winner;

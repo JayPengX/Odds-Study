@@ -1,6 +1,7 @@
 import {
   FANS,
   HABITS,
+  groupSize,
   SPORTS,
   sportTemplate,
   weekOfYear,
@@ -45,10 +46,10 @@ import { f1Driver, leagueLogo, teamLogo } from './lib/teams.mjs';
 const STAKE = 100;
 // Simulated players per habit. Big enough that the results barely move
 // between runs, so one fixed-seed run is shown.
-// Simulated players per habit x fan type group.
+// Simulated players per habit x fan type group, on average: each habit gets
+// its share of the crowd (100,020 in all).
 const PER_GROUP = Math.ceil(100_000 / (HABITS.length * FANS.length));
-const PER_HABIT = PER_GROUP * FANS.length;
-const SIM_PLAYERS = HABITS.length * PER_HABIT;
+const SIM_PLAYERS = FANS.length * HABITS.reduce((n, habit) => n + groupSize(habit, PER_GROUP), 0);
 const SIM_SEED = 1;
 // Shown as a round "100,000".
 const SIM_PLAYERS_SHOWN = Math.round(SIM_PLAYERS / 1000) * 1000;
@@ -2078,7 +2079,7 @@ function renderBuys(totals, period) {
   );
 }
 
-// How a group of about 3,334 people with one habit and one kind of fan did.
+// How the group of people with one habit and one kind of fan did.
 function renderYou() {
   const t = state.t;
   const stats = state.simStats;
