@@ -370,7 +370,7 @@ test('the streaming crowd equals simulating everyone in full', () => {
   }
 });
 
-test('ticket analysis: exact figures, where the money goes, each leg, a year of it', async () => {
+test('ticket analysis: exact figures, where the money goes, each leg, one short', async () => {
   const { analyzeSlip } = await import('../public/lib/odds.mjs');
   const legs = [
     { odds: 1.8, fairChance: 0.5 },
@@ -392,18 +392,11 @@ test('ticket analysis: exact figures, where the money goes, each leg, a year of 
   // Without the worst leg, the rest return more.
   assert.ok(a.legs[1].without > a.backPer100);
 
-  // A 2-leg parlay bought 52 times: ahead = exact binomial, within sampling error.
-  const pair = [{ odds: 1.8, fairChance: 0.5 }, { odds: 1.8, fairChance: 0.5 }];
-  const y = analyzeSlip({ legs: pair, sizes: [2], stake: 100 }).year;
-  const cost = 100;
-  const win = 100 * 1.8 * 1.8;
-  let ahead = 0;
-  const p = 0.25;
-  for (let k = 0; k <= 52; k++) if (k * win > 52 * cost) ahead += choose(52, k) * p ** k * (1 - p) ** (52 - k);
-  assert.ok(Math.abs(y.ahead - ahead) < 0.01, `${y.ahead} vs ${ahead}`);
-  close(y.expected, 52 * (p * win - cost), 1e-6);
-  // Same numbers every time.
-  assert.deepEqual(analyzeSlip({ legs: pair, sizes: [2], stake: 100 }).year, y);
+  // One short: exactly one pick lost.
+  const one = legs.reduce((sum, _, i) => sum + legs.reduce((p, l, j) => p * (j === i ? 1 - l.fairChance : l.fairChance), 1), 0);
+  close(a.nearMiss, one, 1e-12);
+  close(a.lone[0], 0.5 * 0.45 * 0.55 * 0.5, 1e-12);
+  close(a.nearMiss, a.byHits[3].chance, 1e-12);
 });
 
 test('the sport calendar has a realistic number of games per year', async () => {

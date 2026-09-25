@@ -73,8 +73,6 @@ const state = {
   // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
   slipSizes: new Set([2, 'all']),
   slipStake: 100,
-  // Weeks in a row for the slip's "every week" outlook.
-  slipWeeks: 52,
   day: null,
   // True until the first simulation is ready: the loading screen covers the page.
   booting: true,
@@ -1074,6 +1072,7 @@ function slipAnalysisView(a, legs, ranges, extra) {
     ])
   );
   cards.push(drawCard(legs, a, extra.sig));
+  cards.push(crowdCard(a));
 
   // Where each NT$100 goes.
   const { take, tax, back } = a.per100;
@@ -1134,22 +1133,7 @@ function slipAnalysisView(a, legs, ranges, extra) {
     ])
   );
 
-  // The same ticket every week for a year.
-  const y = a.year;
-  const everyYears = a.top.chance > 0 ? 1 / (a.top.chance * y.weeks) : Infinity;
-  cards.push(
-    el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: t('anaYearTitle', { n: y.weeks }) }),
-      yearSlider(y.weeks),
-      el('div', { class: 'kpis' }, [
-        statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high', null, false, '🏁'),
-        statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) }), false, '🧍'),
-        statTile(t('anaYearExpected'), fmtMoney(y.expected), y.expected < 0 ? 'back-low' : 'back-high', null, true, '📉'),
-        statTile(t('anaTopOdds'), t('anaOneIn', { n: fmtCount(1 / Math.max(a.top.chance, 1e-12)) }), '', everyYears > 1 ? t('anaTopWait', { y: everyYears < 10 ? everyYears.toFixed(1) : fmtCount(everyYears) }) : null, false, '🎰')
-      ]),
-      y.neverPaid > 0.01 ? el('p', { class: 'note', text: t('anaNeverPaid', { p: fmtChance(y.neverPaid), n: y.weeks }) }) : null
-    ])
-  );
+  cards.push(heartbreakCard(a, legs));
   return cards;
 }
 
@@ -1336,16 +1320,64 @@ function drawCard(legs, a, sig) {
   return box;
 }
 
-// How many weeks in a row the same ticket is bought: 1 to 260 (5 years).
-function yearSlider(weeks) {
+// 100 people buy this exact ticket today: how many profit, how many get some
+// money back, how many get nothing, and what the lottery takes in and pays out.
+function crowdCard(a) {
   const t = state.t;
-  const input = el('input', { type: 'range', min: '1', max: '260', step: '1', value: String(weeks), 'aria-label': t('anaYearTitle', { n: weeks }) });
-  input.addEventListener('input', () => (input.closest('.card').querySelector('.card-title').textContent = t('anaYearTitle', { n: input.value })));
-  input.addEventListener('change', () => {
-    state.slipWeeks = Number(input.value);
-    setTimeout(renderParlay);
-  });
-  return el('div', { class: 'range-row' }, [el('span', { text: '1' }), input, el('span', { text: '260' })]);
+  const money = v => fmtMoney(v, { sign: false });
+  const shares = [a.profit, Math.max(0, a.paid - a.profit), Math.max(0, 1 - a.paid)];
+  // Whole people that add up to 100 (largest remainders).
+  const counts = shares.map(p => Math.floor(p * 100));
+  shares.map((p, i) => [p * 100 - counts[i], i]).sort((x, y) => y[0] - x[0]).slice(0, 100 - counts.reduce((x, y) => x + y, 0)).forEach(([, i]) => counts[i]++);
+  const kinds = ['won', 'some', 'lost'];
+  const person = kind => {
+    const svg = svgEl('svg', { class: `buyer ${kind}`, viewBox: '0 0 24 30', 'aria-hidden': 'true' });
+    svg.append(svgEl('circle', { cx: 12, cy: 7, r: 5.5 }), svgEl('path', { d: 'M2 30v-6a10 10 0 0 1 20 0v6z' }));
+    return svg;
+  };
+  const people = kinds.flatMap((kind, i) => Array.from({ length: counts[i] }, () => person(kind)));
+  const lines = [
+    el('span', {}, [el('i', { class: 'buyer-key won' }), document.createTextNode(t('crowdWon', { n: counts[0] }))]),
+    counts[1] ? el('span', {}, [el('i', { class: 'buyer-key some' }), document.createTextNode(t('crowdSome', { n: counts[1] }))]) : null,
+    el('span', {}, [el('i', { class: 'buyer-key lost' }), document.createTextNode(t('crowdLost', { n: counts[2] }))])
+  ];
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('crowdTitle') }),
+    el('div', { class: 'buyers', role: 'img', 'aria-label': t('crowdTitle') }, people),
+    el('div', { class: 'split-legend' }, lines),
+    counts[0] === 0 && a.top.chance > 0 ? el('p', { class: 'note', text: t('crowdNeed', { n: fmtCount(1 / Math.max(a.profit || a.top.chance, 1e-12)) }) }) : null,
+    el('p', { class: 'note', text: t('crowdMoney', { in: money(a.cost * 100), out: money(a.expectedNet * 100), keep: money((a.cost - a.expectedNet) * 100) }) })
+  ]);
+}
+
+// Missing by one pick: how often it happens next to winning outright, and
+// which pick is most often the one that lets the ticket down.
+function heartbreakCard(a, legs) {
+  const t = state.t;
+  const n = legs.length;
+  if (n < 2) return null;
+  const scale = Math.max(...a.lone);
+  const worst = a.lone.indexOf(scale);
+  const times = a.top.chance > 0 ? a.nearMiss / a.top.chance : 0;
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('heartTitle') }),
+    el('p', { class: 'heart-big' }, [
+      el('span', { 'aria-hidden': 'true', text: '💔 ' }),
+      document.createTextNode(t('heartPre')),
+      el('strong', { text: fmtChance(a.nearMiss) }),
+      document.createTextNode(times >= 1.05 ? t('heartTimes', { x: times.toLocaleString(numberLocale(), { maximumFractionDigits: 1 }) }) : t('heartPost'))
+    ]),
+    el('ol', { class: 'run-bars heart-bars' },
+      legs.map((b, i) =>
+        el('li', { class: i === worst ? 'heart-worst' : '' }, [
+          el('span', { class: 'run-hits', text: b.shortLabel }),
+          el('span', { class: 'run-track' }, [el('span', { class: 'run-bar', style: `width:${scale > 0 ? (a.lone[i] / scale) * 100 : 0}%` })]),
+          el('span', { class: 'run-share' }, [el('strong', { text: fmtChance(a.lone[i]) })])
+        ])
+      )
+    ),
+    el('p', { class: 'note', text: t('heartWorst', { leg: legs[worst].shortLabel, p: fmtPctShort(1 - legs[worst].fairChance) }) })
+  ]);
 }
 
 function renderParlay() {
@@ -1475,7 +1507,7 @@ function renderParlay() {
 
   let results = [];
   if (sizes.length && !errors.includes('stakeUnit')) {
-    const a = analyzeSlip({ legs: slip, sizes, stake, weeks: state.slipWeeks });
+    const a = analyzeSlip({ legs: slip, sizes, stake });
     // Range if every fair chance and estimated price is off by its margin, all
     // the same way (the realistic worst and best case).
     const shifted = dir =>
@@ -1923,7 +1955,7 @@ function renderLapse(bands, weeks) {
   const t = state.t;
   const box = $('sim-lapse');
   if (!box) return;
-  clearInterval(box._timer);
+  clearTimeout(box._timer);
   box._observer?.disconnect();
   const startWeek = weekOfYear(new Date());
   const events = lapseEvents(bands, weeks, startWeek);
@@ -1991,8 +2023,9 @@ function renderLapse(bands, weeks) {
     slider.value = String(w);
     // The latest three things that have happened, newest first.
     const past = events.filter(e => e.w <= w);
+    let fresh = false;
     if (past.length !== shownEvents) {
-      const fresh = past.length > shownEvents && shownEvents >= 0;
+      fresh = past.length > shownEvents && shownEvents >= 0;
       shownEvents = past.length;
       const recent = past.slice(-3).reverse();
       feed.replaceChildren(
@@ -2001,9 +2034,10 @@ function renderLapse(bands, weeks) {
         )
       );
     }
+    return fresh;
   };
   const stop = () => {
-    clearInterval(box._timer);
+    clearTimeout(box._timer);
     box._timer = null;
     play.textContent = `▶ ${t('lapsePlay')}`;
   };
@@ -2011,11 +2045,16 @@ function renderLapse(bands, weeks) {
     let w = Number(slider.value) >= weeks ? 1 : Number(slider.value);
     set(w);
     play.textContent = `⏸ ${t('lapsePause')}`;
-    box._timer = setInterval(() => {
-      if (!box.contains(play)) return clearInterval(box._timer);
-      set(++w);
+    // About 20 seconds for a year (short periods no faster than 0.6 s a
+    // week), holding 2.5 s on each new event so it can be read.
+    const step = Math.max(80, Math.min(600, Math.round(20_000 / weeks)));
+    const tick = () => {
+      if (!box.contains(play)) return;
+      const fresh = set(++w);
       if (w >= weeks) stop();
-    }, Math.max(30, Math.min(250, Math.round(8000 / weeks))));
+      else box._timer = setTimeout(tick, fresh ? 2500 : step);
+    };
+    box._timer = setTimeout(tick, step);
   };
   play.addEventListener('click', () => (box._timer ? stop() : start()));
   slider.addEventListener('input', () => (stop(), set(Number(slider.value))));

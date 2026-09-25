@@ -841,3 +841,22 @@ details.market[open] > summary { margin-bottom: 6px; }
 .period-presets button { font: inherit; font-size: 0.76rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; }
 .period-presets button[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .range-row { display: flex; align-items: center; gap: 8px; margin: -2px 0 12px; font-size: 0.72rem; color: var(--text-muted); }
+
+/* ---- Bet slip: 100 buyers, one pick short ---- */
+.buyers { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; margin-bottom: 10px; }
+.buyer { width: 100%; height: auto; aspect-ratio: 24 / 30; }
+.buyer path, .buyer circle { fill: var(--surface-sunken); }
+.buyer.won path, .buyer.won circle { fill: var(--good); }
+.buyer.some path, .buyer.some circle { fill: var(--gold); }
+.buyer.lost path, .buyer.lost circle { fill: color-mix(in srgb, var(--text-muted) 45%, transparent); }
+.buyer-key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+.buyer-key.won { background: var(--good); }
+.buyer-key.some { background: var(--gold); }
+.buyer-key.lost { background: color-mix(in srgb, var(--text-muted) 45%, transparent); }
+@media (max-width: 480px) { .buyers { grid-template-columns: repeat(10, 1fr); gap: 4px; max-width: 280px; } }
+.heart-big { font-size: 1rem; margin-bottom: 10px; }
+.heart-big strong { color: var(--bad-strong); font-size: 1.2rem; }
+.heart-bars li { grid-template-columns: minmax(0, 8em) 1fr 4.5em; }
+.heart-bars .run-hits { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.heart-bars .run-bar { background: linear-gradient(90deg, #f87171, var(--bad-strong)); }
+.heart-bars li.heart-worst .run-hits { color: var(--bad-strong); font-weight: 700; }

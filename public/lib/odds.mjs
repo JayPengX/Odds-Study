@@ -1179,10 +1179,8 @@ export function slipPayoutTable({ legs, sizes, stake }) {
 // - where each NT$100 goes: the lottery's cut, the tax, what comes back;
 // - each leg's own value and what the ticket would return without it;
 // - how rare the top payout is, and which results still make a profit;
-// - buying the same ticket every week for `weeks` weeks: the chance of being
-//   ahead and the usual range (a fixed-seed draw of `seasons` years, so it
-//   reads the same every time).
-export function analyzeSlip({ legs, sizes, stake, weeks = 52, seasons = 20_000, seed = 1 }) {
+// - the heartbreak: the chance of missing by exactly one pick, and by which.
+export function analyzeSlip({ legs, sizes, stake }) {
   const n = legs.length;
   const { gross, net } = slipPayoutTable({ legs, sizes, stake });
   const cost = sizes.reduce((s, k) => s + choose(n, k), 0) * stake;
@@ -1230,35 +1228,9 @@ export function analyzeSlip({ legs, sizes, stake, weeks = 52, seasons = 20_000, 
   });
   const weakest = legInfo.reduce((w, l, i) => (l.value < legInfo[w].value ? i : w), 0);
 
-  // Same ticket every week: draw each week's result from the exact chances.
-  const cumulative = new Float64Array(1 << n);
-  let run = 0;
-  for (let won = 0; won < 1 << n; won++) cumulative[won] = run += chance[won];
-  const random = seededRandom(seed);
-  const finals = new Float64Array(seasons);
-  let ahead = 0;
-  let neverPaid = 0;
-  for (let s = 0; s < seasons; s++) {
-    let total = 0;
-    let anyPaid = false;
-    for (let w = 0; w < weeks; w++) {
-      const u = random() * run;
-      let lo = 0;
-      let hi = all;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (cumulative[mid] < u) lo = mid + 1;
-        else hi = mid;
-      }
-      total += net[lo] - cost;
-      if (gross[lo] > 0) anyPaid = true;
-    }
-    finals[s] = total;
-    if (total > 0) ahead++;
-    if (!anyPaid) neverPaid++;
-  }
-  finals.sort();
-  const at = q => finals[Math.min(seasons - 1, Math.floor(q * seasons))];
+  // One game short: exactly one pick lost, and which pick it was.
+  const lone = legs.map((_, i) => chance[all & ~(1 << i)]);
+  const nearMiss = n > 1 ? lone.reduce((x, y) => x + y, 0) : 0;
   return {
     cost,
     combos: cost / stake,
@@ -1277,7 +1249,9 @@ export function analyzeSlip({ legs, sizes, stake, weeks = 52, seasons = 20_000, 
     byHits,
     legs: legInfo,
     weakest,
-    year: { weeks, ahead: ahead / seasons, neverPaid: neverPaid / seasons, q10: at(0.1), q50: at(0.5), q90: at(0.9), expected: weeks * (expectedNet - cost) }
+    // Chance each pick is the only one that lost, and of any one-short result.
+    lone,
+    nearMiss
   };
 }
 
