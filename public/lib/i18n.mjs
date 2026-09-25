@@ -9,6 +9,62 @@ const STRINGS = {
     updated: '資料時間',
     sources: '公平機率來源：DraftKings（經 ESPN）、Polymarket',
     refresh: '重新整理',
+    guideMathTitle: '賠率的數學',
+    guide: [
+      ['下注習慣（模擬裡的 6 種人）', [
+        ['小試身手', '每週平均買約 1 張（有些週不買），每張串 2 場，大多下 NT$100–300，偶爾（5%）一張 NT$1,000–3,000。隨便挑場次。最像「偶爾玩玩」的人。'],
+        ['重注球迷', '每週平均約 3 張，只押熱門（勝率 55% 以上的選項），每張 NT$200–500，10% 的彩券上千。熱門比較常中，但賠率低，抽成一樣吃。'],
+        ['爆冷獵人', '每週約 2 張，只押冷門（勝率 40% 以下），串 2–3 場。中的時候賠很多，但大多數週都在輸。'],
+        ['串關夢想家', '每週約 2 張，每張串 4–6 場，NT$100–200。每多串一場就多被抽一次，所以平均拿回最少，但最容易出現「一張中大獎」的故事。'],
+        ['追輸族', '每週約 2 張，從 NT$200 開始；這週輸了，下週金額加倍（最多 NT$3,000），贏了就回到 NT$200。加碼不會改變抽成，只會讓下注總額和虧損變大。'],
+        ['精算派', '每週約 1 張，只挑每 NT$100 拿回最多的那四分之一，NT$200–500。已經是最聰明的玩法，還是在虧。']
+      ]],
+      ['球迷類型（模擬裡的 5 種人）', [
+        ['MLB 迷', '只賭 MLB。球季（3 月底到 10 月）每週有約 90 場可選；季外 7 成的人休息，3 成改賭當週有的其他運動。'],
+        ['英超迷', '只賭英超。8 月到隔年 5 月，每輪 10 場，國際賽週停賽、聖誕節前後特別多；季外同樣 3 成改賭別的。三種結果（主勝、和局、客勝）讓單場更難猜。'],
+        ['NBA 迷', '只賭 NBA。10 月底到 4 月中每週約 47 場，季後賽到 6 月。運彩有開 NBA 單場，但本站抓不到 NBA 賠率，所以用「一般 NBA 比賽」的機率分布，抽成照一般水準，這部分是假設。'],
+        ['F1 迷', '只賭 F1 分站冠軍，一年 24 站，一張押一位車手。F1 的抽成遠高於球類（加起來約 167%），所以虧最多。'],
+        ['什麼都賭', '每週有什麼賭什麼，挑到哪個運動的機會跟那週的比賽數成正比（MLB 季中最多）。']
+      ]],
+      ['投注種類', [
+        ['不讓分', '猜誰贏。MLB、NBA 沒有和局（延長賽分勝負）；足球有主勝、和局、客勝三種。'],
+        ['大小分', '猜兩隊總分比某條線多（大）或少（小）。運彩每場開三條線：最接近五五波的那條，加上下各一分。'],
+        ['讓分', '熱門隊先讓對方幾分再比。MLB 開 1.5 分和同一邊的 2.5 分。運彩的價格把機率往五五波拉，所以比較可能過盤的那一邊通常比較划算。'],
+        ['單隊大小', '只看其中一隊的得分。用每隊得分的模型，從 DraftKings 的勝率和總分推算。'],
+        ['得分最高單局', '猜哪一局得分最多（不含延長賽），或是一樣多。運彩幾乎每場都開同一張表，抽成約 48%，是抽最多的玩法之一。'],
+        ['冠軍', '猜整季冠軍，要等賽季結束才開獎。抽成約 40–50%。'],
+        ['F1 分站冠軍', '猜哪位車手贏這一站。熱門車手照曲線估，機率很小的車手運彩直接開 65、325 或 500。']
+      ]],
+      ['模擬怎麼做', [
+        ['10 萬人', '6 種習慣 × 5 種球迷，每組約 3,334 人，共 100,020 人。每個人有自己的編號和亂數種子，同樣的編號每次都會重演一模一樣的人生。'],
+        ['未來的比賽', '今天看得到的比賽只是樣本：每週照各聯盟的真實行事曆決定有幾場、哪些運動在打，從樣本裡抽出這週的比賽（今天沒有的運動用一般比賽的機率分布）。'],
+        ['準不準', '同樣設定換不同亂數種子，頁面上的數字幾乎不動（例如「還在贏的比例」只差約 0.2 個百分點）。每個人都完整模擬到每一張彩券；為了省電不存每個人每週的數字，但測試證明結果和全部存下來算一模一樣。'],
+        ['投注單的「跑 10 萬次」', '把同一張單的結果模擬 10 萬次：每場照公平機率決定輸贏，每個版本的獎金都精確計算（含稅），再和精確機率並列。']
+      ]],
+      ['運彩規則與稅', [
+        ['投注單', '每張最多 12 場，同一場只能選一個結果；每組合 NT$10 為單位；每張 NT$100–100,000；每張彩金上限 NT$2,000 萬。每場有「過關數」限制，大部分 MLB 要串 2 場以上。'],
+        ['稅', '單注（每個組合）獎金超過 NT$5,000，預扣 20% 所得稅和 0.4% 印花稅，共 20.4%；NT$5,000 以下不扣。'],
+        ['年齡與合法性', '購買運彩須年滿 18 歲；在海外網站（包含 Polymarket）下注在台灣屬於違法賭博。本站只是教學工具。']
+      ]],
+      ['資料與誤差', [
+        ['資料來源', '公平機率來自 DraftKings（經 ESPN）和 Polymarket，各自先去掉自己的抽成再平均；透過共用代理伺服器即時抓取。'],
+        ['校準', '估計賠率的公式用 2026/9/25 運彩的真實價格比對過：MLB 單場 14 場、大小分 12 場、讓分和單隊大小 10 場、冠軍盤和 F1 各一次。'],
+        ['± 誤差', '公平機率的 ± 是兩個來源差距的一半；估計賠率的 ± 是和真實價格比對的平均誤差；模擬的 ± 是抽樣誤差（95%）。']
+      ]]
+    ],
+    fanDesc_all: '每週有什麼就賭什麼，照比賽多寡',
+    fanDesc_f1: '只賭 F1 分站冠軍，一次押一位車手',
+    fanDesc_nba: '只賭 NBA，季外 3 成會改賭別的',
+    fanDesc_epl: '只賭英超，季外 3 成會改賭別的',
+    fanDesc_mlb: '只賭 MLB，季外 3 成會改賭別的',
+    fan_all: '什麼都賭',
+    fan_f1: 'F1 迷',
+    fan_nba: 'NBA 迷',
+    fan_epl: '英超迷',
+    fan_mlb: 'MLB 迷',
+    fanMeta: '{ahead} 最後還在贏 · 平均買 {tickets} 張 · 下注 {staked} · 結果 {final}',
+    fansIntro: '每種球迷各約 {n} 人（6 種習慣都有）、玩{period}，照各運動的真實賽季。數字是每 NT$100 平均拿回多少（已扣稅）。',
+    fansTitle: '哪種球迷虧最多？',
     marginsHelp: '都是誤差範圍。公平機率的 ± 是 DraftKings 和 Polymarket 差距的一半（* 表示只有一個來源，用同聯盟的典型差距）；估計賠率的 ± 是和運彩真實價格比對的平均誤差（? 表示還沒驗證過，只是猜測）；平均拿回的 ± 是兩者合計。',
     marginsHelpTitle: '± 是什麼？',
     backShort: '每百拿回',
@@ -64,7 +120,7 @@ const STRINGS = {
     slipRangeNote: '誤差範圍：假設每場的公平機率和估計賠率都往同一個方向偏到誤差邊緣時的結果。填入真實賠率後，賠率的誤差就不算了。',
     rangeLabel: '誤差範圍 {range}',
     oneSource: '單一來源',
-    tab_math: '數學說明',
+    tab_math: '說明',
     tab_sim: '模擬',
     tab_slip: '投注單',
     tab_f1: 'F1',
@@ -160,7 +216,7 @@ const STRINGS = {
     slipMode_single: '一關',
     slipMode: '玩法',
     simTitle: '模擬：一群人真的去買運彩，會怎樣？',
-    simIntro: '10 萬個人、6 種下注習慣：有人每週買一張、有人一次串 6 場、有人輸了就加碼。大部分彩券下幾百元，偶爾一張 NT$1,000–3,000，最多 NT$3,000。每週買幾張、下多少、串哪幾場都不一樣，選的是這裡的真實賽事；中獎超過 NT$5,000 的彩券會扣 20.4% 的稅。人數夠多，結果穩定，每次打開都一樣。',
+    simIntro: '10 萬個人、6 種下注習慣 × 5 種球迷：MLB 迷、英超迷、NBA 迷、F1 迷，和什麼都賭的人。時間從這週開始往後走，每週有哪些比賽、有幾場，照各聯盟真實的賽季行事曆（MLB 3–10 月、英超 8–5 月、NBA 10–6 月、F1 24 站），不只是今天的比賽。大部分彩券下幾百元，偶爾一張 NT$1,000–3,000；中獎超過 NT$5,000 扣 20.4% 的稅。人數夠多，結果穩定，每次打開都一樣。',
     simPeriod: '玩多久',
     period_4: '1 個月',
     period_13: '3 個月',
@@ -232,7 +288,7 @@ const STRINGS = {
     f1Intro: 'F1 的抽成遠比 MLB 高（所有車手的隱含機率加起來約 167%，MLB 約 115%），而且越冷門的車手抽越多。估計公式用一場比賽的 9 個價格驗證，平均誤差約 8%；運彩對個別車手的看法有時和 Polymarket 不同（例如把勒克萊爾開得比漢米爾頓熱門），這種差異公式估不出來，看到真實賠率請填進來。',
     f1None: '目前沒有即將開始的 F1 分站冠軍市場。',
     colDriver: '車手',
-    mathTitle: '數學說明',
+    mathTitle: '說明',
     mathSteps: [
       ['1. 賠率 → 隱含機率', '十進位賠率是「每下 1 元，贏了拿回多少（含本金）」。1.80 代表下 NT$100 贏了拿回 NT$180。它背後假設的機率是 1 ÷ 賠率 = 55.6%。'],
       ['2. 為什麼加起來超過 100%', '同一場的另一邊 1.70 → 58.8%。兩邊加起來 114.4%，但真實機率一定是 100%。多出來的 14.4% 就是莊家的抽成。'],
@@ -257,6 +313,62 @@ const STRINGS = {
     updated: 'Data as of',
     sources: 'Fair chances from DraftKings (via ESPN) and Polymarket',
     refresh: 'Refresh',
+    guideMathTitle: 'The odds math',
+    guide: [
+      ['Betting habits (the 6 kinds of people in the simulator)', [
+        ['Casual', 'About 1 ticket a week (some weeks none), 2 games each, mostly NT$100–300, now and then (5%) a NT$1,000–3,000 ticket. Picks at random. The "just for fun" player.'],
+        ['Big fan', 'About 3 tickets a week, favorites only (picks that win 55%+), NT$200–500, 10% of tickets over NT$1,000. Favorites win more often but pay little, and the cut is the same.'],
+        ['Upset hunter', 'About 2 tickets a week, underdogs only (40% or less), 2–3 games. Big when it hits, but most weeks lose.'],
+        ['Parlay dreamer', 'About 2 tickets a week, 4–6 games each, NT$100–200. Every extra game takes the cut again, so the lowest average back, but the most "one huge ticket" stories.'],
+        ['Chaser', 'About 2 tickets a week from NT$200; after a losing week the stake doubles (up to NT$3,000), after a winning week it drops back. Doubling up never changes the cut; it just makes the total staked, and lost, bigger.'],
+        ['Careful', 'About 1 ticket a week, only the quarter of bets that return the most per NT$100, NT$200–500. The smartest way to play here, and it still loses.']
+      ]],
+      ['Kinds of fan (the 5 kinds in the simulator)', [
+        ['MLB fan', 'MLB only. In season (late March to October) about 90 games a week; in the off-season 70% take the week off and 30% bet on whatever else is on.'],
+        ['Premier League fan', 'Premier League only, August to May, 10 games a round, off on international breaks and busier over Christmas; 30% switch in the off-season too. Three results (home, draw, away) make each game harder to call.'],
+        ['NBA fan', 'NBA only, about 47 games a week late October to mid April, playoffs to June. The lottery does sell NBA games, but this page doesn\'t fetch NBA odds, so a typical NBA spread of chances at the usual cut stands in. That part is an assumption.'],
+        ['F1 fan', 'F1 race winners only, 24 races a year, one driver per ticket. F1\'s cut is far bigger (about 167% in total), so they lose the most.'],
+        ['Bets on everything', 'Whatever is on that week, each sport as likely as its share of that week\'s games (MLB dominates mid-season).']
+      ]],
+      ['Kinds of bet', [
+        ['Win (moneyline)', 'Who wins. No draws in MLB or the NBA (extra time settles it); soccer has home, draw and away.'],
+        ['Total', 'Whether both teams together score more (over) or fewer (under) than a line. The lottery posts three lines per game: the one closest to 50/50 plus one either side.'],
+        ['Run line', 'The favorite gives the other side a head start. MLB posts 1.5 and 2.5 on the same side. The lottery prices these as if closer to 50/50 than they are, so the side likelier to cover is usually the better deal.'],
+        ['Team total', 'One team\'s runs only, from a per-team runs model fitted to DraftKings\' win chance and total.'],
+        ['Highest-scoring inning', 'Which inning scores the most (no extras), or a tie. Almost the same table every game, with a ~48% cut: one of the worst bets.'],
+        ['Championships', 'Who wins the season; paid only when it ends. The cut is about 40–50%.'],
+        ['F1 race winner', 'Which driver wins the race. Front-runners follow a curve; long shots get the lottery\'s fixed 65, 325 or 500.']
+      ]],
+      ['How the simulator works', [
+        ['100,000 people', '6 habits × 5 kinds of fan, about 3,334 in each group, 100,020 in all. Each person has a number and a random seed, so the same number always replays the exact same year.'],
+        ['Future games', 'Today\'s board is only a sample: each week follows each league\'s real calendar for how many games there are and which sports are on, drawn from the sample (a typical game for sports with nothing on today).'],
+        ['How accurate', 'Change the random seed and the numbers barely move (the share still ahead shifts about 0.2 points). Everyone is simulated ticket by ticket; to save power, week-by-week numbers aren\'t stored for everyone, but tests prove the results are exactly the same as storing them all.'],
+        ['Run it 100,000 times', 'The bet slip plays one ticket out 100,000 times: each game won or lost at its fair chance, each version\'s payout exact (tax included), shown next to the exact chances.']
+      ]],
+      ['Lottery rules and tax', [
+        ['Tickets', 'Up to 12 games, one pick per game; NT$10 units per combination; NT$100–100,000 per ticket; payouts capped at NT$20 million. Each game has a minimum number of legs; most MLB games need 2+.'],
+        ['Tax', 'Any single combination paying over NT$5,000 has 20% income tax and 0.4% stamp duty withheld, 20.4% in all; NT$5,000 or less is untaxed.'],
+        ['Age and the law', 'You must be 18+ to buy lottery tickets; betting on overseas sites (Polymarket included) is illegal gambling in Taiwan. This page is a teaching tool.']
+      ]],
+      ['Data and margins', [
+        ['Sources', 'Fair chances from DraftKings (via ESPN) and Polymarket, each with its own cut removed, then averaged; fetched live through the shared proxy.'],
+        ['Calibration', 'The estimated-odds formulas were checked against real lottery prices from 2026-09-25: 14 MLB games for wins, 12 for totals, 10 for run lines and team totals, plus one round of championship and F1 prices.'],
+        ['± margins', 'For fair chances, half the gap between the two sources; for estimated odds, the average error against real prices; for the simulator, sampling error (95%).']
+      ]]
+    ],
+    fanDesc_all: 'whatever is on that week, in proportion to the games',
+    fanDesc_f1: 'F1 race winners only, one driver per ticket',
+    fanDesc_nba: 'NBA only; in the off-season 30% bet on something else',
+    fanDesc_epl: 'Premier League only; in the off-season 30% bet on something else',
+    fanDesc_mlb: 'MLB only; in the off-season 30% bet on something else',
+    fan_all: 'Bets on everything',
+    fan_f1: 'F1 fan',
+    fan_nba: 'NBA fan',
+    fan_epl: 'Premier League fan',
+    fan_mlb: 'MLB fan',
+    fanMeta: '{ahead} still ahead · {tickets} tickets · staked {staked} · result {final}',
+    fansIntro: 'About {n} of each kind of fan (all 6 habits), playing for {period} on each sport\'s real calendar. The number is the average back per NT$100, after tax.',
+    fansTitle: 'Which fans lose the most?',
     marginsHelp: 'They\'re margins of error. For the fair chance, half the gap between DraftKings and Polymarket (* means one source only, so the league\'s typical gap); for estimated odds, the average error against real lottery prices (? means not checked yet, just a guess); for the amount back, both combined.',
     marginsHelpTitle: 'What do the ± numbers mean?',
     backShort: 'back/100',
@@ -312,7 +424,7 @@ const STRINGS = {
     slipRangeNote: 'Range: the result if every fair chance and estimated price were off by its full margin, all in the same direction. Once you type in real odds, their margin drops out.',
     rangeLabel: 'range {range}',
     oneSource: 'one source',
-    tab_math: 'The math',
+    tab_math: 'Guide',
     tab_sim: 'Simulator',
     tab_slip: 'Bet slip',
     tab_f1: 'F1',
@@ -408,7 +520,7 @@ const STRINGS = {
     slipMode_single: 'Singles (一關)',
     slipMode: 'Mode',
     simTitle: 'Simulation: what happens when real people play the lottery?',
-    simIntro: '100,000 people with 6 betting habits: one buys a ticket a week, one parlays 6 games at once, one doubles up after losing. Most tickets are a few hundred NT$, now and then one is NT$1,000–3,000, never more than NT$3,000. How many tickets, how much, and which games change every week, drawn from the real games here; any ticket paying over NT$5,000 loses 20.4% to tax. The crowd is big enough that the result is stable and the same every time you open the page.',
+    simIntro: '100,000 people: 6 betting habits × 5 kinds of fan (MLB, Premier League, NBA, F1, and people who bet on everything). Time runs forward from this week, and each week has the games each league really plays then (MLB March–October, Premier League August–May, NBA October–June, 24 F1 races), not just today\'s board. Most tickets are a few hundred NT$, now and then NT$1,000–3,000; any ticket paying over NT$5,000 loses 20.4% to tax. The crowd is big enough that the result is stable and the same every time.',
     simPeriod: 'How long',
     period_4: '1 month',
     period_13: '3 months',
@@ -480,7 +592,7 @@ const STRINGS = {
     f1Intro: "The lottery's F1 cut is far bigger than MLB's (all drivers' implied chances add up to about 167%, vs about 115% for MLB), and bigger still on longshots. The formula was checked on 9 prices from one race, with an average error of about 8%. The lottery sometimes rates a driver differently from Polymarket (it made Leclerc shorter than Hamilton, for example); no formula can predict that, so type in the real odds when you see them.",
     f1None: 'No upcoming F1 race-winner market right now.',
     colDriver: 'Driver',
-    mathTitle: 'The math',
+    mathTitle: 'Guide',
     mathSteps: [
       ['1. Odds → implied chance', 'Decimal odds are what you get back per NT$1, stake included. 1.80 means NT$100 returns NT$180 on a win. The chance it assumes is 1 ÷ odds = 55.6%.'],
       ['2. Why it adds up to more than 100%', "The other side at 1.70 → 58.8%. Together that's 114.4%, but real chances must total 100%. The extra 14.4% is the house's cut."],

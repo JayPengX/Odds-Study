@@ -385,3 +385,33 @@ test('100,000 versions of a ticket match its exact chances', async () => {
   for (const row of run.byHits) assert.ok(Math.abs(row.simulated - row.exact) < 0.006, `${row.hits}`);
   close(run.averageNet, exact.expectedNet, exact.expectedNet * 0.02);
 });
+
+test('the sport calendar has a realistic number of games per year', async () => {
+  const { gamesInWeek, SPORTS } = await import('../public/lib/odds.mjs');
+  const perYear = Object.fromEntries(SPORTS.map(s => [s, Array.from({ length: 52 }, (_, w) => gamesInWeek(s, w)).reduce((a, b) => a + b, 0)]));
+  // MLB ~2,430 + postseason; Premier League 380; NBA 1,230 + playoffs; 24 F1 races.
+  assert.ok(perYear.mlb > 2400 && perYear.mlb < 2650, `${perYear.mlb}`);
+  assert.ok(perYear.epl > 360 && perYear.epl < 410, `${perYear.epl}`);
+  assert.ok(perYear.nba > 1200 && perYear.nba < 1350, `${perYear.nba}`);
+  assert.equal(perYear.f1, 24);
+  // Seasons: no MLB in January, no Premier League or NBA in July.
+  assert.equal(gamesInWeek('mlb', 2), 0);
+  assert.equal(gamesInWeek('epl', 28), 0);
+  assert.equal(gamesInWeek('nba', 28), 0);
+});
+
+test('the multi-sport crowd splits by fan type and replays players exactly', async () => {
+  const { sportTemplate, FANS, SPORTS } = await import('../public/lib/odds.mjs');
+  const sportPools = Object.fromEntries(SPORTS.map(s => [s, habitPools(sportTemplate(s))]));
+  const stats = simulateCrowdStats({ sportPools, startWeek: 38, weeks: 26, perGroup: 60, seed: 3 });
+  assert.equal(stats.players, 60 * HABITS.length * FANS.length);
+  assert.equal(stats.fanSummaries.length, FANS.length);
+  // F1 fans face the biggest cut.
+  const back = key => stats.fanSummaries.find(f => f.fan.key === key).back;
+  assert.ok(back('f1') < back('mlb'), `${back('f1')} vs ${back('mlb')}`);
+  // Replaying a record holder gives the same person.
+  const again = simulateCrowdStats({ sportPools, startWeek: 38, weeks: 26, perGroup: 60, seed: 3 });
+  assert.equal(again.notable.best.serial, stats.notable.best.serial);
+  assert.equal(again.notable.best.final, stats.notable.best.final);
+  assert.deepEqual([...again.characters.median.path], [...stats.characters.median.path]);
+});

@@ -1,5 +1,9 @@
 import {
+  FANS,
   HABITS,
+  SPORTS,
+  sportTemplate,
+  weekOfYear,
   K_DRAFTKINGS,
   blendOutcomes,
   FUTURES_OVERROUND,
@@ -34,7 +38,9 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 const STAKE = 100;
 // Simulated players per habit. Big enough that the results barely move
 // between runs, so one fixed-seed run is shown.
-const PER_HABIT = Math.ceil(100_000 / HABITS.length);
+// Simulated players per habit x fan type group.
+const PER_GROUP = Math.ceil(100_000 / (HABITS.length * FANS.length));
+const PER_HABIT = PER_GROUP * FANS.length;
 const SIM_PLAYERS = HABITS.length * PER_HABIT;
 const SIM_SEED = 1;
 // Shown as a round "100,000".
@@ -465,8 +471,16 @@ function renderStatic() {
   ])
     $(id).textContent = t(key);
   for (const node of document.querySelectorAll('[data-t]')) node.textContent = t(node.dataset.t);
+  // The guide: the odds math, then every habit, kind of fan, kind of bet, how
+  // the simulators work, the rules and the data, each group folded but the first.
+  const groups = [[t('guideMathTitle'), t('mathSteps')], ...t('guide')];
   $('math-body').replaceChildren(
-    ...t('mathSteps').map(([h, p]) => el('div', { class: 'math-step' }, [el('h3', { text: h }), el('p', { text: p })]))
+    ...groups.map(([title, items], i) =>
+      el('details', { class: 'guide-group', ...(i === 0 ? { open: '' } : {}) }, [
+        el('summary', { text: title }),
+        ...items.map(([h, p]) => el('div', { class: 'math-step' }, [el('h3', { text: h }), el('p', { text: p })]))
+      ])
+    )
   );
 }
 
@@ -972,15 +986,22 @@ function renderParlay() {
 
 // ---- Simulator ----------------------------------------------------------------
 
-// Every bet on the board (all days) is a stand-in for the games of a typical
-// week. F1 joins only when it's the chosen sport: a race isn't parlayed with
-// ball games.
-function simPool() {
-  const onlyF1 = state.sport === 'f1';
-  return state.bets
-    // One total line per game (the main one), like the lottery's own balance of bets.
-    .filter(b => inSport(b.sport) && (onlyF1 || b.kind !== 'f1') && (b.kind !== 'total' || b.mainLine) && b.kind !== 'runline')
-    .map(b => ({ gameId: b.gameId, fairChance: b.fairChance, odds: effectiveOdds(b) }));
+// Bets per sport that stand in for that sport's games in any week of the
+// year: the real ones on the board (win lines and each game's main total),
+// or a typical week when a sport has none (always for the NBA). Every sport
+// is simulated, whatever the sport filter shows.
+function simSportBets() {
+  const real = sport =>
+    state.bets
+      .filter(b => b.sport === sport && (b.kind === 'ml' || b.kind === 'f1' || (b.kind === 'total' && b.mainLine)))
+      .map(b => ({ gameId: b.gameId, fairChance: b.fairChance, odds: effectiveOdds(b) }));
+  return Object.fromEntries(
+    SPORTS.map(sport => {
+      const bets = sport === 'nba' ? [] : real(sport);
+      const games = new Set(bets.map(b => b.gameId)).size;
+      return [sport, games >= (sport === 'f1' ? 1 : 2) ? bets : sportTemplate(sport)];
+    })
+  );
 }
 
 function niceStep(range, target) {
@@ -1017,8 +1038,8 @@ const crowdCache = new Map();
 let crowdJob = null;
 let worker = null;
 
-function crowdKey(pool, weeks) {
-  return JSON.stringify([weeks, pool.map(b => [b.gameId, b.fairChance, b.odds])]);
+function crowdKey(sportBets, weeks) {
+  return JSON.stringify([weeks, sportBets]);
 }
 
 // Loading screen progress. At start-up it spans both stages, odds (first 35%)
@@ -1046,8 +1067,9 @@ function hideLoading() {
 
 // Runs (or reuses) the simulation for this pool and period. A new request
 // cancels a running one, so no power goes to a result nobody will see.
-function crowdStats(pool, weeks) {
-  const key = crowdKey(pool, weeks);
+function crowdStats(sportBets, weeks) {
+  const key = crowdKey(sportBets, weeks);
+  const startWeek = weekOfYear(new Date());
   if (crowdCache.has(key)) return Promise.resolve(crowdCache.get(key));
   if (crowdJob?.key === key) return crowdJob.promise;
   if (crowdJob) {
@@ -1080,13 +1102,14 @@ function crowdStats(pool, weeks) {
       worker = null;
       runHere();
     };
-    worker.postMessage({ id: key, pool, weeks, perHabit: PER_HABIT, seed: SIM_SEED });
+    worker.postMessage({ id: key, sportBets, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED });
   } catch {
     runHere();
   }
   // No worker (very old browser): run here after the loading screen paints.
   function runHere() {
-    setTimeout(() => done(simulateCrowdStats({ pools: habitPools(pool), weeks, perHabit: PER_HABIT, seed: SIM_SEED })), 30);
+    const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
+    setTimeout(() => done(simulateCrowdStats({ sportPools, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED })), 30);
   }
   return promise;
 }
@@ -1094,22 +1117,16 @@ function crowdStats(pool, weeks) {
 function renderSim() {
   const t = state.t;
   const chart = $('sim-chart');
-  const parts = ['sim-headline', 'sim-stats', 'sim-legend', 'sim-players', 'sim-habits', 'sim-facts', 'sim-table'];
-  const pool = simPool();
-  if (pool.length === 0) {
-    for (const id of parts) $(id).replaceChildren();
-    chart.replaceChildren(el('p', { class: 'muted', text: t('noBets') }));
-    return Promise.resolve();
-  }
+  const sportBets = simSportBets();
   const weeks = Number($('sim-weeks').value);
-  const cached = crowdCache.get(crowdKey(pool, weeks));
+  const cached = crowdCache.get(crowdKey(sportBets, weeks));
   if (cached) {
     drawSim(cached, weeks);
     return Promise.resolve();
   }
   // Only run when someone will see it: on the simulator tab (or at start-up).
   if (state.tab !== 'sim' && !state.booting) return Promise.resolve();
-  return crowdStats(pool, weeks).then(
+  return crowdStats(sportBets, weeks).then(
     stats => {
       if (Number($('sim-weeks').value) === weeks) drawSim(stats, weeks);
     },
@@ -1138,6 +1155,7 @@ function drawSim(stats, weeks) {
   drawSimChart($('sim-chart'), bands, characters, weeks);
   renderPlayers(characters);
   renderHabits(summaries, period);
+  renderFans(stats.fanSummaries, period);
   renderFacts(totals, characters, summaries, period);
   renderStories(stats, period);
   renderSimTable(bands, characters, weeks);
@@ -1176,7 +1194,11 @@ function renderPlayers(characters) {
       else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
       const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
       return el('article', { class: 'player', style: `--player:${color}` }, [
-        el('p', { class: 'player-name' }, [document.createTextNode(t(name)), el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })]),
+        el('p', { class: 'player-name' }, [
+          document.createTextNode(t(name)),
+          p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null,
+          el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })
+        ]),
         el('p', { class: 'player-rank', text: t(rank) }),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
         el('p', { class: 'player-tale', text: tale }),
@@ -1218,6 +1240,27 @@ function renderHabits(summaries, period) {
   );
 }
 
+// The same crowd by what they bet on: one sport all year, or everything.
+function renderFans(fans, period) {
+  const t = state.t;
+  $('fans-intro').textContent = t('fansIntro', { n: fmtCount(Math.round(fans[0].players / 100) * 100), period });
+  const sorted = [...fans].sort((a, b) => b.back - a.back);
+  const scaleMax = Math.max(100, sorted[0].back) * 1.04;
+  $('sim-fans').replaceChildren(
+    ...sorted.map(f =>
+      el('li', { class: 'ranking-item habit-item' }, [
+        el('span', { class: 'rank-label' }, [el('strong', { text: t(`fan_${f.fan.key}`) }), el('small', { text: ` ${t(`fanDesc_${f.fan.key}`)}` })]),
+        el('span', { class: `rank-value ${backClass(f.back)}` }, [document.createTextNode(fmtMoney(f.back, { sign: false })), marginEl(`±${f.backMargin.toFixed(1)}`)]),
+        el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
+          el('div', { class: 'bar', style: `width:${(f.back / scaleMax) * 100}%` }),
+          el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
+        ]),
+        el('span', { class: 'habit-meta', text: t('fanMeta', { ahead: `${fmtShare(f.aheadShare)} ±${(f.aheadMargin * 100).toFixed(1)}`, tickets: fmtCount(f.avgTickets), staked: fmtMoney(f.avgStaked, { sign: false }), final: fmtMoney(f.avgFinal) }) })
+      ])
+    )
+  );
+}
+
 function renderFacts(totals, characters, summaries, period) {
   const t = state.t;
   const facts = [];
@@ -1242,7 +1285,7 @@ function renderStories(stats, period) {
   const t = state.t;
   const { notable, crowd } = stats;
   const money = v => fmtMoney(v, { sign: false });
-  const who = p => ({ serial: `#${fmtCount(p.serial)}`, habit: t(`habit_${p.habit.key}`) });
+  const who = p => ({ serial: `#${fmtCount(p.serial)}`, habit: p.fan ? `${t(`fan_${p.fan.key}`)}・${t(`habit_${p.habit.key}`)}` : t(`habit_${p.habit.key}`) });
   const stories = [];
   const add = (icon, titleKey, textKey, p, vars) => p && stories.push({ icon, title: t(titleKey), text: t(textKey, { ...who(p), period, ...vars }), serial: who(p).serial });
   const hours = v => (v / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: 0 });

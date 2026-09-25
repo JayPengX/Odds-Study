@@ -409,12 +409,25 @@ function compile(list) {
 // Games already on the ticket being built (at most 12 legs).
 const ticketGames = new Int32Array(16);
 
-// One player's `weeks` of betting with `habit`. Writes the running profit at
-// the end of each week into `path` (if given) and returns the player's story.
-function playSeason(habit, list, weeks, random, path) {
-  const c = compile(list);
+// What a player can bet on in a week: one or more compiled lists (one per
+// sport), picked in proportion to `weights` (the sport's games that week).
+// Game keys are made unique across sports.
+function picker(lists, weights = lists.map(() => 1)) {
+  const compiled = lists.map(compile);
+  const cum = new Float64Array(lists.length);
+  let sum = 0;
+  weights.forEach((w, i) => (cum[i] = sum += w));
+  for (let i = 0; i < cum.length; i++) cum[i] /= sum;
+  return { compiled, cum, games: compiled.reduce((n, c) => n + new Set(c.game).size, 0) };
+}
+
+// One player's `weeks` of betting with `habit`. `weekPicker(w)` is what the
+// player bets on in week w (null: nothing to bet on; then with chance
+// `switchRate` they bet on `fallback(w)` instead). Writes the running profit
+// at the end of each week into `path` (if given) and returns the story.
+function playSeason(habit, weekPicker, weeks, random, path, fallback = null, switchRate = 0, legsCap = null) {
   const noTicket = Math.exp(-habit.perWeek);
-  const [lo, hi] = habit.legs;
+  const [lo, hi] = legsCap ?? habit.legs;
   const legSpan = hi - lo + 1;
   const base = habit.stakes[0];
   let profit = 0;
@@ -434,18 +447,24 @@ function playSeason(habit, list, weeks, random, path) {
   let peakWeek = -1;
   let maxDrop = 0;
   for (let w = 0; w < weeks; w++) {
-    // Poisson number of tickets this week.
+    let pick = weekPicker(w);
+    if (!pick && fallback && random() < switchRate) pick = fallback(w);
+    // Poisson number of tickets this week (none when there's nothing to bet on).
     let count = 0;
-    for (let p = random(); p > noTicket; p *= random()) count++;
+    if (pick) for (let p = random(); p > noTicket; p *= random()) count++;
     let week = 0;
     for (let i = 0; i < count; i++) {
-      const want = lo + Math.floor(random() * legSpan);
+      const want = Math.min(lo + Math.floor(random() * legSpan), pick.games);
       let legs = 0;
       let won = true;
       let odds = 1;
       for (let tries = 0; legs < want && tries < want * 20; tries++) {
+        const r = random();
+        let s = 0;
+        while (s < pick.cum.length - 1 && r > pick.cum[s]) s++;
+        const c = pick.compiled[s];
         const j = Math.floor(random() * c.n);
-        const game = c.game[j];
+        const game = s * 65536 + c.game[j];
         let dup = false;
         for (let k = 0; k < legs; k++) if (ticketGames[k] === game) dup = true;
         if (dup) continue;
@@ -507,7 +526,8 @@ function playSeason(habit, list, weeks, random, path) {
 // One player's season with their full week-by-week path.
 export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
   const path = new Float64Array(weeks);
-  return { path, ...playSeason(habit, pools[habit.pick], weeks, random, path) };
+  const pick = picker([pools[habit.pick]]);
+  return { path, ...playSeason(habit, () => pick, weeks, random, path) };
 }
 
 // Each player gets their own random stream, so any one of them can be
@@ -524,18 +544,93 @@ function histogramShape(weeks) {
   return { bins, lo: -half, width: (2 * half) / bins };
 }
 
-// A crowd of `perHabit` players for every habit. Nothing per player is kept
-// but the final result: each week streams into a histogram (for the 10/25/50/
-// 75/90% bands) and each habit into running sums. The players at the top 10%,
-// middle and bottom 10% are replayed at the end for their full stories.
-export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onProgress }) {
-  const total = HABITS.length * perHabit;
+// ---- Multi-sport calendar ----------------------------------------------------
+
+export const SPORTS = ['mlb', 'epl', 'nba', 'f1'];
+// Who bets on what. A fan of one sport bets on it while it's in season; in
+// its off-season, OFFSEASON_SWITCH of them bet on whatever else is on that
+// week and the rest take the week off. F1 is one race at a time, so F1 fans'
+// tickets are single picks.
+export const FANS = [
+  { key: 'mlb', sports: ['mlb'] },
+  { key: 'epl', sports: ['epl'] },
+  { key: 'nba', sports: ['nba'] },
+  { key: 'f1', sports: ['f1'], legs: [1, 1] },
+  { key: 'all', sports: SPORTS }
+];
+export const OFFSEASON_SWITCH = 0.3;
+const F1_RACE_WEEKS = new Set([9, 11, 13, 15, 17, 19, 20, 22, 23, 25, 26, 27, 29, 30, 34, 35, 37, 38, 41, 42, 43, 45, 47, 48]);
+const EPL_BREAKS = new Set([12, 36, 41, 46]);
+
+// Games a sport has in a week of the year (0 = first week of January), from
+// its usual calendar: MLB ~2,430 regular-season games late March to September
+// plus the October postseason; the Premier League's 380 games August to May,
+// with international breaks and a busy festive period; the NBA's 1,230 games
+// late October to mid April plus the playoffs to June; 24 F1 races.
+export function gamesInWeek(sport, week) {
+  const w = ((week % 52) + 52) % 52;
+  if (sport === 'mlb') return w >= 12 && w <= 38 ? 93 : w >= 39 && w <= 42 ? 10 : 0;
+  if (sport === 'epl') {
+    if (!(w >= 32 || w <= 20) || EPL_BREAKS.has(w)) return 0;
+    return w === 51 || w === 0 ? 20 : 10;
+  }
+  if (sport === 'nba') return w >= 42 || w <= 14 ? 47 : w >= 15 && w <= 23 ? 9 : 0;
+  if (sport === 'f1') return F1_RACE_WEEKS.has(w) ? 1 : 0;
+  return 0;
+}
+
+// Week of the year (0-51) for a date.
+export function weekOfYear(date) {
+  const d = new Date(date);
+  return Math.min(51, Math.floor((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / (7 * 86_400_000)));
+}
+
+// The simulated groups: every habit x every fan type, each with what it can
+// bet on week by week. `sportPools` maps a sport to habitPools(...) of its
+// bets (a template for that sport's games); a missing sport is never on.
+function multiSportGroups(sportPools, startWeek, weeks) {
+  const cache = new Map();
+  const pickerFor = (sports, pick, w) => {
+    const live = sports.filter(sp => sportPools[sp] && gamesInWeek(sp, startWeek + w) > 0);
+    if (live.length === 0) return null;
+    const weights = live.map(sp => gamesInWeek(sp, startWeek + w));
+    const key = `${pick}|${live.join(',')}|${weights.join(',')}`;
+    if (!cache.has(key)) cache.set(key, picker(live.map(sp => sportPools[sp][pick]), weights));
+    return cache.get(key);
+  };
+  const groups = [];
+  for (const habit of HABITS)
+    for (const fan of FANS) {
+      const own = Array.from({ length: weeks }, (_, w) => pickerFor(fan.sports, habit.pick, w));
+      const other = Array.from({ length: weeks }, (_, w) => pickerFor(SPORTS, habit.pick, w));
+      groups.push({ habit, fan, weekPicker: w => own[w], fallback: fan.key === 'all' ? null : w => other[w], switchRate: OFFSEASON_SWITCH, legs: fan.legs ?? null });
+    }
+  return groups;
+}
+
+// A crowd of players in groups: with `sportPools`, every habit x fan type on
+// the multi-sport calendar starting at week `startWeek`; with `pools`, one
+// group per habit on the same bets every week. `perGroup` players each.
+// Nothing per player is kept but the final result: each week streams into a
+// histogram (for the 10/25/50/75/90% bands) and each group into running sums.
+// Record holders and the players at the top 10%, middle and bottom 10% are
+// replayed at the end for their full stories.
+export function simulateCrowdStats({ pools, sportPools, startWeek = 0, weeks, perHabit, perGroup, seed = 1, onProgress }) {
+  const groups = sportPools
+    ? multiSportGroups(sportPools, startWeek, weeks)
+    : HABITS.map(habit => {
+        const pick = picker([pools[habit.pick]]);
+        return { habit, fan: null, weekPicker: () => pick, fallback: null, switchRate: 0, legs: null };
+      });
+  const per = perGroup ?? perHabit ?? 500;
+  const total = groups.length * per;
+  const play = (g, random, path) => playSeason(g.habit, g.weekPicker, weeks, random, path, g.fallback, g.switchRate, g.legs);
   const { bins, lo, width } = histogramShape(weeks);
   const hist = new Uint32Array(weeks * bins);
   const aheadByWeek = new Uint32Array(weeks);
   const finals = new Float64Array(total);
   const path = new Float64Array(weeks);
-  const sums = HABITS.map(() => ({ staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 }));
+  const sums = groups.map(() => ({ n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 }));
   // Record holders (by player index) and crowd-wide totals for the fun facts.
   const records = { biggestWin: [-1, -Infinity], best: [-1, -Infinity], worst: [-1, Infinity], drought: [-1, -1], fall: [-1, -1] };
   const beat = (key, index, value, higher = true) => {
@@ -544,13 +639,12 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
   let winnings = 0;
   let losses = 0;
   let neverWon = 0;
-  for (let h = 0; h < HABITS.length; h++) {
-    const habit = HABITS[h];
-    const list = pools[habit.pick];
-    const sum = sums[h];
-    for (let i = 0; i < perHabit; i++) {
-      const index = h * perHabit + i;
-      const story = playSeason(habit, list, weeks, playerRandom(seed, index), path);
+  for (let g = 0; g < groups.length; g++) {
+    const group = groups[g];
+    const sum = sums[g];
+    for (let i = 0; i < per; i++) {
+      const index = g * per + i;
+      const story = play(group, playerRandom(seed, index), path);
       finals[index] = story.final;
       for (let w = 0; w < weeks; w++) {
         const v = path[w];
@@ -560,6 +654,7 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
         if (v > 0) aheadByWeek[w]++;
       }
       const returned = story.staked + story.final;
+      sum.n++;
       sum.staked += story.staked;
       sum.net += story.final;
       sum.tickets += story.tickets;
@@ -578,7 +673,7 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
       // Furthest ahead at some point, yet down at the end.
       if (story.final < 0) beat('fall', index, story.peak);
       if (story.everAhead) sum.everAhead++;
-      if (habit.chaseCap && story.maxStake >= habit.chaseCap) sum.capHits++;
+      if (group.habit.chaseCap && story.maxStake >= group.habit.chaseCap) sum.capHits++;
       if (onProgress && index % 2000 === 1999) onProgress((index + 1) / total);
     }
   }
@@ -600,16 +695,19 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
     q90: at(w, 0.9),
     ahead: aheadByWeek[w]
   }));
-  const summaries = HABITS.map((habit, h) => {
-    const s = sums[h];
-    const n = perHabit;
+  // Per habit and per fan type, merged over the other dimension.
+  const summarize = members => {
+    const s = members.reduce((a, m) => {
+      for (const k of Object.keys(a)) a[k] += m[k];
+      return a;
+    }, { n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, capHits: 0, rr: 0, rs: 0, ss: 0 });
+    const n = s.n;
     const back = s.staked > 0 ? (s.staked + s.net) / s.staked : 1;
     const aheadShare = s.ahead / n;
     // 95% sampling margins: a ratio estimate for the amount back, binomial for the share.
     const spread = Math.max(0, s.rr - 2 * back * s.rs + back * back * s.ss);
     const meanStaked = s.staked / n;
     return {
-      habit,
       back: back * 100,
       backMargin: n > 1 && meanStaked > 0 ? (1.96 * Math.sqrt(spread / (n * (n - 1))) * 100) / meanStaked : 0,
       aheadShare,
@@ -617,14 +715,18 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
       avgFinal: s.net / n,
       avgStaked: s.staked / n,
       avgTickets: s.tickets / n,
-      capShare: s.capHits / n
+      capShare: s.capHits / n,
+      players: n
     };
-  });
+  };
+  const summaries = HABITS.map(habit => ({ habit, ...summarize(sums.filter((_, g) => groups[g].habit === habit)) }));
+  const fanSummaries = sportPools ? FANS.map(fan => ({ fan, ...summarize(sums.filter((_, g) => groups[g].fan === fan)) })) : [];
   const order = Uint32Array.from({ length: total }, (_, i) => i).sort((a, b) => finals[a] - finals[b]);
   // Replays one player exactly; `serial` is their 1-based number in the crowd.
   const replayIndex = index => {
-    const habit = HABITS[Math.floor(index / perHabit)];
-    return { serial: index + 1, habit, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, index) }) };
+    const group = groups[Math.floor(index / per)];
+    const p = new Float64Array(weeks);
+    return { serial: index + 1, habit: group.habit, fan: group.fan, path: p, ...play(group, playerRandom(seed, index), p) };
   };
   const replay = q => replayIndex(order[Math.round((total - 1) * q)]);
   const finalAt = q => finals[order[Math.round((total - 1) * q)]];
@@ -634,6 +736,7 @@ export function simulateCrowdStats({ pools, weeks, perHabit = 500, seed = 1, onP
     players: total,
     bands,
     summaries,
+    fanSummaries,
     characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
     totals: {
       staked: sumOf('staked'),
@@ -854,4 +957,26 @@ export function simulateSlipOutcomes({ legs, sizes, stake, runs = 100_000, seed 
     byHits,
     stories: { firstPayout, firstAll, best: best.net > 0 ? best : null }
   };
+}
+
+// A typical week of games for a sport with nothing on the board today (and
+// always for the NBA, whose game odds aren't fetched): win chances spread as
+// they usually are in that sport, priced at the lottery's usual cut. Seeded,
+// so it's the same every time.
+export function sportTemplate(sport, seed = 7) {
+  const random = seededRandom(seed);
+  const between = (lo, hi) => lo + random() * (hi - lo);
+  const bets = [];
+  const two = (gameId, p) => [p, 1 - p].forEach(q => bets.push({ gameId, fairChance: q, odds: estimateLotteryOdds(q, 1.15) }));
+  if (sport === 'mlb') for (let g = 0; g < 15; g++) (two(g, between(0.35, 0.65)), two(g + 100, between(0.45, 0.55)));
+  if (sport === 'nba') for (let g = 0; g < 10; g++) (two(g, between(0.15, 0.85)), two(g + 100, between(0.47, 0.53)));
+  if (sport === 'epl')
+    for (let g = 0; g < 10; g++) {
+      const home = between(0.3, 0.6);
+      const draw = between(0.22, 0.3);
+      [home, draw, 1 - home - draw].forEach(q => bets.push({ gameId: g, fairChance: q, odds: estimateLotteryOdds(q, 1.15) }));
+      two(g + 100, between(0.45, 0.55));
+    }
+  if (sport === 'f1') [0.35, 0.2, 0.14, 0.1, 0.06, 0.05, 0.04, 0.03, 0.01, 0.01, 0.005, 0.005].forEach(p => bets.push({ gameId: 0, fairChance: p, odds: estimateF1LotteryOdds(p) }));
+  return bets;
 }

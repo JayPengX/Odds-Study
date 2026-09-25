@@ -497,3 +497,13 @@ section { margin-bottom: 22px; }
 .run-stories li { display: grid; gap: 1px; padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
 .run-stories small { color: var(--text-muted); overflow-wrap: anywhere; }
 @media (max-width: 480px) { .run-bars li { grid-template-columns: 4.5em 1fr 7em; gap: 8px; } }
+
+/* Guide: grouped, folding explanations */
+.guide-group { border-top: 1px solid var(--border); padding: 12px 0; }
+.guide-group:first-of-type { border-top: 0; padding-top: 0; }
+.guide-group > summary { cursor: pointer; font-weight: 700; font-size: 1rem; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.guide-group > summary::-webkit-details-marker { display: none; }
+.guide-group > summary::after { content: '▾'; color: var(--text-muted); transition: transform 0.2s; }
+.guide-group[open] > summary::after { transform: rotate(180deg); }
+.guide-group[open] > summary { margin-bottom: 10px; }
+.guide-group .math-step { padding-left: 12px; border-left: 2px solid var(--accent-wash); }

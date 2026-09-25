@@ -3,11 +3,13 @@
 import { habitPools, simulateCrowdStats } from './lib/odds.mjs';
 
 self.onmessage = ({ data }) => {
-  const { id, pool, weeks, perHabit, seed } = data;
+  const { id, sportBets, startWeek, weeks, perGroup, seed } = data;
+  const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
   const stats = simulateCrowdStats({
-    pools: habitPools(pool),
+    sportPools,
+    startWeek,
     weeks,
-    perHabit,
+    perGroup,
     seed,
     onProgress: progress => self.postMessage({ id, progress })
   });
