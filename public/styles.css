@@ -622,44 +622,41 @@ details.market[open] > summary { margin-bottom: 6px; }
 .link-button { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-weight: 800; text-align: left; }
 .link-button:hover { text-decoration: underline; }
 
-/* ---- Sport tiles and the day strip ---------------------------------------------- */
-#sport-filter, #day-filter { gap: 8px; padding-top: 4px; padding-bottom: 6px; }
-.sport-tile {
-  flex: none; min-width: 92px; display: grid; justify-items: center; gap: 3px; padding: 10px 14px 9px;
-  border: 1.5px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm);
-  transition: border-color 0.15s, background 0.15s, transform 0.1s;
-}
-.sport-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
-.sport-tile:active { transform: scale(0.97); }
-.sport-tile[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-wash); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-.logo-tile { width: 32px; height: 32px; }
-.all-icon rect { fill: var(--accent); opacity: 0.85; }
-.all-icon rect:nth-child(2), .all-icon rect:nth-child(3) { opacity: 0.45; }
-.tile-name { font-size: 0.86rem; font-weight: 700; white-space: nowrap; }
-.tile-count { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sport-tile[aria-pressed='true'] .tile-name { color: var(--accent); }
-
-.day-tile {
-  flex: none; min-width: 74px; display: grid; justify-items: center; gap: 0; padding: 8px 12px 9px;
-  border: 1.5px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm);
+/* ---- Sport tiles and the day strip: compact, one row each (side by side on desktop) ---- */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.toolbar .chips { margin: 0; padding: 2px 0; }
+@media (max-width: 720px) { .toolbar .chips { margin: 0 -16px; padding: 2px 16px; } .toolbar { display: grid; } }
+#day-filter { padding-left: 14px; border-left: 1px solid var(--border); }
+@media (max-width: 720px) { #day-filter { padding-left: 16px; border-left: 0; } }
+.sport-tile, .day-tile {
+  flex: none; height: 46px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px 0 10px;
+  border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-sm);
   transition: border-color 0.15s, background 0.15s, transform 0.1s; font-variant-numeric: tabular-nums;
 }
-.day-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
-.day-tile:active { transform: scale(0.97); }
-.day-week { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
-.day-num { font-size: 1.55rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
-.day-month { font-size: 0.68rem; color: var(--text-muted); }
-.day-count { margin-top: 5px; font-size: 0.68rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); white-space: nowrap; }
-.day-tile[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent); }
-.day-tile[aria-pressed='true'] .day-week, .day-tile[aria-pressed='true'] .day-month { color: rgba(255, 255, 255, 0.85); }
+.sport-tile:hover, .day-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.sport-tile:active, .day-tile:active { transform: scale(0.97); }
+.sport-tile[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-wash); }
+.sport-tile[aria-pressed='true'] .tile-name { color: var(--accent); }
+.logo-tile { width: 24px; height: 24px; }
+.all-icon rect { fill: var(--accent); opacity: 0.85; }
+.all-icon rect:nth-child(2), .all-icon rect:nth-child(3) { opacity: 0.45; }
+.tile-name { font-size: 0.88rem; font-weight: 700; white-space: nowrap; }
+.tile-count { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.day-tile { padding: 0 10px 0 12px; }
+.day-text { display: grid; line-height: 1.1; text-align: left; }
+.day-week { font-size: 0.68rem; font-weight: 700; color: var(--text-muted); }
+.day-num { font-size: 1rem; font-weight: 800; letter-spacing: -0.01em; }
+.day-count { font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); white-space: nowrap; }
+.day-tile[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.day-tile[aria-pressed='true'] .day-week { color: rgba(255, 255, 255, 0.85); }
 .day-tile[aria-pressed='true'] .day-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
 
-/* Premier League: the lion in white on the league's colours. */
-.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #37003c 0%, #963cff 45%, #e90052 75%, #04f5ff 100%); }
+/* Premier League: the lion in its own purple on a small white disc. */
+.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 1px rgba(55, 0, 60, 0.18); }
 .league-epl.logo-xs { width: 18px; height: 18px; }
 .league-epl.logo-sm { width: 22px; height: 22px; }
-.league-epl.logo-tile { width: 32px; height: 32px; }
-.league-epl .logo { width: 72%; height: 72%; filter: brightness(0) invert(1); }
+.league-epl.logo-tile { width: 26px; height: 26px; }
+.league-epl .logo { width: 78%; height: 78%; }
 .board-emblem .league-epl { width: 30px; height: 30px; }
 
 /* ---- Best value of the day: podium, then the full list ---------------------------- */

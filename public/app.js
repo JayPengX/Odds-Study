@@ -464,7 +464,6 @@ function renderDayFilter() {
   const days = [...new Set(state.bets.filter(b => inSport(b.sport)).map(b => dayKey(b.start)))].sort();
   if (!days.includes(state.day)) state.day = days[0] ?? null;
   const weekday = new Intl.DateTimeFormat(numberLocale(), { weekday: 'short' });
-  const month = new Intl.DateTimeFormat(numberLocale(), { month: 'short' });
   const today = dayKey(new Date().toISOString());
   $('day-filter').replaceChildren(
     ...days.map(day => {
@@ -483,9 +482,7 @@ function renderDayFilter() {
           rerenderFiltered();
         }
       }, [
-        el('span', { class: 'day-week', text: label }),
-        el('span', { class: 'day-num', text: String(d) }),
-        el('span', { class: 'day-month', text: month.format(date) }),
+        el('span', { class: 'day-text' }, [el('span', { class: 'day-week', text: label }), el('span', { class: 'day-num', text: `${m}/${d}` })]),
         el('span', { class: 'day-count', text: [games ? t('gamesN', { n: games }) : null, hasF1 ? 'F1' : null].filter(Boolean).join(' + ') })
       ]);
     })
@@ -730,15 +727,13 @@ function gameMore(game, bets, editing) {
   for (const s of SECTIONS.filter(s => s.kind !== 'ml')) {
     for (const options of groupBy(bets.filter(b => b.kind === s.kind), b => b.market).values()) {
       const label = options[0].marketLabel ? `${t(s.title)} ${options[0].marketLabel}` : t(s.title);
-      // Without 詳細: the main total line and the 1.5 run line only.
-      const extra = (s.kind === 'total' && !options[0].mainLine) || (s.kind === 'runline' && options[0].market !== 'rl|1.5');
       const head = el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: label }), el('span', { class: 'detail-only market-take' }, takePill(options))]);
       const picks = el('div', { class: 'market-picks' }, options.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)));
       // The ten-way inning market folds away.
       markets.push(
         s.wide
           ? el('details', { class: 'market wide' }, [el('summary', {}, head), picks])
-          : el('div', { class: `market ${extra ? 'detail-only' : ''}` }, [head, picks])
+          : el('div', { class: 'market' }, [head, picks])
       );
     }
   }
