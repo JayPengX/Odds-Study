@@ -70,7 +70,7 @@ const state = {
   futures: [],
   userOdds: loadUserOdds(),
   parlay: [],
-  slipMode: 'parlay',
+  slipMode: 'single',
   // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
   slipSizes: new Set([2, 'all']),
   slipStake: 100,
@@ -1073,7 +1073,6 @@ function slipAnalysisView(a, legs, ranges, extra) {
     ])
   );
   cards.push(drawCard(legs, a, extra.sig));
-  cards.push(crowdCard(a));
 
   // Where each NT$100 goes.
   const { take, tax, back } = a.per100;
@@ -1134,7 +1133,8 @@ function slipAnalysisView(a, legs, ranges, extra) {
     ])
   );
 
-  cards.push(heartbreakCard(a, legs));
+  // Missing by one only means something when the picks share one ticket.
+  if (state.slipMode !== 'single') cards.push(heartbreakCard(a, legs));
   return cards;
 }
 
@@ -1251,18 +1251,6 @@ function drawCard(legs, a, sig) {
     };
     setTimeout(step, 380);
   };
-  const openMany = k => {
-    if (d.busy) return;
-    let pays = 0;
-    let wins = 0;
-    for (let i = 0; i < k; i++) {
-      const pay = record(drawOne());
-      pays += pay;
-      if (pay > 0) wins++;
-    }
-    d.last = { batch: k, pays, wins };
-    paint();
-  };
   const reset = () => {
     state.draws = null;
     box.replaceWith(drawCard(legs, a, sig));
@@ -1274,8 +1262,6 @@ function drawCard(legs, a, sig) {
       el('p', { class: 'lede', text: t('drawNote') }),
       el('div', { class: 'draw-buttons' }, [
         el('button', { class: 'primary-button', type: 'button', text: t('drawOne'), disabled: d.busy ? '' : null, onclick: openOne }),
-        el('button', { class: 'ghost-button', type: 'button', text: t('drawMany', { n: 10 }), disabled: d.busy ? '' : null, onclick: () => openMany(10) }),
-        el('button', { class: 'ghost-button', type: 'button', text: t('drawMany', { n: 100 }), disabled: d.busy ? '' : null, onclick: () => openMany(100) }),
         d.n > 0 && !d.busy ? el('button', { class: 'link-button', type: 'button', text: t('drawReset'), onclick: reset }) : null
       ])
     ];
@@ -1299,8 +1285,6 @@ function drawCard(legs, a, sig) {
         const text = pay <= 0 ? t('drawLost', { cost: money(a.cost) }) : pay > a.cost ? t('drawWon', { v: money(pay), profit: money(pay - a.cost) }) : t('drawBackSome', { v: money(pay), loss: money(a.cost - pay) });
         parts.push(el('p', { class: `draw-result ${pay > a.cost ? 'win' : 'lose'}`, text }));
       }
-    } else if (last) {
-      parts.push(el('p', { class: 'draw-result', text: t('drawBatch', { n: last.batch, w: last.wins, v: money(last.pays), cost: money(last.batch * a.cost) }) }));
     }
     if (d.n > 0) {
       const net = d.back - d.spent;
@@ -1319,36 +1303,6 @@ function drawCard(legs, a, sig) {
   }
   paint();
   return box;
-}
-
-// 100 people buy this exact ticket today: how many profit, how many get some
-// money back, how many get nothing, and what the lottery takes in and pays out.
-function crowdCard(a) {
-  const t = state.t;
-  const money = v => fmtMoney(v, { sign: false });
-  const shares = [a.profit, Math.max(0, a.paid - a.profit), Math.max(0, 1 - a.paid)];
-  // Whole people that add up to 100 (largest remainders).
-  const counts = shares.map(p => Math.floor(p * 100));
-  shares.map((p, i) => [p * 100 - counts[i], i]).sort((x, y) => y[0] - x[0]).slice(0, 100 - counts.reduce((x, y) => x + y, 0)).forEach(([, i]) => counts[i]++);
-  const kinds = ['won', 'some', 'lost'];
-  const person = kind => {
-    const svg = svgEl('svg', { class: `buyer ${kind}`, viewBox: '0 0 24 30', 'aria-hidden': 'true' });
-    svg.append(svgEl('circle', { cx: 12, cy: 7, r: 5.5 }), svgEl('path', { d: 'M2 30v-6a10 10 0 0 1 20 0v6z' }));
-    return svg;
-  };
-  const people = kinds.flatMap((kind, i) => Array.from({ length: counts[i] }, () => person(kind)));
-  const lines = [
-    el('span', {}, [el('i', { class: 'buyer-key won' }), document.createTextNode(t('crowdWon', { n: counts[0] }))]),
-    counts[1] ? el('span', {}, [el('i', { class: 'buyer-key some' }), document.createTextNode(t('crowdSome', { n: counts[1] }))]) : null,
-    el('span', {}, [el('i', { class: 'buyer-key lost' }), document.createTextNode(t('crowdLost', { n: counts[2] }))])
-  ];
-  return el('div', { class: 'card' }, [
-    el('h3', { class: 'card-title', text: t('crowdTitle') }),
-    el('div', { class: 'buyers', role: 'img', 'aria-label': t('crowdTitle') }, people),
-    el('div', { class: 'split-legend' }, lines),
-    counts[0] === 0 && a.top.chance > 0 ? el('p', { class: 'note', text: t('crowdNeed', { n: fmtCount(1 / Math.max(a.profit || a.top.chance, 1e-12)) }) }) : null,
-    el('p', { class: 'note', text: t('crowdMoney', { in: money(a.cost * 100), out: money(a.expectedNet * 100), keep: money((a.cost - a.expectedNet) * 100) }) })
-  ]);
 }
 
 // Missing by one pick: how often it happens next to winning outright, and
@@ -1418,6 +1372,9 @@ function renderParlay() {
         onclick: () => {
           state.parlay = [];
           renderGames();
+          renderF1();
+          renderFutures();
+          renderRanking();
           renderParlay();
         }
       })
