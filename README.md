@@ -78,7 +78,6 @@ The choice is remembered.
 - **How often and how much:** calibrated on the closest published survey, the University of Hong Kong's 2021 government-commissioned gambling study. The median football bettor there bets once every two weeks and spends HK$201–500 a month; Taiwanese studies don't publish these figures.
   - In the simulation, habits range from about one ticket every three weeks (Careful) to one a week (Big fan). The average person buys about 2 tickets a month.
   - Most tickets are NT$100–500, now and then up to NT$3,000. Anything paying over NT$5,000 is taxed.
-- **Guess first:** for the quick-pick periods, the page first asks how many of 10 people end ahead, then shows the answer and how far off the guess was. Guesses are remembered on the device.
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;

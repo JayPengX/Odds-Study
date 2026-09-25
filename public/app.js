@@ -1664,7 +1664,7 @@ function drawSim(stats, weeks) {
   const { bands, summaries, totals } = stats;
   const characters = CHARACTERS.map(c => ({ ...c, player: stats.characters[c.key] }));
 
-  renderSimHeadline(totals, period, weeks);
+  renderSimHeadline(totals, period);
   const back = totals.staked > 0 ? ((totals.staked + totals.net) / totals.staked) * 100 : 100;
   $('sim-stats').replaceChildren(
     statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : '', null, false, '🧍'),
@@ -1692,18 +1692,8 @@ function drawSim(stats, weeks) {
   renderSimTable(bands, characters, weeks);
 }
 
-function renderSimHeadline(totals, period, weeks) {
+function renderSimHeadline(totals, period) {
   const t = state.t;
-  state.guesses ??= loadGuesses();
-  // Asked for the quick-pick periods only, so moving the slider doesn't keep asking.
-  const asks = PERIOD_PRESETS.some(m => monthWeeks(m) === weeks);
-  const guess = asks ? state.guesses[weeks] : undefined;
-  const hero = $('sim-headline').closest('.hero-card');
-  hero.classList.toggle('guessing', asks && guess == null);
-  if (asks && guess == null) {
-    $('sim-headline').replaceChildren(...guessView(weeks, period, () => renderSimHeadline(totals, period, weeks)));
-    return;
-  }
   const share = totals.aheadShare;
   const { staked, net } = totals;
   const tickets = totals.tickets / SIM_PLAYERS;
@@ -1724,7 +1714,6 @@ function renderSimHeadline(totals, period, weeks) {
       document.createTextNode(t('simHeadlinePost'))
     ]),
     el('div', { class: 'people', role: 'img', 'aria-label': t('simHeadlineShare', { n: inTen }) }, Array.from({ length: 10 }, (_, i) => person(i < inTen))),
-    guess != null ? guessVerdict(guess, inTen) : null,
     el('p', {
       class: 'headline-sub',
       text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked / SIM_PLAYERS, { sign: false }), back: fmtMoney(back, { sign: false }) })
@@ -1864,43 +1853,7 @@ function renderFacts(stats, totals, characters, summaries, period) {
 
 const BOBA_PRICE = 65;
 
-// ---- Simulator extras: guess first, a time-lapse, what the losses buy -------
-
-const GUESS_KEY = 'oddsStudy.guesses';
-function loadGuesses() {
-  try {
-    return JSON.parse(localStorage.getItem(GUESS_KEY)) || {};
-  } catch {
-    return {};
-  }
-}
-function saveGuess(weeks, guess) {
-  state.guesses[weeks] = guess;
-  try {
-    localStorage.setItem(GUESS_KEY, JSON.stringify(state.guesses));
-  } catch {}
-}
-
-// Before the answer: of 10 people, how many does the viewer think end ahead?
-// Asked once per period, remembered on this device.
-function guessView(weeks, period, onGuess) {
-  const t = state.t;
-  return [
-    el('p', { class: 'headline-label', text: t('guessLabel') }),
-    el('p', { class: 'headline-big', text: t('guessQ', { period }) }),
-    el('div', { class: 'guess-buttons', role: 'group', 'aria-label': t('guessQ', { period }) },
-      Array.from({ length: 11 }, (_, g) => el('button', { type: 'button', text: String(g), onclick: () => (saveGuess(weeks, g), onGuess()) }))
-    ),
-    el('p', { class: 'headline-sub', text: t('guessHint') })
-  ];
-}
-
-function guessVerdict(guess, inTen) {
-  const t = state.t;
-  const d = guess - inTen;
-  const text = d === 0 ? t('guessRight') : d > 0 ? t('guessHigh', { d }) : t('guessLow', { d: -d });
-  return el('p', { class: `guess-verdict ${d === 0 ? 'right' : ''}`, text: `${t('guessYou', { g: guess })} ${text}` });
-}
+// ---- Simulator extras: a time-lapse, what the losses buy --------------------
 
 // Week by week: 100 dots, each 1,000 people, lit while they're ahead.
 function renderLapse(bands, weeks) {

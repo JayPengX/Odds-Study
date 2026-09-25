@@ -788,14 +788,7 @@ details.market[open] > summary { margin-bottom: 6px; }
 .draw-tally { margin-top: 12px; }
 .draw-card .sparkline { margin-top: 8px; }
 
-/* ---- Simulator: guess first, time-lapse, what the losses buy ---- */
-.hero-card.guessing #sim-stats { display: none; }
-.guess-buttons { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 6px; margin: 6px 0 4px; }
-.guess-buttons button { font: inherit; font-weight: 800; font-size: 1.05rem; padding: 10px 0; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.14); color: #fff; cursor: pointer; }
-.guess-buttons button:hover { background: rgba(255, 255, 255, 0.3); }
-@media (max-width: 480px) { .guess-buttons { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-.guess-verdict { margin-top: 8px; display: inline-block; padding: 4px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); font-size: 0.86rem; font-weight: 600; }
-.guess-verdict.right { background: rgba(134, 239, 172, 0.3); }
+/* ---- Simulator: time-lapse, what the losses buy ---- */
 
 .lapse { display: grid; grid-template-columns: minmax(0, 260px) 1fr; gap: 20px; align-items: center; }
 .lapse-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; }
