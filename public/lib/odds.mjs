@@ -6,9 +6,19 @@
 export const K_BOTH = 1.151;
 export const K_DRAFTKINGS = 1.153;
 export const K_POLYMARKET = 1.158;
-// F1 race winner: lottery implied chance ~= fair chance ^ F1_EXPONENT, fitted
-// on 5 prices from one race, so only a rough guide.
+// F1 race winner, drivers the lottery prices one by one: lottery implied
+// chance ~= fair chance ^ F1_EXPONENT. Checked on 9 prices from two snapshots
+// of the 2026 Azerbaijan GP (average error ~8%); a refit didn't beat it.
 export const F1_EXPONENT = 0.692;
+// Longshots aren't on that curve: the lottery puts them on a few fixed prices.
+// On 2026-09-25 a 0.6% driver was 65, 0.15-0.25% drivers 325, the rest 500.
+// [fair chance at or above, price], checked in order.
+export const F1_LONGSHOT_STEPS = [
+  [0.01, null],
+  [0.004, 65],
+  [0.001, 325],
+  [0, 500]
+];
 
 export function americanToProbability(american) {
   const a = Number(american);
@@ -54,7 +64,8 @@ export function estimateLotteryOdds(fairChance, k) {
 }
 
 export function estimateF1LotteryOdds(fairChance, exponent = F1_EXPONENT) {
-  return round2(1 / fairChance ** exponent);
+  const [, step] = F1_LONGSHOT_STEPS.find(([min]) => fairChance >= min);
+  return step ?? round2(1 / fairChance ** exponent);
 }
 
 // Average amount returned per `stake` over many identical bets.

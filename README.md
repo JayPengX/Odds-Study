@@ -12,7 +12,7 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 - **Least costly ranking** per day, and a **parlay calculator** (most MLB games on the lottery require 2+ games per ticket).
 - **Simulator**: 24 people with realistic habits play for 1 month to 3 years, drawing their picks from the real games on the board. Each week they buy a random number of parlay tickets with varying stakes. Habits: Casual, Big fan (favorites), Upset hunter (underdogs), Parlay dreamer (4–6 games), Chaser (doubles after a losing week) and Careful (least costly bets). It follows the Lucky, Typical and Unlucky player, then compares the habits over 300 simulated people each: amount back per NT$100, share still ahead, average result.
 - **Premier League**: uses the same MLB formula, which has **not** been checked against real lottery soccer prices yet. Real prices typed in override it.
-- **F1 race winner**: `1 ÷ fair chance^0.69`, fitted on only 5 prices, so rough.
+- **F1 race winner**: `1 ÷ fair chance^0.69` for drivers the lottery prices one by one (checked on 9 prices from the 2026 Azerbaijan GP, average error about 8%). Drivers under 1% get the lottery's fixed longshot prices instead: 65, 325 or 500. The lottery sometimes rates drivers differently from Polymarket, which no formula can predict.
 
 With estimated odds only, every MLB bet comes out at about NT$87, because the formula assumes the same cut everywhere. The ranking becomes informative once real lottery odds are entered.
 

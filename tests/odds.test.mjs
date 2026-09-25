@@ -51,6 +51,11 @@ test('lottery estimate reproduces real MLB prices within a few cents', () => {
 test('F1 estimate follows the power rule', () => {
   close(estimateF1LotteryOdds(0.4081), 1.86, 0.01);
   close(estimateF1LotteryOdds(0.041), 9.1, 0.1);
+  close(estimateF1LotteryOdds(0.0287), 11.67, 0.01);
+  // Longshots sit on the lottery's fixed prices (2026 Azerbaijan GP).
+  assert.equal(estimateF1LotteryOdds(0.0064), 65);
+  assert.equal(estimateF1LotteryOdds(0.0025), 325);
+  assert.equal(estimateF1LotteryOdds(0.0005), 500);
 });
 
 test('expected return and overround', () => {
