@@ -73,7 +73,7 @@ The choice is remembered.
 - **The crowd:** 100,000 people, made of 6 betting habits × 5 kinds of fan.
   - Habits: Casual, Big fan, Upset hunter, Parlay dreamer, Chaser, Careful.
   - Fans: MLB, Premier League, NBA, F1, and people who bet on everything.
-- **The calendar:** time runs forward from this week on each league's real schedule. In a year that's about 2,550 MLB, 390 Premier League and 1,260 NBA games, plus 24 F1 races.
+- **The calendar:** time runs forward from this week on each league's real schedule. From the published 2026/27 schedules: 2,430 MLB games (25 March to 26 September) plus about 40 in the postseason; 380 Premier League games (22 August to 30 May, no games in the international breaks, Boxing Day week doubled); 1,230 NBA games (20 October to 11 April) plus about 90 in the play-in and playoffs; and the 24 races of the 2027 F1 calendar.
   - In a sport's off-season, 30% of its fans bet on something else.
   - Today's real prices stand in for future games. The NBA uses a typical-game template, because its game odds aren't fetched.
 - **How often and how much:** calibrated on the closest published survey, the University of Hong Kong's 2021 government-commissioned gambling study. The median football bettor there bets once every two weeks and spends HK$201–500 a month; Taiwanese studies don't publish these figures.

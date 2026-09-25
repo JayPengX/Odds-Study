@@ -1931,9 +1931,11 @@ function lapseEvents(bands, weeks, startWeek) {
       const now = games(sport, w);
       const before = games(sport, w - 1);
       const name = t(`sport_${sport}`);
-      if (now > 0 && quiet(sport, w - 5, w - 1)) events.push({ w, sport, text: t('lapseSeasonStart', { sport: name }) });
+      // F1 has a championship (賽季), not a league season (球季).
+      const f1 = sport === 'f1' ? 'F1' : '';
+      if (now > 0 && quiet(sport, w - 5, w - 1)) events.push({ w, sport, text: t(`lapseSeasonStart${f1}`, { sport: name }) });
       else if (before > 0 && now > 0 && before >= 3 * now) events.push({ w, sport, text: t('lapsePlayoffs', { sport: name }) });
-      if (now > 0 && w < weeks && quiet(sport, w + 1, w + 5)) events.push({ w, sport, text: t('lapseSeasonEnd', { sport: name }) });
+      if (now > 0 && w < weeks && quiet(sport, w + 1, w + 5)) events.push({ w, sport, text: t(`lapseSeasonEnd${f1}`, { sport: name }) });
     }
   }
   const money = v => fmtMoney(v, { sign: false });

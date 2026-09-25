@@ -1,5 +1,7 @@
 const STRINGS = {
   zh: {
+    lapseSeasonStartF1: "F1 新賽季第一站",
+    lapseSeasonEndF1: "F1 賽季最後一站",
     crowdTitle: "100 個人都買了這張",
     crowdWon: "{n} 人有賺",
     crowdSome: "{n} 人拿回一點",
@@ -474,6 +476,8 @@ const STRINGS = {
     footer: '賠率每次開啟頁面時即時抓取，數字會隨時間變動。本站與台灣運彩無關。'
   },
   en: {
+    lapseSeasonStartF1: "F1's first race of the year",
+    lapseSeasonEndF1: "F1's last race of the year",
     crowdTitle: "100 people buy this ticket",
     crowdWon: "{n} make a profit",
     crowdSome: "{n} get some back",

@@ -700,22 +700,33 @@ export const FANS = [
   { key: 'all', sports: SPORTS }
 ];
 export const OFFSEASON_SWITCH = 0.3;
-const F1_RACE_WEEKS = new Set([9, 11, 13, 15, 17, 19, 20, 22, 23, 25, 26, 27, 29, 30, 34, 35, 37, 38, 41, 42, 43, 45, 47, 48]);
-const EPL_BREAKS = new Set([12, 36, 41, 46]);
+// From the published 2026/27 schedules (week 0 = 1-7 January):
+// - MLB: 2,430 games from Opening Day (25 March 2027, week 11) to 26
+//   September (week 38), then the postseason to the end of October (~40 games).
+// - Premier League: 380 games, 22 August 2026 (week 33) to 30 May 2027
+//   (week 21), with no games in the merged September-October international
+//   break (weeks 38-39), mid-November (45) or late March (12), and Boxing Day
+//   plus 30 December in the same week (51).
+// - NBA: 1,230 games, opening night 20 October (week 41) to 11 April (week
+//   14), then the play-in and playoffs to mid-June (~90 games).
+// - F1: the 24 races of the 2027 calendar, Bahrain 14 March to Abu Dhabi 12 December.
+const F1_RACE_WEEKS = new Set([10, 11, 13, 14, 15, 17, 20, 22, 24, 26, 27, 29, 30, 35, 36, 38, 39, 40, 42, 43, 44, 46, 48, 49]);
+const EPL_BREAKS = new Set([12, 38, 39, 45]);
 
-// Games a sport has in a week of the year (0 = first week of January), from
-// its usual calendar: MLB ~2,430 regular-season games late March to September
-// plus the October postseason; the Premier League's 380 games August to May,
-// with international breaks and a busy festive period; the NBA's 1,230 games
-// late October to mid April plus the playoffs to June; 24 F1 races.
+// Games a sport has in a week of the year.
 export function gamesInWeek(sport, week) {
   const w = ((week % 52) + 52) % 52;
-  if (sport === 'mlb') return w >= 12 && w <= 38 ? 93 : w >= 39 && w <= 42 ? 10 : 0;
+  if (sport === 'mlb') return w >= 11 && w <= 38 ? 87 : w >= 39 && w <= 43 ? 8 : 0;
   if (sport === 'epl') {
-    if (!(w >= 32 || w <= 20) || EPL_BREAKS.has(w)) return 0;
-    return w === 51 || w === 0 ? 20 : 10;
+    if (!(w >= 33 || w <= 21) || EPL_BREAKS.has(w)) return 0;
+    return w === 51 ? 20 : 10;
   }
-  if (sport === 'nba') return w >= 42 || w <= 14 ? 47 : w >= 15 && w <= 23 ? 9 : 0;
+  if (sport === 'nba') {
+    if (w === 41) return 15;
+    if (w === 14) return 39;
+    if (w >= 42 || w <= 13) return 49;
+    return w >= 15 && w <= 24 ? 9 : 0;
+  }
   if (sport === 'f1') return F1_RACE_WEEKS.has(w) ? 1 : 0;
   return 0;
 }
