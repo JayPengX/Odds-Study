@@ -374,15 +374,24 @@ export function seededRandom(seed) {
 // While any is left they bet every week: it tops up their ticket, and what's
 // over the lottery's per-ticket limit goes on extra tickets (at most 30), so a
 // big win keeps being bet until it's lost.
+// Each habit's other quirks:
+// - `satisfied`: weeks off after a winning ticket (happy with the win).
+// - `quitStreak` [n, weeks]: weeks off after n losing tickets in a row.
+// - `hotHand`: after a winning ticket the next stake doubles (feeling lucky).
+// - `nearMiss`: after missing by one leg the next stake doubles ("so close!").
+// - `burnout`: weeks off after losing a week at the chase cap; then from the start.
+// - `stopLoss` [NT$, weeks]: weeks off after losing that much in one week.
+// Boosted stakes stay within NT$3,000.
 const RIDE_EXTRA_TICKETS = 30;
+const BOOST_MAX = 3000;
 export const BIG_STAKES = [1000, 2000, 3000];
 export const HABITS = [
-  { key: 'casual', perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any' },
-  { key: 'fan', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite' },
+  { key: 'casual', perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any', satisfied: 1, quitStreak: [6, 4] },
+  { key: 'fan', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite', hotHand: true },
   { key: 'underdog', perWeek: 0.5, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog', ride: true },
-  { key: 'dreamer', perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any', ride: true },
-  { key: 'chaser', perWeek: 0.75, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000 },
-  { key: 'careful', perWeek: 0.35, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best' }
+  { key: 'dreamer', perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any', ride: true, nearMiss: true },
+  { key: 'chaser', perWeek: 0.75, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000, burnout: 4 },
+  { key: 'careful', perWeek: 0.35, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best', stopLoss: [1000, 6] }
 ];
 
 // Splits a pool of bets ({gameId, fairChance, odds}) into the lists each
@@ -528,6 +537,10 @@ function freshState(habit) {
     chaseStake: habit.stakes[0],
     // Winnings waiting to ride on the next ticket.
     pot: 0,
+    // Weeks still off, weeks taken off in all, and the next stake's multiplier.
+    rest: 0,
+    restWeeks: 0,
+    boost: 1,
     maxStake: 0,
     peak: 0,
     peakWeek: -1,
@@ -561,6 +574,7 @@ function storyOf(st) {
     worstWeek: st.worstWeek,
     worstWeekAt: st.worstWeekAt,
     taxPaid: st.taxPaid,
+    restWeeks: st.restWeeks,
     firstWon: st.firstWon === true
   };
 }
@@ -582,6 +596,11 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
     // Poisson number of tickets this week (none when there's nothing to bet on).
     let count = 0;
     if (pick) for (let p = random(); p > noTicket; p *= random()) count++;
+    if (st.rest > 0) {
+      st.rest--;
+      st.restWeeks++;
+      count = 0;
+    }
     const riding = () => habit.ride && pick && st.pot >= SLIP_RULES.minTicket;
     if (count === 0 && riding()) count = 1;
     let week = 0;
@@ -590,6 +609,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       const want = Math.min(lo + Math.floor(random() * legSpan), pick.games);
       let legs = 0;
       let won = true;
+      let missed = 0;
       let odds = 1;
       for (let tries = 0; legs < want && tries < want * 20; tries++) {
         const r = random();
@@ -614,7 +634,10 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         ticketGames[legs++] = game;
         odds *= c.odds[j];
         const result = worldDraw(w, c.market[j], copy);
-        if (result < c.lo[j] || result >= c.hi[j]) won = false;
+        if (result < c.lo[j] || result >= c.hi[j]) {
+          won = false;
+          missed++;
+        }
       }
       if (legs === 0) continue;
       // Extra tickets are the winnings alone.
@@ -626,6 +649,10 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
             : random() < habit.big
               ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
               : habit.stakes[Math.floor(random() * habit.stakes.length)];
+      if (stake > 0 && st.boost > 1) {
+        stake = Math.max(stake, Math.min(BOOST_MAX, stake * st.boost));
+        st.boost = 1;
+      }
       if (st.pot > 0) {
         const ride = Math.min(Math.floor(st.pot / SLIP_RULES.unit) * SLIP_RULES.unit, SLIP_RULES.maxTicket - stake);
         stake += ride;
@@ -640,6 +667,8 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       if (stake > st.maxStake) st.maxStake = stake;
       if (won) {
         if (habit.ride) winnings += afterTax(gross);
+        if (habit.hotHand) st.boost = 2;
+        if (habit.satisfied) st.rest = Math.max(st.rest, habit.satisfied);
         st.wonTickets++;
         st.losing = 0;
         if (++st.winning > st.longestWinning) st.longestWinning = st.winning;
@@ -660,6 +689,8 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       } else {
         st.winning = 0;
         if (++st.losing > st.longestLosing) st.longestLosing = st.losing;
+        if (habit.nearMiss && missed === 1 && legs > 1) st.boost = 2;
+        if (habit.quitStreak && st.losing % habit.quitStreak[0] === 0) st.rest = Math.max(st.rest, habit.quitStreak[1]);
       }
     }
     st.pot += winnings;
@@ -667,7 +698,13 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       st.worstWeek = week;
       st.worstWeekAt = w;
     }
-    if (habit.chaseCap && count > 0) st.chaseStake = week < 0 ? Math.min(st.chaseStake * 2, habit.chaseCap) : base;
+    if (habit.chaseCap && count > 0) {
+      if (week < 0 && st.chaseStake >= habit.chaseCap && habit.burnout) {
+        st.chaseStake = base;
+        st.rest = habit.burnout;
+      } else st.chaseStake = week < 0 ? Math.min(st.chaseStake * 2, habit.chaseCap) : base;
+    }
+    if (habit.stopLoss && week <= -habit.stopLoss[0]) st.rest = Math.max(st.rest, habit.stopLoss[1]);
     st.profit += week;
     if (path) path[w] = st.profit;
     if (st.profit > st.peak) {

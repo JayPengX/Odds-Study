@@ -1735,7 +1735,8 @@ function renderPlayers(characters) {
         el('div', { class: 'player-tags' }, [
           p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null,
           el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) }),
-          el('span', { class: 'habit-tag detail-only', text: `${t('playerMaxStake')} ${fmtMoney(p.maxStake, { sign: false })}` })
+          el('span', { class: 'habit-tag detail-only', text: `${t('playerMaxStake')} ${fmtMoney(p.maxStake, { sign: false })}` }),
+          p.restWeeks > 0 ? el('span', { class: 'habit-tag detail-only', text: t('playerRest', { n: fmtCount(p.restWeeks) }) }) : null
         ])
       ]);
     })

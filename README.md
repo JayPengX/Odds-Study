@@ -80,6 +80,13 @@ The choice is remembered.
   - In the simulation, habits range from about one ticket every three weeks (Careful) to one a week (Big fan). The average person buys about 2 tickets a month.
   - Most tickets are NT$100–500, now and then up to NT$3,000. Anything paying over NT$5,000 is taxed.
   - Upset hunters and parlay dreamers let it ride: a winning ticket's whole payout (after tax) is bet again. It tops up their next ticket, and whatever is over the lottery's NT$100,000 per-ticket limit goes on extra tickets that week (up to 30), so a big win keeps being bet until it's lost.
+  - Each habit has its quirks too:
+    - Casual: happy with a win, takes a week off; after 6 losing tickets in a row, a month off.
+    - Big fan: hot hand, the ticket after a win is doubled (up to NT$3,000).
+    - Parlay dreamer: "so close!", the ticket after missing by one game is doubled.
+    - Chaser: losing a week at the NT$3,000 cap, quits for a month, then starts over from NT$200.
+    - Careful: a stop-loss, six weeks off after losing NT$1,000 or more in a week.
+  - A player's card shows the weeks they took off (with 詳細 on).
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;

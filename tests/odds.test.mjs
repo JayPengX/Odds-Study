@@ -149,6 +149,18 @@ test('riders keep betting their winnings, within the ticket limit', () => {
   }
 });
 
+test('the habits\' quirks: breaks, hot hands and burnout', () => {
+  const pools = habitPools(examplePool());
+  const run = (key, change = {}) => simulateHabit({ habit: { ...habit(key), ...change }, pools, weeks: 156, random: seededRandom(7) });
+  // Casual, chaser and careful take weeks off; the others never do.
+  for (const key of ['casual', 'chaser', 'careful']) assert.ok(run(key).restWeeks > 0, key);
+  for (const key of ['fan', 'underdog', 'dreamer']) assert.equal(run(key).restWeeks, 0, key);
+  // Without the quirk, no weeks off and (for the fan) smaller stakes.
+  assert.equal(run('casual', { satisfied: 0, quitStreak: null }).restWeeks, 0);
+  assert.ok(run('fan').staked > run('fan', { hotHand: false }).staked);
+  assert.ok(run('fan').maxStake <= 3000);
+});
+
 test('each extra parlay leg takes the cut again, and a big crowd is stable', () => {
   const pools = habitPools(examplePool());
   const crowd = seed => simulateCrowdStats({ pools, weeks: 52, perHabit: 2000, seed });
