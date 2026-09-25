@@ -2105,7 +2105,8 @@ function renderYou() {
     el('div', { class: 'kpis' }, [
       statTile(t('youMedian'), fmtMoney(g.median), g.median < 0 ? 'back-low' : 'back-high', null, false, '🧍'),
       statTile(t('simBackPer100'), money(g.back), g.back < 100 ? 'back-low' : '', null, false, '💸'),
-      statTile(t('youTickets'), fmtCount(g.avgTickets), '', null, false, '🎫')
+      statTile(t('youTickets'), fmtCount(g.avgTickets), '', null, false, '🎫'),
+      statTile(t('youStaked'), money(g.avgStaked), '', null, false, '💰')
     ]),
     el('div', { class: 'you-range' }, [
       el('span', { class: 'you-end back-low', text: fmtMoney(g.worst) }),

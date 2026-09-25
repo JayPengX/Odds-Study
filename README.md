@@ -107,7 +107,7 @@ The choice is remembered.
     - the hit rate, the tax collected and what the lottery makes per day.
 - **People like you:** pick a habit and a kind of fan to see that group of about 3,334 people. It shows:
   - how many are still ahead;
-  - the typical result, the average back and the tickets bought;
+  - the typical result, the average back, the tickets bought and the total bet (averages);
   - the group's range from its biggest loser to its biggest winner;
   - the typical loss in bubble teas.
 - **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart, their story, and their highest and lowest running total (and the week of each). The numbers in the stories are clickable too.
