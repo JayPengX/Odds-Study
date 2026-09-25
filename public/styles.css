@@ -566,12 +566,12 @@ body:not(.detail) .detail-only, body:not(.detail) .margin, body:not(.detail) .st
   width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.8rem; font-weight: 800;
   color: var(--badge); background: color-mix(in srgb, var(--badge) 14%, var(--surface)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--badge) 35%, transparent);
 }
-/* The first child is the row's icon, whatever it is (badge, logo, the
-   Premier League disc): it spans both lines, so the bar stays in column 2. */
+/* The first child is the row's icon, whatever it is (a badge or a league
+   logo): it spans both lines, so the bar stays in column 2. */
 .bar-item > :first-child { grid-row: 1 / 3; grid-column: 1; justify-self: center; }
 .bar-item > .bar-name, .bar-item > .bar-track { grid-column: 2; }
 .bar-item > .logo-wrap .logo, .bar-item > .logo { width: 28px; height: 28px; }
-.bar-item > .league-epl.league-epl { --s: 28px; }
+.bar-item > .league-badge.league-badge { --s: 28px; }
 .board-emblem { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
 .board-emblem .logo { width: 28px; height: 28px; }
 .empty-icon { width: 56px; height: 56px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -656,32 +656,16 @@ details.market[open] > summary { margin-bottom: 6px; }
 .day-tile[aria-pressed='true'] .day-week { color: rgba(255, 255, 255, 0.85); }
 .day-tile[aria-pressed='true'] .day-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
 
-/* Premier League: the lion alone, in the same square box as every other
-   logo. Light mode: the purple lion. Dark mode: ESPN's white outline lion,
-   cropped out of its 500x500 logo (the lion spans x 48-362, y 14-400 there;
-   the wordmark curves around outside it). --s is the box size. */
-.league-epl { --s: 30px; position: relative; display: inline-grid; place-items: center; flex: none; width: var(--s); height: var(--s); }
-.league-epl.logo-xs { --s: 18px; }
-.league-epl.logo-sm { --s: 20px; }
-.league-epl.logo-tile { --s: 24px; }
-.board-emblem .league-epl { --s: 28px; }
-.league-epl .logo-wrap, .league-epl .logo { width: 100%; height: 100%; object-fit: contain; }
-.epl-dark {
-  /* A window exactly the lion's size (314 x 386 of the source), centred. */
-  display: none; position: absolute; top: 0; height: var(--s);
-  width: calc(var(--s) * 314 / 386); left: calc(50% - var(--s) * 157 / 386);
-  background: url('https://a.espncdn.com/i/leaguelogos/soccer/500-dark/23.png') no-repeat;
-  background-size: calc(var(--s) * 500 / 386) auto;
-  background-position: calc(var(--s) * -48 / 386) calc(var(--s) * -14 / 386);
-  /* The wordmark's first letter starts just below the lion's right side. */
-  clip-path: polygon(0 0, 100% 0, 100% 84%, 84% 100%, 0 100%);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .league-epl .logo-wrap { visibility: hidden; }
-  :root:not([data-theme='light']) .epl-dark { display: block; }
-}
-:root[data-theme='dark'] .league-epl .logo-wrap { visibility: hidden; }
-:root[data-theme='dark'] .epl-dark { display: block; }
+/* League logos: each on a small white disc, every league alike and in both
+   themes. The Premier League image is a wide crop of just the lion, so
+   `cover` trims its empty sides; the others are square. --s is the size. */
+.league-badge { --s: 30px; display: inline-grid; place-items: center; flex: none; width: var(--s); height: var(--s); border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.league-badge.logo-xs { --s: 20px; }
+.league-badge.logo-sm { --s: 22px; }
+.league-badge.logo-tile { --s: 26px; }
+.board-emblem .league-badge { --s: 30px; }
+.league-badge .logo-wrap { display: grid; place-items: center; width: 78%; height: 78%; }
+.league-badge .league-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* ---- Best value of the day: podium, then the full list ---------------------------- */
 .ranking-card { padding: 16px; }
@@ -736,7 +720,7 @@ details.market[open] > summary { margin-bottom: 6px; }
   .sport-tile { height: 40px; padding: 0 12px 0 8px; gap: 6px; border-radius: 12px; }
   .sport-tile .tile-count { display: none; }
   .logo-tile { width: 22px; height: 22px; }
-  .league-epl.logo-tile { --s: 22px; }
+  .league-badge.logo-tile { --s: 24px; }
   .tile-name { font-size: 0.84rem; }
   .day-tile { height: 40px; border-radius: 12px; }
   .ranking-card { padding: 14px 12px; }
@@ -751,7 +735,11 @@ details.market[open] > summary { margin-bottom: 6px; }
 /* Phones: no app header; its controls sit in a slim row at the top. */
 .mobile-bar { display: none; }
 @media (max-width: 720px) {
-  .appbar { display: none; }
+  /* The tab bar lives in the app bar (fixed to the bottom on phones), so
+     only the bar's own look and the brand go, never the bar itself. */
+  .appbar { position: static; background: none; border: 0; }
+  .appbar-inner { padding: 0; }
+  .brand { display: none; }
   .page { padding-top: calc(10px + env(safe-area-inset-top)); }
   .mobile-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
   .mobile-bar .status { flex: 1 1 auto; font-size: 0.74rem; }

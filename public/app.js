@@ -522,14 +522,12 @@ function logoImg(sport, enName, label, size = '') {
   return logoPicture(teamLogo(sport, enName), teamLogo(sport, enName, true), `logo ${size}`, fallback);
 }
 
-// The league's logo; "all" and anything without one get a letter badge.
+// The league's own logo on a small white disc, the same for every league in
+// light and dark mode (as Match-Find shows them), so no logo ever vanishes
+// into a dark background and none stands out.
 function leagueImg(sport, size = '') {
-  // The league's name is always next to it, so a plain disc stands in.
-  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true' });
-  // Premier League: the purple lion in light mode; in dark mode ESPN's white
-  // outline lion, cropped from its logo so the wordmark stays out.
-  if (sport === 'epl') return el('span', { class: `league-epl ${size}` }, [logoPicture(leagueLogo(sport), null, 'logo league epl-light', fallback), el('span', { class: 'epl-dark', 'aria-hidden': 'true' })]);
-  return logoPicture(leagueLogo(sport), leagueLogo(sport, true), `logo league ${size}`, fallback);
+  const fallback = () => el('span', { class: 'league-img league-missing', 'aria-hidden': 'true' });
+  return el('span', { class: `league-badge ${size}` }, logoPicture(leagueLogo(sport), null, 'league-img', fallback));
 }
 
 // A round badge with a letter, in a group's colour.

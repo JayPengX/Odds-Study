@@ -27,7 +27,7 @@ The choice is remembered.
   - The Premier League's next matchweek, once its first game is within 3 days.
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
   - The next F1 race winner, with **every** driver the market prices.
-- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). The Premier League's lion is shown alone: purple in light mode, and in dark mode ESPN's white outline lion cropped out of its logo, in the same square box as every other logo.
+- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). Every league logo sits on the same small white disc in both themes (as in Match-Find); the Premier League shows just its purple lion, cropped by ESPN's own resizer.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
   - the estimated lottery odds, tinted green or red when a bet is unusually good or bad;
