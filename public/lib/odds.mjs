@@ -381,7 +381,58 @@ export const HABITS = [
 
 // Splits a pool of bets ({gameId, fairChance, odds}) into the lists each
 // `pick` style draws from. A style with nothing to pick falls back to all.
-export function habitPools(pool) {
+// ---- One shared world ---------------------------------------------------------
+// Every player bets into the same world: each week every game (and each F1
+// race) has one real result, and everyone who bet on it sees that result. A
+// result is a hash of (world seed, week, market, copy) turned into a number
+// in [0, 1) and matched against the market's outcomes, so nothing has to be
+// stored and any player can be replayed alone. `copy` tells apart the
+// several real games a week that share one template game (MLB plays ~90 a
+// week; the board has ~15).
+let worldSeed = 1;
+
+function mix32(h) {
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function worldDraw(week, market, copy) {
+  return mix32(mix32(mix32(mix32(worldSeed ^ 0x9e3779b9) ^ week) ^ market) ^ copy) / 4294967296;
+}
+
+function hashString(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return mix32(h) | 0;
+}
+
+// Each option's slice of [0, 1) within its market (a game's win market, its
+// total, an F1 race), from the whole pool so filtered lists keep the slices.
+function withOutcomes(pool) {
+  const markets = new Map();
+  for (const b of pool) {
+    const key = b.key ?? `${b.gameId}|${b.market ?? ''}`;
+    if (!markets.has(key)) markets.set(key, []);
+    markets.get(key).push(b);
+  }
+  const out = new Map();
+  for (const [key, options] of markets) {
+    const total = options.reduce((sum, b) => sum + b.fairChance, 0) || 1;
+    let lo = 0;
+    for (const b of options) {
+      const hi = lo + b.fairChance / total;
+      out.set(b, { ...b, outLo: lo, outHi: hi, marketId: hashString(key), gameKey: hashString(String(b.gameKey ?? b.gameId)) });
+      lo = hi;
+    }
+  }
+  return pool.map(b => out.get(b));
+}
+
+export function habitPools(rawPool) {
+  const pool = withOutcomes(rawPool);
   const byBack = [...pool].sort((a, b) => b.fairChance * b.odds - a.fairChance * a.odds);
   const lists = {
     any: pool,
@@ -394,7 +445,11 @@ export function habitPools(pool) {
 }
 
 // Pools compiled to flat arrays (game index, fair chance, odds), so the inner
-// loop reads numbers and allocates nothing. Cached per list.
+// loop reads numbers and allocates nothing. Cached per list. `pickCum` is how
+// players choose among the options: in proportion to each one's chance of
+// winning. A game's outcomes add up to 1, so every game is equally likely to
+// be picked, and within it favourites far more often than long shots (a
+// 0.1% F1 driver gets 0.1% of the bets on that race, not 1 in 23).
 const compiledLists = new WeakMap();
 function compile(list) {
   let c = compiledLists.get(list);
@@ -404,8 +459,17 @@ function compile(list) {
       n: list.length,
       game: Int32Array.from(list, b => (games.has(b.gameId) ? games.get(b.gameId) : games.set(b.gameId, games.size).get(b.gameId))),
       fair: Float64Array.from(list, b => b.fairChance),
-      odds: Float64Array.from(list, b => b.odds)
+      odds: Float64Array.from(list, b => b.odds),
+      pickCum: new Float64Array(list.length),
+      // Where each option sits in its market, for the shared results.
+      lo: Float64Array.from(list, b => b.outLo ?? 0),
+      hi: Float64Array.from(list, b => b.outHi ?? b.fairChance),
+      market: Int32Array.from(list, b => b.marketId ?? b.gameId ?? 0),
+      gameKey: Int32Array.from(list, b => b.gameKey ?? 0)
     };
+    let sum = 0;
+    list.forEach((b, i) => (c.pickCum[i] = sum += b.fairChance));
+    for (let i = 0; i < c.n; i++) c.pickCum[i] /= sum;
     compiledLists.set(list, c);
   }
   return c;
@@ -417,13 +481,16 @@ const ticketGames = new Int32Array(16);
 // What a player can bet on in a week: one or more compiled lists (one per
 // sport), picked in proportion to `weights` (the sport's games that week).
 // Game keys are made unique across sports.
+// `weights` are the real games each sport plays that week: each template game
+// on the board stands for `copies` of them, each with its own result.
 function picker(lists, weights = lists.map(() => 1)) {
   const compiled = lists.map(compile);
   const cum = new Float64Array(lists.length);
   let sum = 0;
   weights.forEach((w, i) => (cum[i] = sum += w));
   for (let i = 0; i < cum.length; i++) cum[i] /= sum;
-  return { compiled, cum, games: compiled.reduce((n, c) => n + new Set(c.game).size, 0) };
+  const copies = Int32Array.from(compiled, (c, i) => Math.max(1, Math.round(weights[i] / Math.max(1, new Set(c.game).size))));
+  return { compiled, cum, copies, games: compiled.reduce((n, c, i) => n + new Set(c.game).size * copies[i], 0) };
 }
 
 // A player's running totals, so a season can stop and carry on later.
@@ -518,14 +585,25 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         let s = 0;
         while (s < pick.cum.length - 1 && r > pick.cum[s]) s++;
         const c = pick.compiled[s];
-        const j = Math.floor(random() * c.n);
-        const game = s * 65536 + c.game[j];
+        const u = random();
+        let lo = 0;
+        let hi = c.n - 1;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (c.pickCum[mid] < u) lo = mid + 1;
+          else hi = mid;
+        }
+        const j = lo;
+        // Which of that week's real games this is, and its shared result.
+        const copy = Math.floor(random() * pick.copies[s]);
+        const game = mix32(c.gameKey[j] ^ Math.imul(copy + 1, 0x9e3779b1)) | 0;
         let dup = false;
         for (let k = 0; k < legs; k++) if (ticketGames[k] === game) dup = true;
         if (dup) continue;
         ticketGames[legs++] = game;
         odds *= c.odds[j];
-        if (random() >= c.fair[j]) won = false;
+        const result = worldDraw(w, c.market[j], copy);
+        if (result < c.lo[j] || result >= c.hi[j]) won = false;
       }
       if (legs === 0) continue;
       const stake = habit.chaseCap
@@ -581,7 +659,8 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
 }
 
 // One player's season with their full week-by-week path.
-export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
+export function simulateHabit({ habit, pools, weeks, random = Math.random, seed = 1 }) {
+  worldSeed = seed;
   const path = new Float64Array(weeks);
   const pick = picker([pools[habit.pick]]);
   return { path, ...playSeason(habit, () => pick, weeks, random, path) };
@@ -679,6 +758,7 @@ function multiSportGroups(sportPools, startWeek, weeks) {
 // from where that run stopped instead of starting over, so 3 years is the
 // 1-year run plus 2 more years. Returns { results: {weeks: stats}, resume }.
 export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpoints = [weeks], perHabit, perGroup, seed = 1, onProgress, resume = null }) {
+  worldSeed = seed;
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {
@@ -895,6 +975,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
 
 // Any one player of the crowd, replayed exactly: `index` is their serial - 1.
 export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup, perHabit, seed = 1, index }) {
+  worldSeed = seed;
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {
@@ -1183,5 +1264,6 @@ export function sportTemplate(sport, seed = 7) {
       two(g + 100, between(0.45, 0.55));
     }
   if (sport === 'f1') [0.35, 0.2, 0.14, 0.1, 0.06, 0.05, 0.04, 0.03, 0.01, 0.01, 0.005, 0.005].forEach(p => bets.push({ gameId: 0, fairChance: p, odds: estimateF1LotteryOdds(p) }));
-  return bets;
+  // Keys per sport, so template games of different sports get their own results.
+  return bets.map(b => ({ ...b, key: `${sport}|${b.gameId}`, gameKey: `${sport}|${b.gameId % 100}` }));
 }

@@ -458,21 +458,32 @@ function allIcon() {
   return svg;
 }
 
+// 今天 / 明天 / the weekday, in Taiwan time.
+function dayLabel(day) {
+  const today = dayKey(new Date().toISOString());
+  const tomorrow = dayKey(new Date(Date.now() + 86_400_000).toISOString());
+  if (day === today) return state.t('today');
+  if (day === tomorrow) return state.t('tomorrow');
+  const [y, m, d] = day.split('-').map(Number);
+  return new Intl.DateTimeFormat(numberLocale(), { weekday: 'short' }).format(new Date(y, m - 1, d));
+}
+
 // Days as a calendar strip: weekday, date, and what's on.
 function renderDayFilter() {
   const t = state.t;
   const days = [...new Set(state.bets.filter(b => inSport(b.sport)).map(b => dayKey(b.start)))].sort();
   if (!days.includes(state.day)) state.day = days[0] ?? null;
-  const weekday = new Intl.DateTimeFormat(numberLocale(), { weekday: 'short' });
-  const today = dayKey(new Date().toISOString());
+  // One day only (the usual case): no picker, the day goes in the heading.
+  $('day-filter').hidden = days.length <= 1;
+  const [, gm, gd] = (state.day ?? '').split('-').map(Number);
+  $('games-title').textContent = state.day ? `${t('gamesTitle')} · ${dayLabel(state.day)} ${gm}/${gd}` : t('gamesTitle');
   $('day-filter').replaceChildren(
     ...days.map(day => {
       const games = state.data.games.filter(g => inSport(g.sport) && dayKey(g.startUtc) === day).length;
       const hasF1 = inSport('f1') && state.data.f1 && dayKey(state.data.f1.startUtc) === day;
       const [y, m, d] = day.split('-').map(Number);
       const date = new Date(y, m - 1, d);
-      const tomorrow = dayKey(new Date(Date.now() + 86_400_000).toISOString());
-      const label = day === today ? t('today') : day === tomorrow ? t('tomorrow') : weekday.format(date);
+      const label = dayLabel(day);
       return el('button', {
         class: 'day-tile',
         type: 'button',
@@ -506,13 +517,15 @@ function logoPicture(light, dark, cls, fallback) {
 
 // A team logo, or its initials in a circle when there's no logo (or it fails).
 function logoImg(sport, enName, label, size = '') {
-  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: (label || '?').slice(0, 2) });
+  // One character: a Chinese name's first character, or an English initial.
+  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: (label || '?').trim().slice(0, 1) });
   return logoPicture(teamLogo(sport, enName), teamLogo(sport, enName, true), `logo ${size}`, fallback);
 }
 
 // The league's logo; "all" and anything without one get a letter badge.
 function leagueImg(sport, size = '') {
-  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: sport === 'all' ? '∑' : sport.toUpperCase().slice(0, 3) });
+  // The league's name is always next to it, so a plain disc stands in.
+  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true' });
   if (sport === 'epl') return el('span', { class: `league-epl ${size}` }, logoPicture(leagueLogo(sport), null, 'logo league', fallback));
   return logoPicture(leagueLogo(sport), leagueLogo(sport, true), `logo league ${size}`, fallback);
 }
@@ -588,8 +601,10 @@ function renderStatus(kind) {
   const status = $('status');
   if (kind === 'loading') status.textContent = t('loading');
   else if (kind === 'error') status.textContent = t('loadFailed');
-  else status.textContent = `${t('updated')} ${fmtTime(state.data.loadedAt)} · DraftKings + Polymarket`;
-  status.title = t('sources');
+  else {
+    status.textContent = t('updatedShort', { time: fmtTime(state.data.loadedAt) });
+    status.title = `${fmtTime(state.data.loadedAt)} · ${t('sources')}`;
+  }
 }
 
 // ---- Ranking ------------------------------------------------------------------
@@ -617,20 +632,23 @@ function renderRanking() {
       const back = betReturn(bet);
       const inSlip = state.parlay.includes(bet.id);
       return el('li', { class: `podium-card ${inSlip ? 'in-slip' : ''}` }, [
-        el('div', { class: 'podium-top' }, [el('span', { class: 'podium-medal', 'aria-hidden': 'true', text: medals[i] }), betIcon(bet)]),
-        el('p', { class: 'podium-pick', text: bet.shortLabel }),
-        el('p', { class: 'podium-game', text: context(bet) }),
-        el('p', { class: `podium-back ${backClass(back)}` }, [
-          el('small', { text: t('perHundred') }),
-          el('strong', { text: fmtMoney(back, { sign: false }) }),
-          marginEl(`±${Math.round(betBackMargin(bet))}`)
-        ]),
-        el('button', {
-          class: `podium-odds ${inSlip ? 'in-slip' : ''}`,
-          type: 'button',
-          'aria-pressed': String(inSlip),
-          onclick: () => toggleLeg(bet)
-        }, [document.createTextNode(`@ ${fmtOdds(effectiveOdds(bet))}`), el('span', { text: inSlip ? ' ✓' : ' +' })])
+        el('span', { class: 'podium-medal', 'aria-hidden': 'true', text: medals[i] }),
+        betIcon(bet),
+        el('div', { class: 'podium-body' }, [el('p', { class: 'podium-pick', text: bet.shortLabel }), el('p', { class: 'podium-game', text: context(bet) })]),
+        el('div', { class: 'podium-side' }, [
+          el('p', { class: `podium-back ${backClass(back)}` }, [
+            el('small', { text: t('perHundred') }),
+            el('strong', { text: fmtMoney(back, { sign: false }) }),
+            marginEl(`±${Math.round(betBackMargin(bet))}`)
+          ]),
+          el('button', {
+            class: `podium-odds ${inSlip ? 'in-slip' : ''}`,
+            type: 'button',
+            'aria-pressed': String(inSlip),
+            'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}`,
+            onclick: () => toggleLeg(bet)
+          }, [document.createTextNode(fmtOdds(effectiveOdds(bet))), el('span', { text: inSlip ? ' ✓' : ' +' })])
+        ])
       ]);
     })
   );
@@ -660,7 +678,9 @@ function renderRanking() {
   const notes = [];
   if (!ranked.some(hasRealOdds)) notes.push(t('rankingEstimateNote'));
   else if (tied > 1) notes.push(`#1–#${tied}: ${t('tie')}`);
-  $('ranking-notes').replaceChildren(...notes.map(text => el('p', { class: 'tie-note', text })));
+  $('ranking-notes').replaceChildren(
+    ...notes.map(text => el('details', { class: 'info' }, [el('summary', { text: t(ranked.some(hasRealOdds) ? 'tieTitle' : 'rankingEstimateTitle') }), el('p', { text })]))
+  );
 }
 
 // ---- Games --------------------------------------------------------------------
@@ -1284,7 +1304,9 @@ function simSportBets() {
   const real = sport =>
     state.bets
       .filter(b => b.sport === sport && (b.kind === 'ml' || b.kind === 'f1' || (b.kind === 'total' && b.mainLine)))
-      .map(b => ({ gameId: b.gameId, fairChance: b.fairChance, odds: effectiveOdds(b) }));
+      // `key`: the market (a game's win market, its total, the race) whose one
+      // shared result decides every bet on it.
+      .map(b => ({ gameId: b.gameId, key: `${sport}|${b.gameId}|${b.kind === 'total' ? 'total' : 'win'}`, fairChance: b.fairChance, odds: effectiveOdds(b) }));
   return Object.fromEntries(
     SPORTS.map(sport => {
       const bets = sport === 'nba' ? [] : real(sport);

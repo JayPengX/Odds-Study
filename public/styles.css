@@ -664,28 +664,60 @@ details.market[open] > summary { margin-bottom: 6px; }
 .ranking-head { margin-bottom: 12px; }
 .ranking-head h2 { font-size: 1.05rem; margin-bottom: 6px; }
 .ranking-head .lede { margin: 0; }
-.podium { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
-.podium-card { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border); position: relative; }
+.podium { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+/* Desktop: a card each. Medal and logo on top, the pick, then back and odds. */
+.podium-card {
+  display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto auto; align-items: center; gap: 4px 8px;
+  padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border);
+}
 .podium-card:first-child { background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 14%, var(--surface-raised)), var(--surface-raised) 70%); border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
-.podium-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .podium-medal { font-size: 1.3rem; line-height: 1; }
-.podium-pick { font-weight: 800; font-size: 0.98rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.podium-game { font-size: 0.74rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.podium-back { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.podium-body { grid-column: 1 / -1; min-width: 0; }
+.podium-side { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.podium-pick { font-weight: 800; font-size: 0.96rem; line-height: 1.3; }
+.podium-game { font-size: 0.74rem; color: var(--text-muted); }
+.podium-back { display: flex; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; }
 .podium-back small { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; }
-.podium-back strong { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.01em; }
-.podium-odds { position: absolute; top: 10px; right: 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.podium-back strong { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; }
+.podium-odds { flex: none; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-weight: 800; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
 .podium-odds:hover { border-color: var(--accent); }
 .podium-odds.in-slip { background: var(--accent); border-color: var(--accent); color: #fff; }
 .podium-odds span { color: var(--accent); }
 .podium-odds.in-slip span { color: #fff; }
+/* Phones: three compact rows, nothing cut off. */
+@media (max-width: 720px) {
+  .podium { grid-template-columns: 1fr; gap: 6px; }
+  .podium-card { grid-template-columns: auto auto 1fr auto; grid-template-rows: auto; padding: 9px 10px; gap: 8px; }
+  .podium-medal { font-size: 1.15rem; }
+  .podium-body { grid-column: auto; }
+  .podium-pick { font-size: 0.88rem; }
+  .podium-game { font-size: 0.7rem; }
+  .podium-side { grid-column: auto; display: grid; justify-items: end; gap: 3px; margin: 0; }
+  .podium-back small { display: none; }
+  .podium-back strong { font-size: 1rem; }
+  .podium-odds { padding: 3px 9px; font-size: 0.8rem; }
+}
 .ranking-notes .tie-note { margin-top: 10px; }
 .ranking-more { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .ranking-more > summary { cursor: pointer; list-style: none; text-align: center; color: var(--accent); font-weight: 700; font-size: 0.86rem; padding: 4px; }
 .ranking-more > summary::-webkit-details-marker { display: none; }
 .ranking-more[open] > summary { margin-bottom: 8px; }
+
+/* Games heading: the day inline, the tap hint beside it. */
+.games-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; margin: 6px 0 10px; }
+.games-head .section-heading { margin: 0; }
+.games-hint { font-size: 0.78rem; color: var(--text-muted); }
+.ranking-notes .info { margin-top: 10px; }
 @media (max-width: 720px) {
-  .podium { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
-  .podium::-webkit-scrollbar { display: none; }
-  .podium-card { flex: 0 0 78%; scroll-snap-align: start; }
+  .sport-tile { height: 40px; padding: 0 12px 0 8px; gap: 6px; border-radius: 12px; }
+  .sport-tile .tile-count { display: none; }
+  .logo-tile, .league-epl.logo-tile { width: 22px; height: 22px; }
+  .tile-name { font-size: 0.84rem; }
+  .day-tile { height: 40px; border-radius: 12px; }
+  .ranking-card { padding: 14px 12px; }
+  .ranking-head { margin-bottom: 10px; }
+  .ranking-head h2 { font-size: 1rem; margin: 0; }
+  .notice { font-size: 0.74rem; padding: 6px 12px; margin-bottom: 10px; }
 }
+.logo-fallback { white-space: nowrap; overflow: hidden; line-height: 1; }
+.logo-fallback.logo-sm, .logo-fallback.logo-xs { font-size: 0.6rem; }

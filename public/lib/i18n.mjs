@@ -1,5 +1,8 @@
 const STRINGS = {
   zh: {
+    tieTitle: '差距在誤差內',
+    rankingEstimateTitle: '為什麼每注都差不多？',
+    updatedShort: '{time} 更新',
     futuresOnly: '冠軍盤',
     rankingMore: '看全部 {n} 注的排名',
     perHundred: '每百回',
@@ -141,6 +144,7 @@ const STRINGS = {
         ['10 萬人', '6 種習慣 × 5 種球迷，每組約 3,334 人，共 100,020 人。每個人有自己的編號和亂數種子，同樣的編號每次都會重演一模一樣的人生。'],
         ['未來的比賽', '今天看得到的比賽只是樣本：每週照各聯盟的真實行事曆決定有幾場、哪些運動在打，從樣本裡抽出這週的比賽（今天沒有的運動用一般比賽的機率分布）。'],
         ['準不準', '同樣設定換不同亂數種子，頁面上的數字幾乎不動（例如「還在贏的比例」只差約 0.2 個百分點）。每個人都完整模擬到每一張彩券；為了省電不存每個人每週的數字，但測試證明結果和全部存下來算一模一樣。'],
+        ['同一個世界', '10 萬人都活在同一個世界：每週每場比賽、每站 F1 只有一個真正的結果，押同一場的人一起中、一起輸。所以一年 24 站 F1，機率 0.25% 的冷門車手整年贏到一站的機會只有約 6%；真的爆冷時，押他的人會一起中。每個人挑注的方式也照機率：越可能贏的選項越多人押，0.1% 的冷門只分到約 0.1% 的注，不會跟熱門一樣常被選到。'],
         ['一次算好幾個時段', '預設跑 1 年時，1 個月、3 個月、半年的結果就在同一次模擬裡一起記下來，切換時不用重算。選 3 年時，每個人從第 52 週的狀態接著玩下去，只多算後面 2 年；結果和從頭跑 3 年一模一樣（有測試確認）。'],
         ['「專家」也只猜中 54.9%', '一篇國內研究追蹤 15 位運彩「專家」兩個月的 MLB 預測，平均命中率只有 54.9%，接近丟硬幣。研究也發現投注者容易有「熱手謬誤」：覺得連勝的球隊會繼續贏。上面「最長連勝」的故事，其實也只是運氣。'],
         ['投注單分析', '投注單的每一個數字都是精確計算：把每場的輸贏組合全部列出來（最多 4,096 種），算出每種結果的機率和獎金（含稅）、每 NT$100 去了哪裡（拿回、抽成、稅）、每一場單獨的價值、少了哪一場會比較好。唯一用抽樣的是「每週買這張、連買 52 週」：固定亂數種子抽 2 萬個一年，所以每次看到的數字都一樣。']
@@ -397,6 +401,9 @@ const STRINGS = {
     footer: '賠率每次開啟頁面時即時抓取，數字會隨時間變動。本站與台灣運彩無關。'
   },
   en: {
+    tieTitle: 'Within the margin of error',
+    rankingEstimateTitle: 'Why are they all about the same?',
+    updatedShort: 'Updated {time}',
     futuresOnly: 'Futures',
     rankingMore: 'See all {n} bets ranked',
     perHundred: 'per 100',
@@ -538,6 +545,7 @@ const STRINGS = {
         ['100,000 people', '6 habits × 5 kinds of fan, about 3,334 in each group, 100,020 in all. Each person has a number and a random seed, so the same number always replays the exact same year.'],
         ['Future games', 'Today\'s board is only a sample: each week follows each league\'s real calendar for how many games there are and which sports are on, drawn from the sample (a typical game for sports with nothing on today).'],
         ['How accurate', 'Change the random seed and the numbers barely move (the share still ahead shifts about 0.2 points). Everyone is simulated ticket by ticket; to save power, week-by-week numbers aren\'t stored for everyone, but tests prove the results are exactly the same as storing them all.'],
+        ['One shared world', 'All 100,000 people live in the same world: each week every game and every F1 race has one real result, and everyone who bet on it wins or loses together. So with 24 races a year, a 0.25% driver wins any race at all only about 6% of years; when a long shot does come in, everyone who backed them cashes together. People also pick like real bettors, in proportion to each option\'s chance: a 0.1% driver gets about 0.1% of the bets on the race, not as many as the favourite.'],
         ['Several periods from one run', 'The default 1-year run records the 1-month, 3-month and 6-month results along the way, so switching periods needs no new run. For 3 years, every player carries on from where they were at week 52, and only the 2 extra years are played; the result is exactly the same as running 3 years from scratch (a test checks it).'],
         ['Even "experts" hit only 54.9%', 'A Taiwanese study followed 15 sports-lottery "experts" through two months of MLB picks: they averaged 54.9% correct, barely better than a coin. It also found bettors fall for the hot-hand fallacy, believing a team on a streak will keep winning. The "longest winning streak" story above is luck too.'],
         ['Ticket analysis', 'Every number on the bet slip is exact: every way the games can land (up to 4,096) is listed, with its chance and after-tax payout, where each NT$100 goes (back to you, the cut, the tax), each pick\'s own value, and what the ticket returns without each pick. The only sampled part is "this ticket every week for 52 weeks": 20,000 years drawn with a fixed seed, so the numbers read the same every time.']

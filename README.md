@@ -97,6 +97,10 @@ The choice is remembered.
   - the group's range from its biggest loser to its biggest winner;
   - the typical loss in bubble teas.
 - **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart and their story. The numbers in the stories are clickable too.
+- **One shared world:** each week every game and F1 race has a single real result that everyone who bet on it shares. This is a hash of (seed, week, market, which real game), so it takes no storage and any player can still be replayed alone.
+  - Sports keep their real number of distinct games per week.
+  - With 24 races a year, F1 long shots come in only as rarely as they should.
+  - Picks are weighted by each option's chance, so a 0.1% driver gets about 0.1% of the bets.
 - **Periods:** 1 month to 3 years. The seed is fixed, so the same period always gives the same result.
   - The default 1-year run records 1, 3 and 6 months along the way, so switching to them is instant.
   - 3 years carries every player on from week 52 and plays only the extra two years. Tests check it matches a straight 3-year run exactly.
