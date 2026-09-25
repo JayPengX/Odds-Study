@@ -120,3 +120,68 @@ export function teamZh(sport, name) {
   if (sport === 'nba') return NBA_TEAM_ZH[name] ?? name;
   return MLB_TEAM_ZH[name] ?? name;
 }
+
+// ---- Logos ------------------------------------------------------------------
+
+// ESPN's logo files: MLB and NBA by abbreviation, soccer clubs by ESPN id.
+const MLB_ABBR = {
+  'Arizona Diamondbacks': 'ari', Athletics: 'ath', 'Oakland Athletics': 'ath', 'Atlanta Braves': 'atl', 'Baltimore Orioles': 'bal',
+  'Boston Red Sox': 'bos', 'Chicago Cubs': 'chc', 'Chicago White Sox': 'chw', 'Cincinnati Reds': 'cin', 'Cleveland Guardians': 'cle',
+  'Colorado Rockies': 'col', 'Detroit Tigers': 'det', 'Houston Astros': 'hou', 'Kansas City Royals': 'kc', 'Los Angeles Angels': 'laa',
+  'Los Angeles Dodgers': 'lad', 'Miami Marlins': 'mia', 'Milwaukee Brewers': 'mil', 'Minnesota Twins': 'min', 'New York Mets': 'nym',
+  'New York Yankees': 'nyy', 'Philadelphia Phillies': 'phi', 'Pittsburgh Pirates': 'pit', 'San Diego Padres': 'sd', 'San Francisco Giants': 'sf',
+  'Seattle Mariners': 'sea', 'St. Louis Cardinals': 'stl', 'Tampa Bay Rays': 'tb', 'Texas Rangers': 'tex', 'Toronto Blue Jays': 'tor',
+  'Washington Nationals': 'wsh'
+};
+const NBA_ABBR = {
+  'Atlanta Hawks': 'atl', 'Boston Celtics': 'bos', 'Brooklyn Nets': 'bkn', 'Charlotte Hornets': 'cha', 'Chicago Bulls': 'chi',
+  'Cleveland Cavaliers': 'cle', 'Dallas Mavericks': 'dal', 'Denver Nuggets': 'den', 'Detroit Pistons': 'det', 'Golden State Warriors': 'gs',
+  'Houston Rockets': 'hou', 'Indiana Pacers': 'ind', 'Los Angeles Clippers': 'lac', 'LA Clippers': 'lac', 'Los Angeles Lakers': 'lal',
+  'Memphis Grizzlies': 'mem', 'Miami Heat': 'mia', 'Milwaukee Bucks': 'mil', 'Minnesota Timberwolves': 'min', 'New Orleans Pelicans': 'no',
+  'New York Knicks': 'ny', 'Oklahoma City Thunder': 'okc', 'Orlando Magic': 'orl', 'Philadelphia 76ers': 'phi', 'Phoenix Suns': 'phx',
+  'Portland Trail Blazers': 'por', 'Sacramento Kings': 'sac', 'San Antonio Spurs': 'sa', 'Toronto Raptors': 'tor', 'Utah Jazz': 'utah',
+  'Washington Wizards': 'wsh'
+};
+const EPL_ESPN_ID = {
+  arsenal: 359, 'aston villa': 362, bournemouth: 349, brentford: 337, brighton: 331, 'brighton hove albion': 331, burnley: 379,
+  chelsea: 363, 'coventry city': 388, 'crystal palace': 384, everton: 368, fulham: 370, 'hull city': 306, 'ipswich town': 373,
+  'leeds united': 357, 'leicester city': 375, liverpool: 364, 'manchester city': 382, 'manchester united': 360,
+  'newcastle united': 361, 'nottingham forest': 393, southampton: 376, sunderland: 366, tottenham: 367, 'tottenham hotspur': 367,
+  'west ham united': 371, 'wolverhampton wanderers': 380, wolves: 380
+};
+
+// Logo URL for a team (English name as the sources write it), or null.
+export function teamLogo(sport, name) {
+  const base = 'https://a.espncdn.com/i/teamlogos';
+  if (sport === 'mlb') return MLB_ABBR[name] ? `${base}/mlb/500/${MLB_ABBR[name]}.png` : null;
+  if (sport === 'nba') return NBA_ABBR[name] ? `${base}/nba/500/${NBA_ABBR[name]}.png` : null;
+  if (sport === 'epl') {
+    const id = EPL_ESPN_ID[normalizeTeamName(name)];
+    return id ? `${base}/soccer/500/${id}.png` : null;
+  }
+  return null;
+}
+
+// 2026 F1 grid: each driver's team and its colour, for the driver badges.
+const F1_TEAMS = {
+  mclaren: { name: 'McLaren', color: '#ff8000', drivers: ['Norris', 'Piastri'] },
+  ferrari: { name: 'Ferrari', color: '#e8002d', drivers: ['Leclerc', 'Hamilton'] },
+  redbull: { name: 'Red Bull', color: '#3671c6', drivers: ['Verstappen', 'Hadjar'] },
+  mercedes: { name: 'Mercedes', color: '#00d2be', drivers: ['Russell', 'Antonelli'] },
+  aston: { name: 'Aston Martin', color: '#229971', drivers: ['Alonso', 'Stroll'] },
+  alpine: { name: 'Alpine', color: '#ff87bc', drivers: ['Gasly', 'Colapinto'] },
+  williams: { name: 'Williams', color: '#64c4ff', drivers: ['Albon', 'Sainz'] },
+  rb: { name: 'Racing Bulls', color: '#6692ff', drivers: ['Lawson', 'Lindblad'] },
+  haas: { name: 'Haas', color: '#9ea3a8', drivers: ['Ocon', 'Bearman'] },
+  audi: { name: 'Audi', color: '#bb0a30', drivers: ['Hulkenberg', 'Bortoleto'] },
+  cadillac: { name: 'Cadillac', color: '#c9a227', drivers: ['Perez', 'Bottas'] }
+};
+
+// { team, color } for a driver's full name ("Carlos Sainz Jr."), or a neutral badge.
+export function f1Driver(name) {
+  const plain = (name || '').normalize('NFKD').replace(/[̀-ͯ]/g, '');
+  for (const team of Object.values(F1_TEAMS)) {
+    if (team.drivers.some(d => new RegExp(`\\b${d}\\b`, 'i').test(plain))) return { team: team.name, color: team.color };
+  }
+  return { team: '', color: '#8a8f98' };
+}

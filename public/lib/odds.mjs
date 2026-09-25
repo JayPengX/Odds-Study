@@ -897,65 +897,108 @@ export function slipPayoutTable({ legs, sizes, stake }) {
   return { gross, net };
 }
 
-// Plays the ticket out `runs` times: each leg wins at its fair chance, on
-// its own. Every version gets its exact payout from the table above. Returns
-// how often each result came up, alongside the exact chances, plus a few
-// numbered versions to show.
-export function simulateSlipOutcomes({ legs, sizes, stake, runs = 100_000, seed = 1 }) {
+// A deep look at one ticket, all exact except the one-year outlook:
+// - every result (legs won) with its chance and after-tax payout;
+// - where each NT$100 goes: the lottery's cut, the tax, what comes back;
+// - each leg's own value and what the ticket would return without it;
+// - how rare the top payout is, and which results still make a profit;
+// - buying the same ticket every week for `weeks` weeks: the chance of being
+//   ahead and the usual range (a fixed-seed draw of `seasons` years, so it
+//   reads the same every time).
+export function analyzeSlip({ legs, sizes, stake, weeks = 52, seasons = 20_000, seed = 1 }) {
   const n = legs.length;
   const { gross, net } = slipPayoutTable({ legs, sizes, stake });
   const cost = sizes.reduce((s, k) => s + choose(n, k), 0) * stake;
-  const random = seededRandom(seed);
-  const counts = new Uint32Array(1 << n);
-  let paid = 0;
-  let profit = 0;
-  let netSum = 0;
-  let best = { version: 0, net: -1, won: 0 };
-  let firstPayout = null;
-  let firstAll = null;
-  for (let v = 0; v < runs; v++) {
-    let won = 0;
-    for (let i = 0; i < n; i++) if (random() < legs[i].fairChance) won |= 1 << i;
-    counts[won]++;
-    const pay = net[won];
-    netSum += pay;
-    if (gross[won] > 0) {
-      paid++;
-      firstPayout ??= { version: v + 1, won, net: pay };
-    }
-    if (pay > cost) profit++;
-    if (pay > best.net) best = { version: v + 1, net: pay, won };
-    if (won === (1 << n) - 1) firstAll ??= { version: v + 1, won, net: pay };
-  }
-  // By number of legs won: simulated share next to the exact chance.
-  const exact = new Float64Array(1 << n);
+  const chance = new Float64Array(1 << n);
   for (let won = 0; won < 1 << n; won++) {
     let p = 1;
     for (let i = 0; i < n; i++) p *= won & (1 << i) ? legs[i].fairChance : 1 - legs[i].fairChance;
-    exact[won] = p;
+    chance[won] = p;
   }
-  const byHits = Array.from({ length: n + 1 }, (_, hits) => ({ hits, simulated: 0, exact: 0, min: Infinity, max: 0 }));
+  let expectedGross = 0;
+  let expectedNet = 0;
+  let second = 0;
+  let paid = 0;
+  let profit = 0;
+  const byHits = Array.from({ length: n + 1 }, (_, hits) => ({ hits, chance: 0, min: Infinity, max: 0, profit: false }));
   for (let won = 0; won < 1 << n; won++) {
+    const p = chance[won];
+    expectedGross += p * gross[won];
+    expectedNet += p * net[won];
+    second += p * net[won] * net[won];
+    if (gross[won] > 0) paid += p;
+    if (net[won] > cost) profit += p;
     let hits = 0;
     for (let i = 0; i < n; i++) if (won & (1 << i)) hits++;
     const row = byHits[hits];
-    row.simulated += counts[won] / runs;
-    row.exact += exact[won];
+    row.chance += p;
     row.min = Math.min(row.min, net[won]);
     row.max = Math.max(row.max, net[won]);
+    if (net[won] > cost) row.profit = true;
   }
-  const exactNet = exact.reduce((s, p, won) => s + p * net[won], 0);
-  const exactPaid = exact.reduce((s, p, won) => s + (gross[won] > 0 ? p : 0), 0);
-  const exactProfit = exact.reduce((s, p, won) => s + (net[won] > cost ? p : 0), 0);
+  const all = (1 << n) - 1;
+  // Fewest legs won that can still show a profit.
+  const profitFrom = byHits.find(r => r.profit)?.hits ?? null;
+  // Each leg on its own (odds x chance) and the ticket without it.
+  const backPer100 = cost > 0 ? (expectedNet / cost) * 100 : 0;
+  const legInfo = legs.map((leg, i) => {
+    const rest = legs.filter((_, j) => j !== i);
+    const restSizes = [...new Set(sizes.map(k => Math.min(k, rest.length)))].filter(k => k >= 1);
+    const without = rest.length && restSizes.length ? evaluateSlip({ legs: rest, sizes: restSizes, stake }) : null;
+    return {
+      fairOdds: 1 / leg.fairChance,
+      value: leg.fairChance * leg.odds * 100,
+      without: without && without.cost > 0 ? (without.expectedNet / without.cost) * 100 : null
+    };
+  });
+  const weakest = legInfo.reduce((w, l, i) => (l.value < legInfo[w].value ? i : w), 0);
+
+  // Same ticket every week: draw each week's result from the exact chances.
+  const cumulative = new Float64Array(1 << n);
+  let run = 0;
+  for (let won = 0; won < 1 << n; won++) cumulative[won] = run += chance[won];
+  const random = seededRandom(seed);
+  const finals = new Float64Array(seasons);
+  let ahead = 0;
+  let neverPaid = 0;
+  for (let s = 0; s < seasons; s++) {
+    let total = 0;
+    let anyPaid = false;
+    for (let w = 0; w < weeks; w++) {
+      const u = random() * run;
+      let lo = 0;
+      let hi = all;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cumulative[mid] < u) lo = mid + 1;
+        else hi = mid;
+      }
+      total += net[lo] - cost;
+      if (gross[lo] > 0) anyPaid = true;
+    }
+    finals[s] = total;
+    if (total > 0) ahead++;
+    if (!anyPaid) neverPaid++;
+  }
+  finals.sort();
+  const at = q => finals[Math.min(seasons - 1, Math.floor(q * seasons))];
   return {
-    runs,
     cost,
-    paidShare: paid / runs,
-    profitShare: profit / runs,
-    averageNet: netSum / runs,
-    exact: { paidShare: exactPaid, profitShare: exactProfit, averageNet: exactNet },
+    combos: cost / stake,
+    expectedGross,
+    expectedNet,
+    backPer100,
+    sd: Math.sqrt(Math.max(0, second - expectedNet * expectedNet)),
+    // Per NT$100: the lottery's cut, the tax, and what comes back.
+    per100: cost > 0 ? { take: 100 - (expectedGross / cost) * 100, tax: ((expectedGross - expectedNet) / cost) * 100, back: backPer100 } : null,
+    paid,
+    profit,
+    profitFrom,
+    top: { chance: chance[all], net: net[all] },
     byHits,
-    stories: { firstPayout, firstAll, best: best.net > 0 ? best : null }
+    legs: legInfo,
+    weakest,
+    year: { weeks, ahead: ahead / seasons, neverPaid: neverPaid / seasons, q10: at(0.1), q50: at(0.5), q90: at(0.9), expected: weeks * (expectedNet - cost) }
   };
 }
 

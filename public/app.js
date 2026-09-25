@@ -14,7 +14,7 @@ import {
   estimateFuturesOdds,
   estimateLotteryOdds,
   evaluateSlip,
-  simulateSlipOutcomes,
+  analyzeSlip,
   expectedReturn,
   habitPools,
   lotteryTotalLines,
@@ -34,6 +34,7 @@ import {
 } from './lib/odds.mjs';
 import { loadOdds, taipeiDayKey } from './lib/sources.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
+import { f1Driver, teamLogo } from './lib/teams.mjs';
 
 const STAKE = 100;
 // Simulated players per habit. Big enough that the results barely move
@@ -48,7 +49,9 @@ const SIM_PLAYERS_SHOWN = Math.round(SIM_PLAYERS / 1000) * 1000;
 const THIN_LIQUIDITY = 10_000;
 const TIE_BAND = 2;
 // Championship teams shown before the rest fold away.
-const FUTURES_SHOWN = 6;
+const FUTURES_SHOWN = 8;
+const SPORT_ICON = { all: '🏟️', mlb: '⚾', epl: '⚽', nba: '🏀', f1: '🏎️' };
+const HABIT_ICON = { casual: '🙂', fan: '📣', underdog: '🐶', dreamer: '🌈', chaser: '😤', careful: '🧮' };
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
 
 const state = {
@@ -63,13 +66,14 @@ const state = {
   // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
   slipSizes: new Set([2, 'all']),
   slipStake: 100,
-  // Last "run it 100,000 times" result, for the ticket it was run on.
-  slipRun: null,
   day: null,
   // True until the first simulation is ready: the loading screen covers the page.
   booting: true,
   sport: 'all',
-  tab: 'games'
+  tab: 'games',
+  // Game cards showing all their markets, and cards showing real-odds boxes.
+  open: new Set(),
+  editing: new Set()
 };
 state.t = makeT(state.locale);
 
@@ -176,6 +180,7 @@ function buildBets(data) {
         ...base,
         id: `${game.id}|ml|${side}`,
         kind: 'ml',
+        side,
         market: 'ml',
         chip: name,
         // Never below half of Polymarket's 1-cent price step.
@@ -299,6 +304,7 @@ function buildBets(data) {
         start: data.f1.startUtc,
         label: `F1 ${d.name}`,
         shortLabel: d.name,
+        driver: f1Driver(d.name),
         fairChance: d.fair,
         fairMargin: null,
         errKey: d.fair < 0.01 ? 'f1Longshot' : 'f1',
@@ -330,6 +336,7 @@ function buildFutures(data) {
       matchup: title,
       label: `${title} ${teamName(team.name)}`,
       shortLabel: teamName(team.name),
+      teamEn: team.name.en,
       fairChance: team.fair,
       fairMargin: null,
       errKey: team.fair < 0.004 && market.sport !== 'nba' ? 'futureLongshot' : `future_${market.key}`,
@@ -397,6 +404,14 @@ function rerenderFiltered() {
   renderF1();
 }
 
+function chip({ pressed, icon, text, count, onclick }) {
+  return el('button', { class: 'chip', type: 'button', 'aria-pressed': String(pressed), onclick }, [
+    icon ? el('span', { class: 'chip-icon', 'aria-hidden': 'true', text: icon }) : null,
+    el('span', { text }),
+    count ? el('span', { class: 'chip-count', text: count }) : null
+  ]);
+}
+
 function renderSportFilter() {
   const t = state.t;
   const present = new Set([...state.bets, ...state.futures].map(b => b.sport));
@@ -404,10 +419,9 @@ function renderSportFilter() {
   if (!sports.includes(state.sport)) state.sport = 'all';
   $('sport-filter').replaceChildren(
     ...sports.map(sport =>
-      el('button', {
-        class: 'ghost-button',
-        type: 'button',
-        'aria-pressed': String(sport === state.sport),
+      chip({
+        pressed: sport === state.sport,
+        icon: SPORT_ICON[sport],
         text: t(`sport_${sport}`),
         onclick: () => {
           state.sport = sport;
@@ -427,12 +441,10 @@ function renderDayFilter() {
       const games = state.data.games.filter(g => inSport(g.sport) && dayKey(g.startUtc) === day).length;
       const hasF1 = inSport('f1') && state.data.f1 && dayKey(state.data.f1.startUtc) === day;
       const [y, m, d] = day.split('-').map(Number);
-      const count = [games ? String(games) : null, hasF1 ? 'F1' : null].filter(Boolean).join(' + ');
-      return el('button', {
-        class: 'ghost-button',
-        type: 'button',
-        'aria-pressed': String(day === state.day),
-        text: `${fmt.format(new Date(y, m - 1, d))} · ${count}`,
+      return chip({
+        pressed: day === state.day,
+        text: fmt.format(new Date(y, m - 1, d)),
+        count: [games ? String(games) : null, hasF1 ? 'F1' : null].filter(Boolean).join('+'),
         onclick: () => {
           state.day = day;
           rerenderFiltered();
@@ -448,16 +460,29 @@ function backClass(back) {
   return '';
 }
 
+// A team logo, or its initials in a circle when there's no logo (or it fails).
+function logoImg(sport, enName, label, size = '') {
+  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: (label || '?').slice(0, 2) });
+  const src = teamLogo(sport, enName);
+  if (!src) return fallback();
+  const img = el('img', { class: `logo ${size}`, src, alt: '', loading: 'lazy', width: '30', height: '30' });
+  img.addEventListener('error', () => img.replaceWith(fallback()), { once: true });
+  return img;
+}
+
 // ---- Rendering: static text ------------------------------------------------
+
+// The guide's groups, in order: the odds math, then i18n's `guide` groups.
+const GUIDE_ICONS = ['🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '🎲', '⚖️', '📡'];
 
 function renderStatic() {
   const t = state.t;
   document.documentElement.lang = state.locale === 'zh' ? 'zh-Hant' : 'en';
   document.title = `${t('title')} · Odds Study`;
   $('title').textContent = t('title');
-  $('subtitle').textContent = t('subtitle');
   $('notice').textContent = t('notice');
-  $('refresh').textContent = t('refresh');
+  $('refresh').setAttribute('aria-label', t('refresh'));
+  $('refresh').title = t('refresh');
   for (const option of $('sim-weeks').options) option.textContent = t(`period_${option.value}`);
   $('footer').textContent = t('footer');
   for (const [id, key] of [
@@ -471,27 +496,55 @@ function renderStatic() {
   ])
     $(id).textContent = t(key);
   for (const node of document.querySelectorAll('[data-t]')) node.textContent = t(node.dataset.t);
+  for (const tab of TABS) $(`tab-${tab}`).querySelector('.tab-label').textContent = t(`tab_${tab}`);
+  renderLegend();
+  renderPeriods();
   // The guide: the odds math, then every habit, kind of fan, kind of bet, how
-  // the simulators work, the rules and the data, each group folded but the first.
+  // the simulators work, the rules and the data, each group folded.
   const groups = [[t('guideMathTitle'), t('mathSteps')], ...t('guide')];
   $('math-body').replaceChildren(
     ...groups.map(([title, items], i) =>
-      el('details', { class: 'guide-group', ...(i === 0 ? { open: '' } : {}) }, [
-        el('summary', { text: title }),
-        ...items.map(([h, p]) => el('div', { class: 'math-step' }, [el('h3', { text: h }), el('p', { text: p })]))
+      el('details', { class: 'card fold guide-group' }, [
+        el('summary', {}, [
+          el('span', { class: 'guide-icon', 'aria-hidden': 'true', text: GUIDE_ICONS[i] ?? '📘' }),
+          el('span', {}, [el('span', { text: title }), el('span', { class: 'guide-count', text: ` · ${items.length}` })])
+        ]),
+        el('div', {}, items.map(([h, p]) => el('div', { class: 'math-step' }, [el('h3', { text: h }), el('p', { text: p })])))
       ])
     )
   );
 }
 
+// What the numbers on a pick mean, in one line, with the ± explained on tap.
+function renderLegend() {
+  const t = state.t;
+  $('legend').replaceChildren(
+    el('span', {}, [el('b', { text: '1.80' }), document.createTextNode(` ${t('legendOdds')}`)]),
+    el('span', {}, [el('b', { text: '52%' }), document.createTextNode(` ${t('legendFair')}`)]),
+    el('span', {}, [el('b', { text: t('backTiny', { v: '87' }) }), document.createTextNode(` ${t('legendBack')}`)]),
+    el('span', { text: t('legendTap') }),
+    el('details', {}, [el('summary', { text: t('marginsHelpTitle') }), el('p', { text: t('marginsHelp') })])
+  );
+}
+
 function renderStatus(kind) {
   const t = state.t;
-  if (kind === 'loading') $('status').textContent = t('loading');
-  else if (kind === 'error') $('status').textContent = t('loadFailed');
-  else $('status').textContent = `${t('updated')} ${fmtTime(state.data.loadedAt)} · ${t('sources')}`;
+  const status = $('status');
+  if (kind === 'loading') status.textContent = t('loading');
+  else if (kind === 'error') status.textContent = t('loadFailed');
+  else status.textContent = `${t('updated')} ${fmtTime(state.data.loadedAt)} · DraftKings + Polymarket`;
+  status.title = t('sources');
 }
 
 // ---- Ranking ------------------------------------------------------------------
+
+function betIcon(bet) {
+  if (bet.kind === 'f1') return driverBadge(bet, 'logo-sm');
+  if (bet.kind === 'future') return logoImg(bet.sport, bet.teamEn, bet.shortLabel, 'logo-sm');
+  const side = bet.side ?? (/\|(away|home)$/.exec(bet.id)?.[1] || /\|tt\|(away|home)\|/.exec(bet.id)?.[1]);
+  if (bet.game && side) return logoImg(bet.sport, bet.game[side].en, teamName(bet.game[side]), 'logo-sm');
+  return el('span', { class: 'logo logo-sm', 'aria-hidden': 'true', text: SPORT_ICON[bet.sport] ?? '' });
+}
 
 function renderRanking() {
   const t = state.t;
@@ -501,34 +554,31 @@ function renderRanking() {
     list.replaceChildren(el('li', { class: 'muted', text: t('noBets') }));
     return;
   }
-  const top = ranked;
   const scaleMax = Math.max(100, betReturn(ranked[0])) * 1.04;
   const best = betReturn(ranked[0]);
-  const hasReal = id => Number(state.userOdds[id]) >= 1.01;
   const items = ranked.map((bet, i) => {
     const back = betReturn(bet);
-    const track = el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
-      el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
-      el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
-    ]);
     const context = bet.label.includes(bet.matchup) ? fmtTime(bet.start) : `${bet.matchup} · ${fmtTime(bet.start)}`;
-    const tag = hasReal(bet.id) ? t('tagReal') : t('tagEstimated');
     return el('li', { class: 'ranking-item' }, [
       el('span', { class: 'rank', text: String(i + 1) }),
+      betIcon(bet),
       el('span', { class: 'rank-label' }, [
         document.createTextNode(`${bet.label} @ ${fmtOdds(effectiveOdds(bet))} `),
-        el('span', { class: `tag ${hasReal(bet.id) ? 'tag-real' : ''}`, text: tag }),
+        hasRealOdds(bet) ? el('span', { class: 'tag tag-real', text: t('tagReal') }) : null,
         el('small', { text: ` ${context}` })
       ]),
       el('span', { class: `rank-value ${backClass(back)}` }, [document.createTextNode(fmtMoney(back, { sign: false })), marginEl(`±${Math.round(betBackMargin(bet))}`)]),
-      track
+      el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
+        el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
+        el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
+      ])
     ]);
   });
   list.replaceChildren(...items);
-  const tied = top.filter(b => best - betReturn(b) <= TIE_BAND).length;
+  const tied = ranked.filter(b => best - betReturn(b) <= TIE_BAND).length;
   const notes = [];
   if (tied > 1) notes.push(`#1–#${tied}: ${t('tie')}`);
-  if (!ranked.some(b => hasReal(b.id))) notes.push(t('rankingEstimateNote'));
+  if (!ranked.some(hasRealOdds)) notes.push(t('rankingEstimateNote'));
   const noteBox = list.parentElement.querySelector('.ranking-notes') || el('div', { class: 'ranking-notes' });
   noteBox.replaceChildren(...notes.map(text => el('p', { class: 'tie-note', text })));
   list.after(noteBox);
@@ -540,114 +590,184 @@ function renderGames() {
   const t = state.t;
   const container = $('games-list');
   const games = state.data.games.filter(g => inSport(g.sport) && dayKey(g.startUtc) === state.day);
+  $('games').hidden = games.length === 0 && !(inSport('f1') && state.data.f1);
   if (games.length === 0) {
     container.replaceChildren(el('p', { class: 'muted', text: t('noBets') }));
     return;
   }
-  const byGame = Map.groupBy ? Map.groupBy(state.bets, b => b.gameId) : groupBy(state.bets, b => b.gameId);
-  container.replaceChildren(
-    ...games
-      .filter(g => byGame.get(g.id))
-      .map(game => {
-        const bets = byGame.get(game.id);
-        const sourceKey = game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
-        const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
-        const meta = `${t(`sport_${game.sport}`)} · ${fmtTime(game.startUtc)} · ${t(sourceKey)}${thin ? ` · ${t('thin')}` : ''}`;
-        const notes = [];
-        if (game.sport === 'epl') notes.push(el('p', { class: 'note', text: t('soccerUnverified') }));
-        if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) {
-          notes.push(el('p', { class: 'note', text: t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }) }));
-        }
-        return el('article', { class: 'game' }, [
-          el('div', { class: 'game-head' }, [
-            el('span', { class: 'game-title', text: matchupText(game) }),
-            el('span', { class: 'game-meta', text: meta })
-          ]),
-          ...gameSections(bets),
-          ...notes
-        ]);
-      })
-  );
+  const byGame = groupBy(state.bets, b => b.gameId);
+  container.replaceChildren(...games.filter(g => byGame.get(g.id)).map(game => gameCard(game, byGame.get(game.id))));
 }
 
-// One section per kind of bet, each with its take (one market's worth: the
-// first line of totals / run lines, one team of team totals). The inning
-// market's ten results fold away.
-const SECTIONS = [
-  { kind: 'ml', title: 'secMoneyline', market: bets => bets },
-  { kind: 'total', title: 'secTotal', market: bets => bets.slice(0, 2) },
-  { kind: 'runline', title: 'secRunLine', market: bets => bets.slice(0, 2) },
-  { kind: 'teamtotal', title: 'secTeamTotal', market: bets => bets.slice(0, 2) },
-  { kind: 'inning', title: 'secTopInning', market: bets => bets, folded: true }
-];
+function hhmm(iso) {
+  return new Intl.DateTimeFormat(numberLocale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Taipei' }).format(new Date(iso));
+}
 
-function gameSections(bets) {
+// A game: its teams with logos and win picks; every other market folds away.
+function gameCard(game, bets) {
   const t = state.t;
-  return SECTIONS.filter(s => bets.some(b => b.kind === s.kind)).map(s => {
-    const group = bets.filter(b => b.kind === s.kind);
-    const head = el('div', { class: 'section-head' }, [el('span', { class: 'section-title', text: t(s.title) }), el('span', { class: 'section-take', text: `${t('takeLabel')} ${takeText(s.market(group))}` })]);
-    if (s.folded) return el('details', { class: 'bet-section folded' }, [el('summary', {}, head), marketRows(group)]);
-    return el('div', { class: 'bet-section' }, [head, marketRows(group)]);
+  const open = state.open.has(game.id);
+  const editing = state.editing.has(game.id);
+  const ml = bets.filter(b => b.kind === 'ml');
+  const sides = game.sport === 'epl' ? ['home', 'draw', 'away'] : ['away', 'home'];
+  const rows = sides.map(side => {
+    const bet = ml.find(b => b.side === side);
+    const who =
+      side === 'draw'
+        ? [el('span', { class: 'draw-icon', 'aria-hidden': 'true', text: '🤝' }), el('span', { class: 'team-name', text: t('draw') })]
+        : [
+            logoImg(game.sport, game[side].en, teamName(game[side])),
+            el('span', { class: 'team-name' }, [document.createTextNode(teamName(game[side])), el('small', { text: t(side === 'home' ? 'homeTag' : 'awayTag') })])
+          ];
+    return el('div', { class: 'team-row' }, [...who, bet ? pickButton(bet, '', editing) : null]);
+  });
+  const others = bets.filter(b => b.kind !== 'ml');
+  const kinds = SECTIONS.filter(s => s.kind !== 'ml' && others.some(b => b.kind === s.kind)).map(s => t(s.short));
+  const toggle = () => {
+    if (state.open.has(game.id)) state.open.delete(game.id);
+    else state.open.add(game.id);
+    renderGames();
+  };
+  return el('article', { class: `game ${open ? 'open' : ''}` }, [
+    el('div', { class: 'game-top' }, [
+      el('span', { class: 'sport-pill' }, [el('span', { 'aria-hidden': 'true', text: SPORT_ICON[game.sport] }), document.createTextNode(t(`sport_${game.sport}`))]),
+      el('span', { class: 'game-time', text: hhmm(game.startUtc) }),
+      ml.length ? el('span', { class: 'game-take' }, takePill(ml)) : null
+    ]),
+    el('div', { class: 'team-rows' }, rows),
+    open ? gameMore(game, others, editing) : null,
+    el('button', { class: 'more-toggle', type: 'button', 'aria-expanded': String(open), onclick: toggle }, [
+      document.createTextNode(open ? t('lessMarkets') : t('moreMarkets')),
+      !open && kinds.length ? el('span', { class: 'more-kinds', text: kinds.join(' · ') }) : null
+    ])
+  ]);
+}
+
+// Every other market of a game, one small card each, then the game's details.
+function gameMore(game, bets, editing) {
+  const t = state.t;
+  const markets = [];
+  for (const s of SECTIONS.filter(s => s.kind !== 'ml')) {
+    for (const options of groupBy(bets.filter(b => b.kind === s.kind), b => b.market).values()) {
+      const label = options[0].marketLabel ? `${t(s.title)} ${options[0].marketLabel}` : t(s.title);
+      markets.push(
+        el('div', { class: `market ${s.wide ? 'wide' : ''}` }, [
+          el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: label }), takePill(options)]),
+          el('div', { class: 'market-picks' }, options.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)))
+        ])
+      );
+    }
+  }
+  const sourceKey = game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
+  const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
+  const notes = [];
+  if (game.sport === 'epl') notes.push(t('soccerUnverified'));
+  if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) notes.push(t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }));
+  if (thin) notes.push(t('thin'));
+  return el('div', { class: 'game-more' }, [
+    markets.length ? el('div', { class: 'markets' }, markets) : null,
+    el('div', { class: 'game-foot' }, [
+      el('span', { text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }),
+      editToggle(game.id, renderGames),
+      notes.length ? el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
+    ])
+  ]);
+}
+
+// Shows or hides the real-odds boxes of one card.
+function editToggle(id, rerender) {
+  const on = state.editing.has(id);
+  return el('button', {
+    class: 'ghost-button',
+    type: 'button',
+    'aria-pressed': String(on),
+    text: state.t(on ? 'editOddsDone' : 'editOdds'),
+    onclick: () => {
+      if (on) state.editing.delete(id);
+      else state.editing.add(id);
+      rerender();
+    }
   });
 }
 
-// One row per market (a line, a team), its outcomes side by side as cards.
-function marketRows(bets) {
-  const markets = groupBy(bets, b => b.market);
-  const labelled = markets.size > 1;
-  return el('div', { class: 'markets' },
-    [...markets.values()].map(options =>
-      el('div', { class: 'market' }, [
-        labelled && options[0].marketLabel ? el('div', { class: 'market-label', text: options[0].marketLabel }) : null,
-        el('div', { class: `options options-${Math.min(options.length, 3)}` }, options.map(optionCard))
-      ])
-    )
-  );
+// One section per kind of bet, each market of it with its own take. The
+// inning market's ten results take a whole row.
+const SECTIONS = [
+  { kind: 'ml', title: 'secMoneyline', short: 'secMoneyline' },
+  { kind: 'total', title: 'secTotal', short: 'secTotal' },
+  { kind: 'runline', title: 'secRunLine', short: 'secRunLine' },
+  { kind: 'teamtotal', title: 'secTeamTotal', short: 'secTeamTotal' },
+  { kind: 'inning', title: 'secTopInning', short: 'secTopInningShort', wide: true }
+];
+
+function takePill(bets) {
+  return el('span', { class: 'take-pill', title: state.t('takeLabel'), text: state.t('takeShort', { v: takeText(bets) }) });
 }
 
-// One outcome: name, estimated lottery odds, fair chance, average back, a box
-// for the real odds and the bet-slip button.
-function optionCard(bet) {
+function fmtPctShort(p) {
+  return p >= 0.1 ? `${Math.round(p * 100)}%` : `${(p * 100).toFixed(1)}%`;
+}
+
+// "52% · 回 87": the fair chance and the average back per NT$100.
+function pickSub(bet) {
+  return [document.createTextNode(`${fmtPctShort(bet.fairChance)} · `), el('b', { text: state.t('backTiny', { v: Math.round(betReturn(bet)) }) })];
+}
+
+function pickTitle(bet) {
+  const t = state.t;
+  const err = ODDS_ERROR[bet.errKey];
+  return [
+    bet.label,
+    `${t('legendOdds')} ${fmtOdds(effectiveOdds(bet))}${hasRealOdds(bet) ? ` (${t('tagReal')})` : ` ±${fmtOdds(bet.estOdds * err.rel)}${err.checked ? '' : '?'}`}`,
+    `${t('colFair')} ${fmtPct(bet.fairChance)}${bet.fairMargin ? ` ${fmtMarginPts(bet.fairMargin)}${bet.typicalMargin ? '*' : ''}` : ''}`,
+    `${t('legendBack')} ${fmtMoney(betReturn(bet), { sign: false })} ±${Math.round(betBackMargin(bet))}`
+  ].join('\n');
+}
+
+function canAddToSlip() {
+  return true;
+}
+
+// A pick: tap to put it on the bet slip (or take it off). The big number is
+// the estimated lottery odds; below it the fair chance and average back.
+function pickButton(bet, name, editing) {
   const t = state.t;
   const back = betReturn(bet);
   const inSlip = state.parlay.includes(bet.id);
   const err = ODDS_ERROR[bet.errKey];
-  const input = el('input', {
-    class: 'opt-real',
+  const add = canAddToSlip(bet);
+  const body = [
+    name ? el('span', { class: 'pick-name', text: name }) : null,
+    el('span', { class: 'pick-odds' }, [
+      document.createTextNode(fmtOdds(effectiveOdds(bet))),
+      el('small', { text: hasRealOdds(bet) ? t('tagReal') : `±${fmtOdds(bet.estOdds * err.rel)}` })
+    ]),
+    el('span', { class: 'pick-sub', 'data-back': bet.id }, pickSub(bet))
+  ];
+  const pick = el(add ? 'button' : 'div', {
+    class: `pick ${backClass(back)} ${inSlip ? 'in-slip' : ''}`,
+    type: add ? 'button' : null,
+    title: pickTitle(bet),
+    'aria-pressed': add ? String(inSlip) : null,
+    'aria-label': add ? `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}` : null,
+    onclick: add ? () => toggleLeg(bet) : null
+  }, body);
+  if (!editing) return pick;
+  return el('div', { class: 'pick-wrap' }, [pick, realOddsInput(bet, 'pick-real')]);
+}
+
+function realOddsInput(bet, cls) {
+  return el('input', {
+    class: cls,
     type: 'number',
     inputmode: 'decimal',
     step: '0.01',
     min: '1.01',
-    placeholder: t('realOddsShort'),
-    'aria-label': `${bet.label} ${t('colReal')}`,
+    placeholder: state.t('realOddsShort'),
+    'aria-label': `${bet.label} ${state.t('colReal')}`,
     value: state.userOdds[bet.id] ?? null,
     oninput: event => onUserOdds(bet, event.target.value)
   });
-  const canAdd = bet.kind !== 'f1' && bet.kind !== 'future' && bet.kind !== 'inning';
-  const addButton = canAdd
-    ? el('button', {
-        class: 'opt-add',
-        type: 'button',
-        'aria-pressed': String(inSlip),
-        'aria-label': inSlip ? t('removeLeg') : t('addLeg'),
-        text: inSlip ? '✓' : '+',
-        onclick: () => toggleLeg(bet)
-      })
-    : null;
-  return el('div', { class: `opt ${inSlip ? 'in-slip' : ''} ${backClass(back)}` }, [
-    el('div', { class: 'opt-row' }, [el('span', { class: 'opt-name', text: bet.chip ?? bet.shortLabel }), addButton]),
-    el('div', { class: 'opt-row' }, [
-      el('span', { class: 'opt-odds' }, [
-        document.createTextNode(fmtOdds(effectiveOdds(bet))),
-        el('small', { text: hasRealOdds(bet) ? t('tagReal') : `±${fmtOdds(bet.estOdds * err.rel)}${err.checked ? '' : '?'}` })
-      ]),
-      el('span', { class: 'opt-fair', title: t('colFair'), text: `${fmtPct(bet.fairChance)}${bet.fairMargin ? ` ${fmtMarginPts(bet.fairMargin)}${bet.typicalMargin ? '*' : ''}` : ''}` })
-    ]),
-    el('div', { class: 'opt-row' }, [
-      el('span', { class: 'opt-back-wrap' }, [el('small', { text: t('backShort') }), el('span', { class: `opt-back ${backClass(back)}`, 'data-back': bet.id }, backCell(bet))]),
-      input
-    ])
-  ]);
 }
 
 function groupBy(items, key) {
@@ -666,54 +786,101 @@ function takeText(bets, labelKey) {
   return labelKey ? `${state.t(labelKey)} ${pct}` : pct;
 }
 
-function takeNote(parts) {
-  return el('p', { class: 'note take-note', text: `${state.t('takeLabel')}：${parts.join(' · ')}` });
-}
-
-function backCell(bet) {
-  return [document.createTextNode(fmtMoney(betReturn(bet), { sign: false })), marginEl(`±${Math.round(betBackMargin(bet))}`)];
-}
-
 function onUserOdds(bet, raw) {
   const value = Number(raw);
   if (raw === '' || !(value >= 1.01)) delete state.userOdds[bet.id];
   else state.userOdds[bet.id] = value;
   saveUserOdds();
-  const cell = document.querySelector(`[data-back="${CSS.escape(bet.id)}"]`);
-  if (cell) {
-    cell.replaceChildren(...backCell(bet));
-    cell.className = cell.classList.contains('opt-back') ? `opt-back ${backClass(betReturn(bet))}` : `num ${backClass(betReturn(bet))}`;
+  // Update the numbers in place: redrawing the card would drop the typing focus.
+  for (const cell of document.querySelectorAll(`[data-back="${CSS.escape(bet.id)}"]`)) {
+    const back = betReturn(bet);
+    if (cell.classList.contains('pick-sub')) {
+      cell.replaceChildren(...pickSub(bet));
+      const pick = cell.closest('.pick');
+      pick.classList.remove('back-high', 'back-low');
+      if (backClass(back)) pick.classList.add(backClass(back));
+      pick.querySelector('.pick-odds').firstChild.textContent = fmtOdds(effectiveOdds(bet));
+    } else {
+      cell.replaceChildren(document.createTextNode(fmtOdds(effectiveOdds(bet))), el('small', { text: state.t('backTiny', { v: Math.round(back) }) }));
+    }
   }
   renderRanking();
   renderParlay();
   renderSim();
 }
 
-// ---- Futures ------------------------------------------------------------------
+// ---- Championships and F1: one board each -------------------------------------
+
+function driverBadge(bet, size = '') {
+  const initials = bet.shortLabel.split(/\s+/).filter(w => !/^jr\.?$/i.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  return el('span', { class: `driver-badge ${size}`, style: `--team:${bet.driver.color}`, 'aria-hidden': 'true', text: initials });
+}
+
+// One row per team or driver: picture, name, chance, then the estimated odds
+// and average back as a button that puts the pick on the slip.
+function entryRow(bet, i, editing, picture, sub) {
+  const t = state.t;
+  const inSlip = state.parlay.includes(bet.id);
+  return el('div', { class: `entry ${inSlip ? 'in-slip' : ''}`, title: pickTitle(bet) }, [
+    el('span', { class: 'entry-rank', text: String(i + 1) }),
+    picture,
+    el('span', { class: 'entry-name' }, [document.createTextNode(bet.shortLabel), el('small', { text: [fmtPctShort(bet.fairChance), sub].filter(Boolean).join(' · ') })]),
+    editing
+      ? realOddsInput(bet, 'entry-real')
+      : el('button', {
+          class: `entry-odds ${inSlip ? 'in-slip' : ''}`,
+          type: 'button',
+          'data-back': bet.id,
+          'aria-pressed': String(inSlip),
+          'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}`,
+          onclick: () => toggleLeg(bet)
+        }, [
+          document.createTextNode(fmtOdds(effectiveOdds(bet))),
+          el('small', { class: backClass(betReturn(bet)), text: t('backTiny', { v: Math.round(betReturn(bet)) }) })
+        ])
+  ]);
+}
+
+function board({ emblem, title, sub, bets, rows, id, notes = [], shown = Infinity }) {
+  const t = state.t;
+  const editing = state.editing.has(id);
+  const entries = bets.map((b, i) => rows(b, i, editing));
+  const rest = entries.slice(shown);
+  return el('article', { class: 'board' }, [
+    el('div', { class: 'board-head' }, [
+      el('span', { class: 'board-emblem', 'aria-hidden': 'true', text: emblem }),
+      el('div', {}, [el('p', { class: 'board-title', text: title }), el('p', { class: 'board-sub', text: sub })]),
+      takePill(bets)
+    ]),
+    el('div', { class: 'entries' }, entries.slice(0, shown)),
+    rest.length ? el('details', { class: 'board-more' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'entries' }, rest)]) : null,
+    el('div', { class: 'board-foot' }, [
+      editToggle(id, () => (renderFutures(), renderF1())),
+      notes.length ? el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
+    ])
+  ]);
+}
 
 function renderFutures() {
   const t = state.t;
-  const markets = Map.groupBy ? Map.groupBy(state.futures.filter(b => inSport(b.sport)), b => b.market) : groupBy(state.futures.filter(b => inSport(b.sport)), b => b.market);
+  const markets = groupBy(state.futures.filter(b => inSport(b.sport)), b => b.market);
   $('futures').hidden = markets.size === 0;
   $('futures-list').replaceChildren(
     ...[...markets.values()].map(bets => {
       const { market, matchup, sport } = bets[0];
       const notes = [];
-      if (sport === 'nba') notes.push(el('p', { class: 'note', text: t('futureNbaNote') }));
-      if (sport === 'epl') notes.push(el('p', { class: 'note', text: t('futureEplNote') }));
-      const rest = bets.slice(FUTURES_SHOWN);
-      return el('article', { class: 'game' }, [
-        el('div', { class: 'game-head' }, [
-          el('span', { class: 'game-title', text: matchup }),
-          el('span', { class: 'game-meta', text: `${t('futureSettles')} ${t(`futureSettle_${market}`)}` })
-        ]),
-        el('div', { class: 'options options-3' }, bets.slice(0, FUTURES_SHOWN).map(optionCard)),
-        rest.length
-          ? el('details', { class: 'more-options' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'options options-3' }, rest.map(optionCard))])
-          : null,
-        takeNote([takeText(bets)]),
-        ...notes
-      ]);
+      if (sport === 'nba') notes.push(t('futureNbaNote'));
+      if (sport === 'epl') notes.push(t('futureEplNote'));
+      return board({
+        emblem: '🏆',
+        title: matchup,
+        sub: `${t('futureSettles')} ${t(`futureSettle_${market}`)}`,
+        bets,
+        id: `fut|${market}`,
+        notes,
+        shown: FUTURES_SHOWN,
+        rows: (b, i, editing) => entryRow(b, i, editing, logoImg(b.sport, b.teamEn, b.shortLabel))
+      });
     })
   );
 }
@@ -725,32 +892,42 @@ function toggleLeg(bet) {
     state.parlay = state.parlay.filter(id => id !== bet.id);
   } else {
     // One pick per game: a new pick from the same game replaces the old one.
-    const sameGame = state.bets.filter(b => b.gameId === bet.gameId).map(b => b.id);
+    const sameGame = slipCandidates().filter(b => b.gameId === bet.gameId).map(b => b.id);
     state.parlay = state.parlay.filter(id => !sameGame.includes(id));
     state.parlay.push(bet.id);
     if (state.parlay.length > SLIP_RULES.maxLegs) state.parlay.shift();
   }
   renderGames();
+  renderF1();
+  renderFutures();
   renderParlay();
 }
 
+// Everything that can go on the slip: games, F1 and championships.
+function slipCandidates() {
+  return [...state.bets, ...state.futures];
+}
+
+// Championships have no start time: they stay open until the lottery closes them.
 function started(bet) {
-  return Date.parse(bet.start) <= Date.now();
+  return bet.start != null && Date.parse(bet.start) <= Date.now();
 }
 
 // Picks on the slip. Games already under way are dropped: the page doesn't
 // cover live (in-play) betting.
 function slipLegs() {
-  const legs = state.parlay.map(id => state.bets.find(b => b.id === id)).filter(Boolean);
+  const candidates = slipCandidates();
+  const legs = state.parlay.map(id => candidates.find(b => b.id === id)).filter(Boolean);
   const live = legs.filter(started);
   if (live.length) state.parlay = state.parlay.filter(id => !live.some(b => b.id === id));
   return { legs: legs.filter(b => !started(b)), dropped: live.length };
 }
 
-function statTile(label, value, extraClass = '', range = null) {
+function statTile(label, value, extraClass = '', range = null, icon = null) {
   return el('div', { class: 'stat' }, [
-    el('p', { class: 'stat-label', text: label }),
+    icon ? el('p', { class: 'stat-icon', 'aria-hidden': 'true', text: icon }) : null,
     el('p', { class: `stat-value ${extraClass}`, text: value }),
+    el('p', { class: 'stat-label', text: label }),
     range ? el('p', { class: 'stat-range', text: state.t('rangeLabel', { range }) }) : null
   ]);
 }
@@ -767,39 +944,101 @@ function sizeName(k, n) {
   return k === n ? state.t('slipAll') : state.t('slipSize', { k });
 }
 
-// The 100,000 versions of one ticket: how often it paid, how often it made a
-// profit, each result's share next to its exact chance, and a few versions.
-function slipRunView(run, legs) {
+// A deep look at the ticket, all computed exactly from each pick's fair chance.
+function slipAnalysisView(a, legs, ranges) {
   const t = state.t;
   const money = v => fmtMoney(v, { sign: false });
   const n = legs.length;
-  const worst = Math.max(...run.byHits.map(r => Math.abs(r.simulated - r.exact)));
-  const legsText = won => legs.map((b, i) => `${won & (1 << i) ? '✓' : '✗'} ${b.shortLabel}`).join('  ');
-  const story = (key, s) => s && el('li', {}, [el('strong', { text: t(key, { v: `#${fmtCount(s.version)}`, pay: money(s.net) }) }), el('small', { text: legsText(s.won) })]);
-  const scale = Math.max(...run.byHits.map(r => Math.max(r.simulated, r.exact)));
-  return el('div', { class: 'run-result' }, [
-    el('p', { class: 'run-headline' }, [
-      document.createTextNode(t('runHeadlinePre', { n: fmtCount(run.runs) })),
-      el('strong', { class: run.paidShare >= 0.5 ? 'back-high' : 'back-low', text: fmtChance(run.paidShare) }),
-      document.createTextNode(t('runHeadlineMid')),
-      el('strong', { class: run.profitShare >= 0.5 ? 'back-high' : 'back-low', text: fmtChance(run.profitShare) }),
-      document.createTextNode(t('runHeadlinePost', { avg: money(run.averageNet), cost: money(run.cost) }))
-    ]),
-    el('ol', { class: 'run-bars' },
-      [...run.byHits].reverse().map(r =>
-        el('li', {}, [
-          el('span', { class: 'run-hits', text: t('slipHitsN', { k: r.hits, n }) }),
-          el('span', { class: 'run-track' }, [
-            el('span', { class: 'run-bar', style: `width:${(r.simulated / scale) * 100}%` }),
-            el('span', { class: 'run-exact', style: `left:${(r.exact / scale) * 100}%` })
-          ]),
-          el('span', { class: 'run-share' }, [el('strong', { text: fmtChance(r.simulated) }), el('small', { text: r.max > 0 ? (r.min === r.max ? money(r.max) : `${money(r.min)}–${money(r.max)}`) : '—' })])
-        ])
-      )
-    ),
-    el('ul', { class: 'run-stories' }, [story('runFirstPayout', run.stories.firstPayout), story('runFirstAll', run.stories.firstAll), story('runBest', run.stories.best)].filter(Boolean)),
-    el('p', { class: 'note', text: t('runExactNote', { paid: fmtChance(run.exact.paidShare), profit: fmtChance(run.exact.profitShare), avg: money(run.exact.averageNet), gap: (worst * 100).toFixed(2) }) })
-  ]);
+  const cards = [];
+
+  // Key numbers.
+  cards.push(
+    el('div', { class: 'card' }, [
+      el('div', { class: 'kpis' }, [
+        statTile(t('slipCost'), money(a.cost), '', null, '💵'),
+        statTile(t('slipBest'), money(a.top.net), 'back-high', null, '🚀'),
+        statTile(t('slipExpected'), money(a.expectedNet), a.backPer100 < 100 ? 'back-low' : 'back-high', ranges.expected, '⚖️'),
+        statTile(t('slipAny'), fmtChance(a.paid), '', ranges.any, '🎯'),
+        statTile(t('slipProfit'), fmtChance(a.profit), a.profit < 0.5 ? 'back-low' : '', ranges.profit, '📈'),
+        statTile(t('slipTakeTax'), fmtPct(1 - a.expectedNet / a.cost), 'back-low', ranges.take, '🏦')
+      ]),
+      el('details', { class: 'info' }, [el('summary', { text: t('slipRangeTitle') }), el('p', { text: t('slipRangeNote') })])
+    ])
+  );
+
+  // Where each NT$100 goes.
+  const { take, tax, back } = a.per100;
+  const seg = (cls, v) => el('span', { class: `split-seg ${cls}`, style: `flex:${Math.max(0, v)}` });
+  cards.push(
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title', text: `💰 ${t('anaSplitTitle')}` }),
+      el('div', { class: 'split-bar', 'aria-hidden': 'true' }, [seg('split-back', back), seg('split-take', take), seg('split-tax', tax)]),
+      el('div', { class: 'split-legend' }, [
+        el('span', {}, [el('i', { class: 'split-back' }), document.createTextNode(`${t('anaBack')} ${money(back)}`)]),
+        el('span', {}, [el('i', { class: 'split-take' }), document.createTextNode(`${t('anaTake')} ${money(take)}`)]),
+        el('span', {}, [el('i', { class: 'split-tax' }), document.createTextNode(`${t('anaTax')} ${money(tax)}`)])
+      ])
+    ])
+  );
+
+  // Every result, exactly.
+  const scale = Math.max(...a.byHits.map(r => r.chance));
+  cards.push(
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title', text: `📊 ${t('anaResultsTitle')}` }),
+      el('ol', { class: 'run-bars' },
+        [...a.byHits].reverse().map(r =>
+          el('li', { class: r.profit ? 'row-profit' : '' }, [
+            el('span', { class: 'run-hits', text: t('slipHitsN', { k: r.hits, n }) }),
+            el('span', { class: 'run-track' }, [el('span', { class: 'run-bar', style: `width:${(r.chance / scale) * 100}%` })]),
+            el('span', { class: 'run-share' }, [el('strong', { text: fmtChance(r.chance) }), el('small', { text: r.max > 0 ? (r.min === r.max ? money(r.max) : `${money(r.min)}–${money(r.max)}`) : '—' })])
+          ])
+        )
+      ),
+      el('p', { class: 'note', text: a.profitFrom == null ? t('anaNoProfit') : t('anaProfitFrom', { k: a.profitFrom, n, p: fmtChance(a.profit) }) })
+    ])
+  );
+
+  // Each pick on its own.
+  cards.push(
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title', text: `🔍 ${t('anaLegsTitle')}` }),
+      el('ul', { class: 'leg-analysis' },
+        legs.map((b, i) => {
+          const info = a.legs[i];
+          return el('li', { class: i === a.weakest && n > 1 ? 'weakest' : '' }, [
+            betIcon(b),
+            el('span', { class: 'leg-main' }, [
+              el('strong', { text: b.shortLabel }),
+              el('small', { class: 'slip-leg-game', text: t('anaLegOdds', { odds: fmtOdds(effectiveOdds(b)), fair: fmtOdds(info.fairOdds), p: fmtPctShort(b.fairChance) }) })
+            ]),
+            el('span', { class: 'leg-value' }, [
+              el('strong', { class: backClass(info.value), text: money(info.value) }),
+              info.without != null && n > 1 ? el('small', { text: t('anaWithout', { v: money(info.without) }) }) : null
+            ])
+          ]);
+        })
+      ),
+      n > 1 ? el('p', { class: 'note', text: t('anaWeakest', { leg: legs[a.weakest].shortLabel, v: money(a.legs[a.weakest].value) }) }) : null
+    ])
+  );
+
+  // The same ticket every week for a year.
+  const y = a.year;
+  const everyYears = a.top.chance > 0 ? 1 / (a.top.chance * y.weeks) : Infinity;
+  cards.push(
+    el('div', { class: 'card' }, [
+      el('h3', { class: 'card-title', text: `📅 ${t('anaYearTitle', { n: y.weeks })}` }),
+      el('div', { class: 'kpis' }, [
+        statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high', null, '🏁'),
+        statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) }), '🧍'),
+        statTile(t('anaYearExpected'), fmtMoney(y.expected), y.expected < 0 ? 'back-low' : 'back-high', null, '📉'),
+        statTile(t('anaTopOdds'), t('anaOneIn', { n: fmtCount(1 / Math.max(a.top.chance, 1e-12)) }), '', everyYears > 1 ? t('anaTopWait', { y: everyYears < 10 ? everyYears.toFixed(1) : fmtCount(everyYears) }) : null, '🎰')
+      ]),
+      y.neverPaid > 0.01 ? el('p', { class: 'note', text: t('anaNeverPaid', { p: fmtChance(y.neverPaid), n: y.weeks }) }) : null
+    ])
+  );
+  return cards;
 }
 
 function renderParlay() {
@@ -816,76 +1055,95 @@ function renderParlay() {
   const errors = slipErrors({ mode, legs: slip, sizes, stake });
   const rerender = () => renderParlay();
 
-  const modeButtons = el('div', { class: 'button-row slip-modes', role: 'group', 'aria-label': t('slipMode') },
-    ['single', 'parlay', 'system'].map(m =>
-      el('button', {
-        class: 'ghost-button',
-        type: 'button',
-        'aria-pressed': String(m === mode),
-        text: t(`slipMode_${m}`),
-        onclick: () => {
-          state.slipMode = m;
-          rerender();
-        }
-      })
-    )
-  );
-  const parts = [modeButtons, el('p', { class: 'note', text: t(`slipModeNote_${mode}`) })];
-  if (dropped) parts.push(el('p', { class: 'note back-low', text: t('slipDroppedLive', { n: dropped }) }));
   if (n === 0) {
-    parts.push(el('p', { class: 'muted', text: t('parlayEmpty') }));
-    body.replaceChildren(...parts);
+    body.replaceChildren(
+      el('div', { class: 'card slip-empty' }, [
+        el('div', { class: 'big-emoji', 'aria-hidden': 'true', text: '🎫' }),
+        el('p', { text: t('parlayEmpty') }),
+        dropped ? el('p', { class: 'back-low', text: t('slipDroppedLive', { n: dropped }) }) : null,
+        el('button', { class: 'primary-button', type: 'button', text: t('goPick'), onclick: () => showTab('games') })
+      ])
+    );
     return;
   }
 
-  parts.push(
+  // Left: the ticket itself. Right: what it can pay and what it costs on average.
+  const ticket = [
+    el('div', { class: 'ticket-head' }, [
+      el('strong', { text: `🎫 ${t('slipLegs', { n })}` }),
+      el('button', {
+        class: 'ghost-button',
+        type: 'button',
+        text: t('clearParlay'),
+        onclick: () => {
+          state.parlay = [];
+          renderGames();
+          renderParlay();
+        }
+      })
+    ]),
+    el('div', { class: 'segmented slip-modes', role: 'group', 'aria-label': t('slipMode') },
+      ['single', 'parlay', 'system'].map(m =>
+        el('button', {
+          type: 'button',
+          'aria-pressed': String(m === mode),
+          text: t(`slipMode_${m}`),
+          onclick: () => {
+            state.slipMode = m;
+            rerender();
+          }
+        })
+      )
+    ),
+    el('p', { class: 'mode-note', text: t(`slipModeNote_${mode}`) }),
+    dropped ? el('p', { class: 'note back-low', text: t('slipDroppedLive', { n: dropped }) }) : null,
     el('ul', { class: 'parlay-legs' },
       legs.map(b =>
         el('li', {}, [
+          betIcon(b),
           // The start time tells doubleheader games apart.
-          el('span', {}, [el('strong', { text: b.shortLabel }), el('small', { class: 'slip-leg-game', text: `${b.matchup} · ${fmtTime(b.start)}` })]),
-          el('span', { class: 'slip-leg-right' }, [
-            el('span', { class: 'num', text: fmtOdds(effectiveOdds(b)) }),
-            el('button', { class: 'ghost-button leg-button', type: 'button', 'aria-label': t('removeLeg'), text: '×', onclick: () => toggleLeg(b) })
-          ])
+          el('span', { class: 'leg-main' }, [el('strong', { text: b.shortLabel }), el('small', { class: 'slip-leg-game', text: b.start ? `${b.matchup} · ${fmtTime(b.start)}` : b.matchup })]),
+          el('span', { class: 'leg-odds', text: fmtOdds(effectiveOdds(b)) }),
+          el('button', { class: 'leg-remove', type: 'button', 'aria-label': t('removeLeg'), text: '×', onclick: () => toggleLeg(b) })
         ])
       )
     )
-  );
-
+  ];
   if (mode === 'system' && n >= 3) {
     const options = [...Array.from({ length: n - 2 }, (_, i) => i + 2), 'all'];
-    parts.push(
-      el('div', { class: 'slip-sizes', role: 'group', 'aria-label': t('slipSizes') },
-        options.map(k => {
-          const size = k === 'all' ? n : k;
-          const on = state.slipSizes.has(k);
-          return el('button', {
-            class: 'ghost-button leg-button',
-            type: 'button',
-            'aria-pressed': String(on),
-            text: `${sizeName(size, n)} · ${t(choose(n, size) === 1 ? 'slipCombo1' : 'slipCombos', { n: choose(n, size) })}`,
-            onclick: () => {
-              if (on) state.slipSizes.delete(k);
-              else state.slipSizes.add(k);
-              rerender();
-            }
-          });
-        })
-      )
+    ticket.push(
+      el('div', { class: 'slip-field' }, [
+        el('span', { text: t('slipSizes') }),
+        el('div', { class: 'slip-sizes', role: 'group', 'aria-label': t('slipSizes') },
+          options.map(k => {
+            const size = k === 'all' ? n : k;
+            const on = state.slipSizes.has(k);
+            return chip({
+              pressed: on,
+              text: sizeName(size, n),
+              count: `×${fmtCount(choose(n, size))}`,
+              onclick: () => {
+                if (on) state.slipSizes.delete(k);
+                else state.slipSizes.add(k);
+                rerender();
+              }
+            });
+          })
+        )
+      ])
     );
   }
-
+  // Typed in NT$10 units, like the lottery's own slip: 10 units = NT$100.
   const stakeInput = el('input', {
-    class: 'odds-input slip-stake',
     type: 'number',
     inputmode: 'numeric',
-    min: String(SLIP_RULES.unit),
-    step: String(SLIP_RULES.unit),
-    value: String(stake),
+    min: '1',
+    step: '1',
+    value: String(Math.round(stake / SLIP_RULES.unit)),
     'aria-label': t('slipStake'),
     onchange: event => {
-      const value = Math.max(0, Math.round(Number(event.target.value) || 0));
+      const units = Math.max(0, Math.round(Number(event.target.value) || 0));
+      const value = units * SLIP_RULES.unit;
       if (value === state.slipStake) return;
       state.slipStake = value;
       // Redraw after the event: redrawing removes this input, and removing a
@@ -893,14 +1151,24 @@ function renderParlay() {
       setTimeout(rerender);
     }
   });
-  parts.push(el('label', { class: 'slip-stake-row' }, [el('span', { text: t('slipStake') }), stakeInput, el('small', { class: 'muted', text: t('slipStakeHint') })]));
-
+  ticket.push(
+    el('label', { class: 'slip-field' }, [
+      el('span', { text: t('slipStake') }),
+      el('span', { class: 'stake-box' }, [
+        stakeInput,
+        el('strong', { text: t('slipStakeEquals', { v: fmtMoney(stake, { sign: false }) }) }),
+        el('small', { text: t('slipStakeHint', { unit: SLIP_RULES.unit }) })
+      ])
+    ])
+  );
   if (errors.length) {
-    parts.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit }) }))));
+    ticket.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit }) }))));
   }
+  ticket.push(el('details', { class: 'info' }, [el('summary', { text: t('slipRulesTitle') }), el('p', { text: t('slipRulesNote') })]));
+
+  let results = [];
   if (sizes.length && !errors.includes('stakeUnit')) {
-    const r = evaluateSlip({ legs: slip, sizes, stake });
-    const backPer100 = r.cost > 0 ? (r.expectedNet / r.cost) * 100 : 0;
+    const a = analyzeSlip({ legs: slip, sizes, stake });
     // Range if every fair chance and estimated price is off by its margin, all
     // the same way (the realistic worst and best case).
     const shifted = dir =>
@@ -914,74 +1182,15 @@ function renderParlay() {
         stake
       });
     const [low, high] = [shifted(-1), shifted(1)];
-    const range = (a, b, fmt) => `${fmt(Math.min(a, b))} – ${fmt(Math.max(a, b))}`;
-    parts.push(
-      el('div', { class: 'stat-row' }, [
-        statTile(t('slipCombosTotal'), `${fmtCount(r.combos)} × ${fmtMoney(stake, { sign: false })}`),
-        statTile(t('slipCost'), fmtMoney(r.cost, { sign: false })),
-        statTile(t('slipBest'), fmtMoney(r.best, { sign: false }), 'back-high'),
-        statTile(t('slipExpected'), fmtMoney(r.expectedNet, { sign: false }), backPer100 < 100 ? 'back-low' : 'back-high', range(low.expectedNet, high.expectedNet, v => fmtMoney(v, { sign: false }))),
-        statTile(t('slipAny'), fmtChance(r.anyPayout), '', range(low.anyPayout, high.anyPayout, fmtChance)),
-        statTile(t('slipProfit'), fmtChance(r.profit), r.profit < 0.5 ? 'back-low' : '', range(low.profit, high.profit, fmtChance)),
-        // The house's share of the ticket (what the average leaves behind), then with Taiwan's tax on top.
-        statTile(t('slipTake'), fmtPct(1 - r.expected / r.cost), '', range(1 - high.expected / r.cost, 1 - low.expected / r.cost, fmtPct)),
-        statTile(t('slipTakeTax'), fmtPct(1 - r.expectedNet / r.cost), 'back-low', range(1 - high.expectedNet / r.cost, 1 - low.expectedNet / r.cost, fmtPct))
-      ]),
-      el('p', { class: 'note', text: t('slipExpectedNote', { back: fmtMoney(backPer100, { sign: false }), gross: fmtMoney(r.expected, { sign: false }) }) }),
-      el('p', { class: 'note', text: t('slipRangeNote') })
-    );
-    parts.push(
-      el('div', { class: 'table-view slip-table' }, [
-        el('table', {}, [
-          el('thead', {}, el('tr', {}, [t('slipHits'), t('slipHitsChance'), t('slipHitsPayout')].map(h => el('th', { text: h })))),
-          el('tbody', {},
-            [...r.byHits].reverse().map(row =>
-              el('tr', {}, [
-                el('td', { text: t('slipHitsN', { k: row.hits, n }) }),
-                el('td', { text: fmtChance(row.chance) }),
-                el('td', { class: row.max > r.cost ? 'back-high' : row.max === 0 ? 'muted' : '', text: row.max === 0 ? '—' : row.min === row.max ? fmtMoney(row.max, { sign: false }) : `${fmtMoney(row.min, { sign: false })} – ${fmtMoney(row.max, { sign: false })}` })
-              ])
-            )
-          )
-        ])
-      ])
-    );
+    const range = (x, y, fmt) => `${fmt(Math.min(x, y))} – ${fmt(Math.max(x, y))}`;
+    results = slipAnalysisView(a, legs, {
+      expected: range(low.expectedNet, high.expectedNet, v => fmtMoney(v, { sign: false })),
+      any: range(low.anyPayout, high.anyPayout, fmtChance),
+      profit: range(low.profit, high.profit, fmtChance),
+      take: range(1 - high.expectedNet / a.cost, 1 - low.expectedNet / a.cost, fmtPct)
+    });
   }
-  // Play this exact ticket out 100,000 times.
-  if (sizes.length && !errors.length) {
-    const runKey = JSON.stringify([slip, sizes, stake]);
-    const run = state.slipRun?.key === runKey ? state.slipRun.result : null;
-    parts.push(
-      el('div', { class: 'slip-run' }, [
-        el('button', {
-          class: 'primary-button',
-          type: 'button',
-          text: run ? t('runAgain') : t('runButton'),
-          onclick: () => {
-            state.slipRun = { key: runKey, result: simulateSlipOutcomes({ legs: slip, sizes, stake, seed: (state.slipRun?.seed ?? 0) + 1 }), seed: (state.slipRun?.seed ?? 0) + 1 };
-            state.slipRun.result && renderParlay();
-          }
-        }),
-        run ? slipRunView(run, legs) : el('p', { class: 'note', text: t('runHint') })
-      ])
-    );
-  }
-  parts.push(
-    el('p', { class: 'note', text: t('slipRulesNote') }),
-    el('div', { class: 'button-row' }, [
-      el('button', {
-        class: 'ghost-button',
-        type: 'button',
-        text: t('clearParlay'),
-        onclick: () => {
-          state.parlay = [];
-          renderGames();
-          renderParlay();
-        }
-      })
-    ])
-  );
-  body.replaceChildren(...parts);
+  body.replaceChildren(el('div', { class: 'slip has-legs' }, [el('div', { class: 'card ticket' }, ticket), el('div', { class: 'slip-results' }, results)]));
 }
 
 // ---- Simulator ----------------------------------------------------------------
@@ -1015,9 +1224,9 @@ function niceStep(range, target) {
 const MIN_WAGE_HOURLY = 196;
 // Each character is the real simulated player at that point of the ranking.
 const CHARACTERS = [
-  { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)' },
-  { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)' },
-  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad)' }
+  { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)', icon: '🍀' },
+  { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)', icon: '🙂' },
+  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)', icon: '😵' }
 ];
 
 function fmtShare(p) {
@@ -1141,10 +1350,12 @@ function drawSim(stats, weeks) {
   const characters = CHARACTERS.map(c => ({ ...c, player: stats.characters[c.key] }));
 
   renderSimHeadline(totals, period);
+  const back = totals.staked > 0 ? ((totals.staked + totals.net) / totals.staked) * 100 : 100;
   $('sim-stats').replaceChildren(
-    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : ''),
-    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare)),
-    statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '')
+    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : '', null, '🧍'),
+    statTile(t('simBackPer100'), fmtMoney(back, { sign: false }), back < 100 ? 'back-low' : '', null, '💸'),
+    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, '📈'),
+    statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '', null, '🏁')
   );
   $('sim-legend').replaceChildren(
     el('span', {}, [el('span', { class: 'legend-key band-outer' }), document.createTextNode(t('simBand80'))]),
@@ -1154,8 +1365,8 @@ function drawSim(stats, weeks) {
   );
   drawSimChart($('sim-chart'), bands, characters, weeks);
   renderPlayers(characters);
-  renderHabits(summaries, period);
-  renderFans(stats.fanSummaries, period);
+  renderHabits(summaries);
+  renderFans(stats.fanSummaries);
   renderFacts(totals, characters, summaries, period);
   renderStories(stats, period);
   renderSimTable(bands, characters, weeks);
@@ -1169,94 +1380,111 @@ function renderSimHeadline(totals, period) {
   const inTen = Math.round(share * 10);
   const back = staked > 0 ? ((staked + net) / staked) * 100 : 100;
   const shareMargin = 1.96 * Math.sqrt((share * (1 - share)) / SIM_PLAYERS);
+  // Ten little people, the ones still ahead in green.
+  const person = won => {
+    const svg = svgEl('svg', { class: `person ${won ? 'won' : ''}`, viewBox: '0 0 24 30', 'aria-hidden': 'true' });
+    svg.append(svgEl('circle', { cx: 12, cy: 7, r: 5.5 }), svgEl('path', { d: 'M2 30v-6a10 10 0 0 1 20 0v6z' }));
+    return svg;
+  };
   $('sim-headline').replaceChildren(
     el('p', { class: 'headline-label', text: t('simHeadlineLabel', { period, n: fmtCount(SIM_PLAYERS_SHOWN) }) }),
     el('p', { class: 'headline-big' }, [
       document.createTextNode(t('simHeadlinePre')),
-      el('strong', { class: share >= 0.5 ? 'good' : '', text: inTen === 0 ? t('simHeadlineNone') : t('simHeadlineShare', { n: inTen }) }),
+      el('strong', { text: inTen === 0 ? t('simHeadlineNone') : t('simHeadlineShare', { n: inTen }) }),
       document.createTextNode(t('simHeadlinePost'))
     ]),
+    el('div', { class: 'people', role: 'img', 'aria-label': t('simHeadlineShare', { n: inTen }) }, Array.from({ length: 10 }, (_, i) => person(i < inTen))),
     el('p', {
       class: 'headline-sub',
       text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked / SIM_PLAYERS, { sign: false }), back: fmtMoney(back, { sign: false }) })
     }),
-    el('p', { class: 'headline-sub margin-note', text: t('simMarginNote', { share: fmtShare(share), n: fmtCount(SIM_PLAYERS_SHOWN), margin: (shareMargin * 100).toFixed(1) }) })
+    el('p', { class: 'margin-note', text: t('simMarginNote', { share: fmtShare(share), n: fmtCount(SIM_PLAYERS_SHOWN), margin: (shareMargin * 100).toFixed(1) }) })
   );
 }
 
 function renderPlayers(characters) {
   const t = state.t;
   $('sim-players').replaceChildren(
-    ...characters.map(({ name, rank, color, player: p }) => {
+    ...characters.map(({ name, rank, color, icon, player: p }) => {
       let tale;
       if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
       else if (!p.everAhead) tale = t('taleNever');
       else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
       const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
       return el('article', { class: 'player', style: `--player:${color}` }, [
-        el('p', { class: 'player-name' }, [
-          document.createTextNode(t(name)),
-          p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null,
-          el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })
+        el('div', { class: 'player-head' }, [
+          el('span', { class: 'avatar', 'aria-hidden': 'true', text: icon }),
+          el('div', {}, [el('p', { class: 'player-name', text: t(name) }), el('p', { class: 'player-rank', text: t(rank) })])
         ]),
-        el('p', { class: 'player-rank', text: t(rank) }),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
         el('p', { class: 'player-tale', text: tale }),
-        line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
-        line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
-        line(t('playerMaxStake'), fmtMoney(p.maxStake, { sign: false })),
-        line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
-        line(t('playerPeak'), p.everAhead ? `${fmtMoney(p.peak)} · ${t('simWeekN', { n: fmtCount(p.peakWeek + 1) })}` : t('playerNeverAhead')),
-        line(t('playerStreak'), t('inARow', { n: p.longestLosing })),
-        line(t('playerDrop'), fmtMoney(-p.maxDrop))
+        el('div', { class: 'player-lines' }, [
+          line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
+          line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
+          line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
+          line(t('playerPeak'), p.everAhead ? `${fmtMoney(p.peak)} · ${t('simWeekN', { n: fmtCount(p.peakWeek + 1) })}` : t('playerNeverAhead')),
+          line(t('playerStreak'), t('inARow', { n: p.longestLosing })),
+          line(t('playerDrop'), fmtMoney(-p.maxDrop))
+        ]),
+        el('div', { class: 'player-tags' }, [
+          p.fan ? el('span', { class: 'habit-tag', text: `${SPORT_ICON[p.fan.key] ?? ''} ${t(`fan_${p.fan.key}`)}` }) : null,
+          el('span', { class: 'habit-tag', text: `${HABIT_ICON[p.habit.key] ?? ''} ${t(`habit_${p.habit.key}`)}` }),
+          el('span', { class: 'habit-tag', text: `${t('playerMaxStake')} ${fmtMoney(p.maxStake, { sign: false })}` })
+        ])
       ]);
     })
   );
 }
 
-function renderHabits(summaries, period) {
+// One row per group: avatar, name, bar to break-even, average back per NT$100.
+function barItem({ icon, name, desc, back, margin, meta, scaleMax }) {
+  return el('li', { class: 'bar-item', title: desc }, [
+    el('span', { class: 'avatar', 'aria-hidden': 'true', text: icon }),
+    el('span', { class: 'bar-name', text: name }),
+    el('span', { class: `rank-value ${backClass(back)}` }, [document.createTextNode(fmtMoney(back, { sign: false })), marginEl(`±${margin.toFixed(1)}`)]),
+    el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
+      el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
+      el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
+    ]),
+    el('span', { class: 'habit-meta', text: meta })
+  ]);
+}
+
+function renderHabits(summaries) {
   const t = state.t;
-  $('habits-intro').textContent = t('habitsIntro', { n: fmtCount(Math.round(PER_HABIT / 100) * 100), period });
   const sorted = [...summaries].sort((a, b) => b.back - a.back);
   const scaleMax = Math.max(100, sorted[0].back) * 1.04;
   $('sim-habits').replaceChildren(
     ...sorted.map(h =>
-      el('li', { class: 'ranking-item habit-item' }, [
-        el('span', { class: 'rank-label' }, [
-          el('strong', { text: t(`habit_${h.habit.key}`) }),
-          el('small', { text: ` ${t(`habitDesc_${h.habit.key}`)}` })
-        ]),
-        el('span', { class: `rank-value ${backClass(h.back)}` }, [document.createTextNode(fmtMoney(h.back, { sign: false })), marginEl(`±${h.backMargin.toFixed(1)}`)]),
-        el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
-          el('div', { class: 'bar', style: `width:${(h.back / scaleMax) * 100}%` }),
-          el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
-        ]),
-        el('span', {
-          class: 'habit-meta',
-          text: t('habitMeta', { ahead: `${fmtShare(h.aheadShare)} ±${(h.aheadMargin * 100).toFixed(1)}`, staked: fmtMoney(h.avgStaked, { sign: false }), final: fmtMoney(h.avgFinal) })
-        })
-      ])
+      barItem({
+        icon: HABIT_ICON[h.habit.key],
+        name: t(`habit_${h.habit.key}`),
+        desc: t(`habitDesc_${h.habit.key}`),
+        back: h.back,
+        margin: h.backMargin,
+        scaleMax,
+        meta: t('habitMeta', { ahead: fmtShare(h.aheadShare), staked: fmtMoney(h.avgStaked, { sign: false }), final: fmtMoney(h.avgFinal) })
+      })
     )
   );
 }
 
 // The same crowd by what they bet on: one sport all year, or everything.
-function renderFans(fans, period) {
+function renderFans(fans) {
   const t = state.t;
-  $('fans-intro').textContent = t('fansIntro', { n: fmtCount(Math.round(fans[0].players / 100) * 100), period });
   const sorted = [...fans].sort((a, b) => b.back - a.back);
   const scaleMax = Math.max(100, sorted[0].back) * 1.04;
   $('sim-fans').replaceChildren(
     ...sorted.map(f =>
-      el('li', { class: 'ranking-item habit-item' }, [
-        el('span', { class: 'rank-label' }, [el('strong', { text: t(`fan_${f.fan.key}`) }), el('small', { text: ` ${t(`fanDesc_${f.fan.key}`)}` })]),
-        el('span', { class: `rank-value ${backClass(f.back)}` }, [document.createTextNode(fmtMoney(f.back, { sign: false })), marginEl(`±${f.backMargin.toFixed(1)}`)]),
-        el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
-          el('div', { class: 'bar', style: `width:${(f.back / scaleMax) * 100}%` }),
-          el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
-        ]),
-        el('span', { class: 'habit-meta', text: t('fanMeta', { ahead: `${fmtShare(f.aheadShare)} ±${(f.aheadMargin * 100).toFixed(1)}`, tickets: fmtCount(f.avgTickets), staked: fmtMoney(f.avgStaked, { sign: false }), final: fmtMoney(f.avgFinal) }) })
-      ])
+      barItem({
+        icon: SPORT_ICON[f.fan.key],
+        name: t(`fan_${f.fan.key}`),
+        desc: t(`fanDesc_${f.fan.key}`),
+        back: f.back,
+        margin: f.backMargin,
+        scaleMax,
+        meta: t('fanMeta', { ahead: fmtShare(f.aheadShare), tickets: fmtCount(f.avgTickets), final: fmtMoney(f.avgFinal) })
+      })
     )
   );
 }
@@ -1465,23 +1693,23 @@ function renderSimTable(bands, characters, weeks) {
 
 // ---- F1 -----------------------------------------------------------------------
 
+// Every driver the market prices, like the lottery's full list.
 function renderF1() {
   const t = state.t;
-  const body = $('f1-body');
   const f1 = state.data.f1;
   $('f1').hidden = !inSport('f1') || !f1;
-  if (!f1) {
-    body.replaceChildren(el('p', { class: 'muted', text: t('f1None') }));
-    return;
-  }
+  if (!f1) return;
   const drivers = state.bets.filter(b => b.kind === 'f1');
-  const shown = drivers.slice(0, 9);
-  const rest = drivers.slice(9);
-  body.replaceChildren(
-    el('p', { class: 'game-meta', text: `${f1.title} · ${fmtTime(f1.startUtc)}` }),
-    el('div', { class: 'options options-3' }, shown.map(optionCard)),
-    rest.length ? el('details', { class: 'more-options' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'options options-3' }, rest.map(optionCard))]) : null,
-    takeNote([takeText(drivers)])
+  $('f1-body').replaceChildren(
+    board({
+      emblem: '🏁',
+      title: f1.title,
+      sub: fmtTime(f1.startUtc),
+      bets: drivers,
+      id: 'f1',
+      notes: [t('f1Intro')],
+      rows: (b, i, editing) => entryRow(b, i, editing, driverBadge(b), b.driver.team)
+    })
   );
 }
 
@@ -1492,7 +1720,7 @@ function renderAll() {
   if (!state.data) return;
   state.bets = buildBets(state.data);
   state.futures = buildFutures(state.data);
-  state.parlay = state.parlay.filter(id => state.bets.some(b => b.id === id));
+  state.parlay = state.parlay.filter(id => slipCandidates().some(b => b.id === id));
   renderStatus('ok');
   renderTabs();
   renderSportFilter();
@@ -1547,7 +1775,9 @@ function renderTabs() {
   const t = state.t;
   if (!tabAvailable(state.tab)) state.tab = 'games';
   const legs = state.parlay.length;
-  $('tab-slip').textContent = legs ? `${t('tab_slip')} (${legs})` : t('tab_slip');
+  const badge = $('tab-slip').querySelector('.tab-badge');
+  badge.hidden = legs === 0;
+  badge.textContent = String(legs);
   for (const tab of TABS) {
     const button = $(`tab-${tab}`);
     button.hidden = !tabAvailable(tab);
@@ -1557,12 +1787,32 @@ function renderTabs() {
   }
 }
 
+// The simulated period as pills; the hidden select keeps the value.
+function renderPeriods() {
+  const select = $('sim-weeks');
+  $('sim-periods').replaceChildren(
+    ...[...select.options].map(option =>
+      el('button', {
+        type: 'button',
+        'aria-pressed': String(option.value === select.value),
+        text: state.t(`periodShort_${option.value}`),
+        onclick: () => {
+          select.value = option.value;
+          renderPeriods();
+          renderSim();
+        }
+      })
+    )
+  );
+}
+
 function showTab(tab) {
   state.tab = tab;
   try {
     history.replaceState(null, '', `#${tab}`);
   } catch {}
   renderTabs();
+  window.scrollTo({ top: 0 });
   // The chart sizes itself to its container, which is hidden until now.
   if (tab === 'sim' && state.data) renderSim();
 }

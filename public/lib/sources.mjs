@@ -21,10 +21,25 @@ export function taipeiDayKey(date) {
   return new Date(new Date(date).getTime() + TAIPEI_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-// MLB games are listed up to the end of tomorrow, Taiwan time.
-export function lotteryWindowEnd(now) {
+// End of the day `days` after today, Taiwan time. MLB games are listed up to
+// the end of tomorrow (days = 1).
+export function lotteryWindowEnd(now, days = 1) {
   const [y, m, d] = taipeiDayKey(now).split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + 2) - TAIPEI_OFFSET_MS);
+  return new Date(Date.UTC(y, m - 1, d + 1 + days) - TAIPEI_OFFSET_MS);
+}
+
+// A Premier League round is listed once it's close: its first game starts
+// within the next 3 days (Taiwan time), not two weeks out after a break.
+export const EPL_OPEN_DAYS = 3;
+
+// The NBA only shows during its season: from opening night (the first
+// Tuesday on or after 19 October) to the end of June, after the Finals.
+export function nbaInSeason(now) {
+  const day = taipeiDayKey(now);
+  const year = Number(day.slice(0, 4));
+  const opener = new Date(Date.UTC(year, 9, 19));
+  opener.setUTCDate(19 + ((2 - opener.getUTCDay() + 7) % 7));
+  return day >= opener.toISOString().slice(0, 10) || day <= `${year}-06-30`;
 }
 
 const MATCHWEEK_MAX_GAP_MS = 4 * DAY_MS;
@@ -48,11 +63,13 @@ export function nextMatchweek(games) {
 }
 
 // What the page lists, like the lottery: MLB up to the end of tomorrow (Taiwan
-// time), the Premier League's whole next matchweek (it has far fewer games).
+// time), the Premier League's whole next matchweek (it has far fewer games)
+// once that round is close.
 export function lotteryGames(games, now) {
   const windowEnd = lotteryWindowEnd(now).getTime();
   const mlb = games.filter(g => g.sport === 'mlb' && Date.parse(g.startUtc) < windowEnd);
-  const epl = nextMatchweek(games.filter(g => g.sport === 'epl'));
+  const round = nextMatchweek(games.filter(g => g.sport === 'epl'));
+  const epl = round.length && Date.parse(round[0].startUtc) < lotteryWindowEnd(now, EPL_OPEN_DAYS).getTime() ? round : [];
   return [...mlb, ...epl].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 }
 
@@ -268,14 +285,15 @@ export function parseF1RaceWinner(events, now) {
   const drivers = (event.markets || [])
     .filter(m => !m.closed)
     .map(m => ({ name: m.groupItemTitle || m.question, raw: Number(parseJsonArray(m.outcomePrices)?.[0]) }))
-    .filter(d => d.raw > 0);
+    // Every priced driver, like the lottery's full list; Polymarket's unpriced
+    // placeholders ("Driver A", "Other") drop out here.
+    .filter(d => d.raw > 0 && !/^(driver [a-z]|other)$/i.test(d.name));
   const fair = devigPower(drivers.map(d => d.raw));
   return {
     title: event.title,
     startUtc: new Date(event.startTime).toISOString(),
     drivers: drivers
       .map((d, i) => ({ name: d.name, fair: fair[i] }))
-      .filter(d => d.fair >= 0.005)
       .sort((a, b) => b.fair - a.fair)
   };
 }
@@ -383,6 +401,6 @@ export async function loadOdds(now = new Date(), onProgress) {
     loadedAt: now.toISOString(),
     games: lotteryGames(mergeGames([...mlbDk, ...eplDk], [...parsePolymarketMlb(mlbPm, now), ...parsePolymarketEpl(eplPm, now)]), now),
     f1: parseF1RaceWinner(f1, now),
-    futures: [...parseFutures(mlbPm, 'mlb'), ...parseFutures(eplPm, 'epl'), ...parseFutures(nbaPm, 'nba')]
+    futures: [...parseFutures(mlbPm, 'mlb'), ...parseFutures(eplPm, 'epl'), ...(nbaInSeason(now) ? parseFutures(nbaPm, 'nba') : [])]
   };
 }

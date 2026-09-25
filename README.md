@@ -2,52 +2,133 @@
 
 **Live site: https://jaypengx.github.io/Odds-Study/**
 
-An educational page about the math of the Taiwan Sports Lottery (台灣運彩): what each bet returns on average, why nearly every bet loses over time, and which bets lose the least. It is not betting advice. Buying lottery tickets in Taiwan requires being 18+, and betting on overseas sites (Polymarket included) is illegal gambling in Taiwan.
+An educational app about the math of the Taiwan Sports Lottery (台灣運彩): what each bet gives back on average, where the money goes, and why nearly every bet loses over time.
 
-## What it shows
+> Not betting advice. Lottery tickets in Taiwan are 18+ only, and betting on overseas sites (Polymarket included) is illegal in Taiwan.
 
-- **Fair chance** for each MLB game and Premier League match (home/draw/away): DraftKings (via ESPN) and Polymarket, each with its own margin removed, averaged. Like the lottery, MLB games are listed up to the end of tomorrow in Taiwan time, and the Premier League's whole next matchweek (ESPN doesn't label rounds, so a round ends where a club would play a second time). Days and times are Taiwan time. Filter by sport (All / MLB / Premier League / NBA / F1) and by day.
-- **Estimated lottery odds**: `1 ÷ (fair chance × 1.15)` for MLB, fitted against 14 real lottery games on 2026-09-25 (average error about 0.04). Anyone can type the real lottery odds in, and every number switches to them.
-- **MLB totals (大小分)**: like the lottery, three lines per game: the half-run line closest to 50/50 plus one run either side. DraftKings gives one line, so total runs are modelled as negative binomial (dispersion 5) fitted to it, and the other lines are read off that. On real lottery prices from 12 games (2026-09-25) it picked the same three lines every time and landed 0.9 points of chance (2% of price) off.
-- **MLB run lines (讓分)**: the lottery posts DraftKings' 1.5-run line and the 2.5 line on the same side, but prices them at its own chances: DraftKings' pulled toward 50/50 (`0.5 + 0.732 × (p − 0.5)`), then a fixed 8.6 points for the extra run. On 38 real prices from 10 games that's 1.6% off. The fair chance stays DraftKings', so the side likelier to cover shows up as the better deal (about NT$92 back per NT$100). Calibration data: `tests/fixtures/lottery-mlb-2026-09-25.json`.
-- **MLB team totals (單隊大小)**: each team's runs modelled as negative binomial (dispersion 4), fitted to DraftKings' win chance and total; the half-run line closest to 50/50. On 9 games it picked the lottery's line 17 times out of 18, about 1.1 points of chance off.
-- **Highest-scoring inning (得分最高單局)**: the lottery's own table (it barely moves between games), shown with its cut removed; it adds up to about 1.92, a ~48% take.
-- Every two-way MLB market the lottery posts (win, totals, run lines, team totals) adds up to about 1.158 in implied chance (81 markets: 1.143–1.173).
-- **Back per NT$100**: `fair chance × odds × 100`. Below 100 loses on average.
-- **Every bet of the day, ranked** from least costly.
-- **Margins of error** on every estimate: fair chance ± half the DraftKings–Polymarket gap (at least ±0.5 points; single-source games use the league's typical gap, marked *); estimated odds ± their average error against real lottery prices, as an odds number (marked ? where never checked); amount back ± both combined; bet slip results as a range; simulator results ± 95% sampling error.
-- **House take** for every market (`1 − 1 ÷ Σ 1/odds`: about 13% for single games, 40–50% for championships) and for a bet slip, before and after tax.
-- **Taiwan's tax**: any single combination paying over NT$5,000 has 20% income tax and 0.4% stamp duty withheld (20.4%); the bet slip and the simulator include it.
-- **Bet slip** under the lottery's ticket rules, in three modes: 一關 (singles), 全部過關 (parlay) and 過關組合 (system, choosing any of 過2關 … 過11關 and 全過). Up to 12 games, one pick per game, NT$10 units per combination, NT$100–100,000 per ticket, NT$20 million payout cap, 20.4% tax (20% income tax + 0.4% stamp duty) on any combination paying over NT$5,000. Type an amount per combination to see the ticket total, the most you can get back, the average back after tax, the chance of any payout or a profit, and every result by number of correct picks (computed exactly over all outcomes). Games already under way are removed: no live betting.
-- **Simulator**: 100,000 people across every sport: 6 habits (Casual, Big fan, Upset hunter, Parlay dreamer, Chaser, Careful) × 5 kinds of fan (MLB, Premier League, NBA, F1, bets on everything), about 3,334 per group. Time runs forward from this week on each league's real calendar (MLB ~2,430 games March–September plus the postseason; Premier League 380 games August–May with international breaks; NBA 1,230 games October–April plus the playoffs; 24 F1 races); in its off-season 30% of a single-sport fan's crowd bets on whatever else is on. Today's real bets stand in for each sport's future games (a typical-game template for the NBA, whose game odds aren't fetched, and for any sport with nothing on today). Most tickets are NT$100–500, now and then NT$1,000–3,000, capped at NT$3,000, and taxed over NT$5,000. It shows the crowd's bands, the players at the top 10%, middle and bottom 10%, habits and fan types ranked with sampling margins, record holders by number and the brutal truths. It runs in a Web Worker behind a loading screen, keeps no per-player paths (weeks stream into histograms, groups into running sums; each player has their own seed and record holders are replayed exactly), and tests prove this equals simulating everyone in full.
-- **Premier League**: uses the same MLB formula, which has **not** been checked against real lottery soccer prices yet. Real prices typed in override it.
-- **Championships (futures)**: World Series, AL and NL champion, Premier League title and NBA title (NBA isn't on the lottery yet), from Polymarket. Estimated lottery odds: each team's implied chance is `fair^0.7`, scaled so the market adds up to the lottery's total (about 200% for MLB and 160% for the Premier League, fitted on real prices from 2026-09-25; MLB within about 5–15%). Below 0.4%, Polymarket can't tell teams apart, so those get a rough 133 or 300. These bets pay out only when the season's result is in.
-- **F1 race winner**: `1 ÷ fair chance^0.69` for drivers the lottery prices one by one (checked on 9 prices from the 2026 Azerbaijan GP, average error about 8%). Drivers under 1% get the lottery's fixed longshot prices instead: 65, 325 or 500. The lottery sometimes rates drivers differently from Polymarket, which no formula can predict.
+## The app
 
-With estimated odds only, every MLB bet comes out at about NT$87, because the formula assumes the same cut everywhere. The ranking becomes informative once real lottery odds are entered.
+Four tabs. On phones they sit in a bottom bar; on desktop they're in the top bar.
 
-The page is split into tabs (Games, Bet slip, Simulator, Guide); championships and F1 sit under the games and follow the sport filter. The Guide explains the odds math, every habit and kind of fan, every kind of bet, how the simulators work, the lottery's rules and tax, and where the data and margins come from. Each game shows one row per market with its outcomes side by side as cards, and the ranking starts collapsed. The bet slip's Run plays the ticket out 100,000 times (each game won or lost at its fair chance, each version paid exactly) and shows the results next to the exact chances, each with its own address (`#games`, `#slip`, …). The language follows the browser: Chinese for any `zh` language, English otherwise.
+### 賽事 Games
+
+- **What's listed** follows the lottery's own schedule:
+  - MLB games up to the end of tomorrow, Taiwan time.
+  - The Premier League's next matchweek, once its first game is within 3 days.
+  - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
+  - The next F1 race winner, with **every** driver the market prices.
+- **Filters:** by sport and by day.
+- **Game cards** show team logos (from ESPN) and the win picks.
+- **Picks:** tap one to add it to the bet slip. It shows:
+  - the estimated lottery odds (± their error);
+  - the fair chance;
+  - the average amount back per NT$100.
+- **更多玩法 (more markets)** opens the other markets:
+  - 大小分 (totals, 3 lines);
+  - 讓分 (run lines, ±1.5 and ±2.5);
+  - 單隊大小 (team totals);
+  - 得分最高單局 (top-scoring inning).
+
+  Each market shows its own house take.
+- **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.
+- **Ranking:** a folded list of every bet of the day, least costly first.
+- **Boards:**
+  - F1: drivers with team-coloured badges.
+  - Championships (World Series, AL, NL, Premier League, NBA): team logos.
+
+  Both can go on the bet slip too.
+
+### 投注單 Bet slip
+
+- **Ticket rules** follow the lottery:
+  - 一關, 全部過關 and 過關組合 (過2關 … 過11關, 全過);
+  - 1–12 picks, one per game;
+  - NT$100–100,000 per ticket, with a NT$20 million payout cap;
+  - 20% income tax plus 0.4% stamp duty on any combination paying over NT$5,000.
+- **Stake:** typed in NT$10 units, like a real slip (10 = NT$100 per combination).
+- **Live games:** games that have started drop off the slip.
+- **Analysis:** all of it is exact over every way the picks can land, except the one-year outlook, which is a fixed-seed draw:
+  - **Key numbers:** cost, top payout, average back after tax, chance of any payout, chance of profit, take + tax. Each comes with its error range.
+  - **Where each NT$100 goes:** back to you, the lottery's cut and the tax.
+  - **Every result:** the chance of k of n correct, what it pays, and which results make a profit.
+  - **Each pick on its own:** the odds against the fair odds, its value per NT$100, and what the ticket returns without it. The costliest pick is flagged.
+  - **Every week for a year:** the chance of ending ahead, the typical result and 80% range, the average result, and how rare the top payout is (1 in N, about once every N years).
+
+### 模擬 Simulator
+
+- **The crowd:** 100,000 people, made of 6 betting habits × 5 kinds of fan.
+  - Habits: Casual, Big fan, Upset hunter, Parlay dreamer, Chaser, Careful.
+  - Fans: MLB, Premier League, NBA, F1, and people who bet on everything.
+- **The calendar:** time runs forward from this week on each league's real schedule. In a year that's about 2,550 MLB, 390 Premier League and 1,260 NBA games, plus 24 F1 races.
+  - In a sport's off-season, 30% of its fans bet on something else.
+  - Today's real prices stand in for future games. The NBA uses a typical-game template, because its game odds aren't fetched.
+- **Stakes:** mostly NT$100–500, now and then up to NT$3,000, taxed over NT$5,000.
+- **What it shows:**
+  - how many in 10 are still ahead, as a pictogram;
+  - the crowd's range over time;
+  - the luckiest 10%, the middle player and the unluckiest 10%;
+  - habits and fans ranked by money back;
+  - record holders by their number in the crowd;
+  - the brutal truths.
+- **Periods:** 1 month to 3 years. The seed is fixed, so the same period always gives the same result.
+- **How it runs:** in a Web Worker, streaming weeks into histograms instead of keeping 100,000 paths. Tests prove this equals simulating everyone in full.
+
+### 說明 Guide
+
+Folding cards explain:
+
+- the odds math;
+- every habit and kind of fan;
+- every kind of bet;
+- how the simulators work;
+- the lottery's rules and tax;
+- where the data and margins come from.
+
+## The math
+
+| What | How |
+| --- | --- |
+| Fair chance | DraftKings (via ESPN) and Polymarket, each with its margin removed, averaged |
+| MLB win odds | `1 ÷ (fair × 1.15)`; average error about 0.04 against 14 real lottery games (2026-09-25) |
+| MLB totals | Total runs as negative binomial (r = 5) fitted to DraftKings' line; the lottery's 3 lines (the one closest to 50/50, ±1). Matched all 12 lottery lines, 0.9 points off |
+| MLB run lines | Lottery chance `0.5 + 0.732 × (p − 0.5)` for ±1.5, then 8.6 points more for ±2.5; 1.6% off on 38 prices |
+| MLB team totals | Each team's runs as negative binomial (r = 4) fitted to the win chance and total; 17 of 18 lines matched |
+| Top-scoring inning | The lottery's own fixed table (about a 48% take) |
+| F1 winner | `1 ÷ fair^0.69`; drivers under 1% get the lottery's fixed 65 / 325 / 500 |
+| Championships | Implied chance ∝ `fair^0.7`, scaled to the lottery's total (MLB 200%, EPL 160%); longshots 133 / 300 |
+| Back per NT$100 | `fair chance × odds × 100`; below 100 loses on average |
+| House take | `1 − 1 ÷ Σ(1 / odds)` |
+| Tax | 20.4% of any combination paying over NT$5,000 |
+
+Every estimate carries its **margin of error**:
+
+- **Fair chances:** half the DraftKings–Polymarket gap. `*` marks a game with only one source, which gets its league's typical gap.
+- **Estimated odds:** their measured error against real lottery prices. `?` marks one not yet checked.
+- **Simulator results:** 95% sampling error.
+
+The calibration data is the real lottery prices in `tests/fixtures/lottery-mlb-2026-09-25.json`. Soccer prices haven't been checked against the lottery yet.
 
 ## How it works
 
-A static site with no build step and no dependencies. The page fetches odds live in the visitor's browser (a failed request is retried once), and every request goes through the `sports-proxy` Cloudflare Worker from [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy) (`https://sports-proxy.pengzjay.workers.dev/sports-proxy?url=…`, set as `PROXY_URL` in `public/lib/sources.mjs`). The proxy adds the CORS headers Polymarket doesn't send and caches responses. For the MLB and Premier League Polymarket pages the page asks for `&trim=polymarket-events`, which cuts each response to the few fields it reads.
+A static site with no build step and no dependencies. The browser fetches odds live through the `sports-proxy` Cloudflare Worker from [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy) (`PROXY_URL` in `public/lib/sources.mjs`). The Worker adds the CORS headers Polymarket doesn't send, and caches responses. A failed request is retried once. Team logos load straight from ESPN's image server.
 
-The page has no direct-fetch fallback, so it depends on that Worker:
+The page depends on that Worker:
 
-- **No proxy, no data.** If the Worker is down, the page loads but shows no odds. The tests don't need it.
-- **Allowed origins only.** The proxy accepts requests only from `https://jaypengx.github.io` and `http://localhost:<port>`. Hosting the page anywhere else needs that origin added to `ALLOWED_ORIGINS` in Shared-Proxy's `sports-proxy-worker.js`.
-- **Allowed hosts only.** It forwards only to hosts on its allowlist (`site.api.espn.com` and `gamma-api.polymarket.com` are the ones used here). A new data source needs its host added there first.
+- **No proxy, no data.** If the Worker is down, the page opens without odds. The tests don't need it.
+- **Allowed origins only:** `https://jaypengx.github.io` and `http://localhost:<port>`. Hosting elsewhere needs the origin added to `ALLOWED_ORIGINS` in Shared-Proxy's `sports-proxy-worker.js`.
+- **Allowed hosts only:** `site.api.espn.com` and `gamma-api.polymarket.com` are the ones used here.
 
 | File | Purpose |
 | --- | --- |
-| `public/lib/odds.mjs` | The math: devig, estimated lottery odds, expected return, bet slip, simulation |
-| `public/lib/sources.mjs` | Fetching and parsing ESPN and Polymarket (MLB, Premier League, F1) through the proxy |
-| `public/lib/teams.mjs` | Chinese team names (MLB, Premier League) and name matching |
-| `public/lib/i18n.mjs` | Traditional Chinese and English text |
+| `public/lib/odds.mjs` | The math: devig, estimated odds, bet slip analysis, simulation |
+| `public/lib/sources.mjs` | Fetching and parsing ESPN and Polymarket; what the lottery would list |
+| `public/lib/teams.mjs` | Chinese team names, ESPN logo ids, the F1 grid's team colours |
+| `public/lib/i18n.mjs` | Traditional Chinese and English text (follows the browser's language) |
 | `public/app.js` | Rendering |
 | `public/sim-worker.js` | Runs the crowd simulation off the main thread |
+| `public/styles.css` | Design tokens (light and dark) and components |
 
-The page opens behind a loading screen (logo, spinner, progress with an estimated time left) until the odds and the first simulation are ready, for at most 45 seconds. A small script in `index.html` that doesn't depend on the app offers Reload / Open anyway if the app's scripts fail to load or never start. On deploy, `scripts/stamp-version.mjs` adds `?v=<commit>` to every local script, module import and stylesheet, so browsers never mix new files with ones cached from the previous deploy.
+A loading screen (logo, spinner, progress, time left) covers the page until the odds and the first simulation are ready, for 45 seconds at most. If the scripts never start, a failsafe in `index.html` offers Reload or Open anyway. On deploy, `scripts/stamp-version.mjs` adds `?v=<commit>` to every local file, so browsers never mix new files with cached old ones.
 
 ## Development
 
@@ -56,4 +137,4 @@ npm test                                              # node:test, no installs n
 python3 -m http.server 8000 --directory public        # then open http://localhost:8000
 ```
 
-Pushing to `main` runs the tests and deploys to GitHub Pages (Settings → Pages → Source must be "GitHub Actions").
+Pushing to `main` runs the tests and deploys to GitHub Pages (Settings → Pages → Source: GitHub Actions).

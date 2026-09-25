@@ -2,11 +2,13 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#1f5fb0" />
 <title>賠率研究室 Odds Study</title>
 <meta name="description" content="用數學看台灣運彩：公平機率、估計賠率、每一注平均拿回多少。教學用途。" />
 <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://sports-proxy.pengzjay.workers.dev" crossorigin />
+<link rel="preconnect" href="https://a.espncdn.com" />
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -45,113 +47,124 @@
     setTimeout(function () { if (!window.__oddsStarted) window.__oddsFail(); }, 15000);
   })();
 </script>
-<main class="page">
-  <header class="masthead">
-    <img class="brand-logo" src="./favicon.svg" alt="" width="44" height="44" />
-    <div>
-      <h1 id="title">賠率研究室</h1>
-      <p id="subtitle" class="subtitle"></p>
+<header class="appbar">
+  <div class="appbar-inner">
+    <div class="brand">
+      <img class="brand-logo" src="./favicon.svg" alt="" width="36" height="36" />
+      <div class="brand-text">
+        <h1 id="title">賠率研究室</h1>
+        <p id="status" class="status" aria-live="polite"></p>
+      </div>
     </div>
-  </header>
+    <nav id="tabs" class="tabs" role="tablist">
+    <button id="tab-games" class="tab" role="tab" type="button" data-tab="games"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
+    <button id="tab-slip" class="tab" role="tab" type="button" data-tab="slip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 0 0 4v0a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v0a2 2 0 0 0 0-4v-3a2 2 0 0 0 0-4z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
+    <button id="tab-sim" class="tab" role="tab" type="button" data-tab="sim"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><path d="M5 16l4-5 4 3 6-8"/><circle cx="19" cy="6" r="1.5"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
+    <button id="tab-math" class="tab" role="tab" type="button" data-tab="math"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M9 8h7M9 12h5"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
+    </nav>
+    <button id="refresh" class="icon-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+  </div>
+</header>
 
+<main class="page">
   <p id="notice" class="notice" role="note"></p>
 
-  <div class="status-row">
-    <p id="status" class="muted" aria-live="polite"></p>
-    <button id="refresh" class="ghost-button" type="button"></button>
-  </div>
-
-  <nav id="sport-filter" class="day-filter" aria-label="sport"></nav>
-
-  <nav id="tabs" class="tabs" role="tablist">
-    <button id="tab-games" class="tab" role="tab" type="button" data-tab="games" data-t="tab_games"></button>
-    <button id="tab-slip" class="tab" role="tab" type="button" data-tab="slip"></button>
-    <button id="tab-sim" class="tab" role="tab" type="button" data-tab="sim" data-t="tab_sim"></button>
-    <button id="tab-math" class="tab" role="tab" type="button" data-tab="math" data-t="tab_math"></button>
-  </nav>
-
   <div id="panel-games" class="tab-panel" role="tabpanel" aria-labelledby="tab-games">
-    <nav id="day-filter" class="day-filter" aria-label="day"></nav>
-    <details id="ranking" class="card ranking-card">
-      <summary><h2 id="ranking-title"></h2><span class="summary-hint" data-t="rankingHint"></span></summary>
-      <p class="intro" data-t="rankingIntro"></p>
+    <div class="toolbar">
+      <nav id="sport-filter" class="chips" aria-label="sport"></nav>
+      <nav id="day-filter" class="chips" aria-label="day"></nav>
+    </div>
+    <div id="legend" class="key-legend"></div>
+
+    <details id="ranking" class="card fold ranking-card">
+      <summary><span class="fold-icon" aria-hidden="true">🏅</span><h2 id="ranking-title"></h2><span class="summary-hint" data-t="rankingHint"></span></summary>
       <ol id="ranking-list" class="ranking-list"></ol>
     </details>
 
     <section id="games" aria-labelledby="games-title">
-      <h2 id="games-title"></h2>
-      <p class="intro" data-t="gamesIntro"></p>
-      <details class="explain"><summary data-t="marginsHelpTitle"></summary><p data-t="marginsHelp"></p></details>
-      <div id="games-list" class="games-list"></div>
+      <h2 id="games-title" class="section-heading"></h2>
+      <div id="games-list" class="games-grid"></div>
+    </section>
+
+    <section id="f1" aria-labelledby="f1-title">
+      <h2 id="f1-title" class="section-heading"></h2>
+      <div id="f1-body"></div>
     </section>
 
     <section id="futures" aria-labelledby="futures-title">
-      <h2 id="futures-title"></h2>
-      <p class="intro" data-t="futuresIntro"></p>
-      <div id="futures-list" class="games-list"></div>
+      <h2 id="futures-title" class="section-heading"></h2>
+      <p class="lede" data-t="futuresIntro"></p>
+      <div id="futures-list" class="games-grid"></div>
     </section>
-
-    <section id="f1" class="card" aria-labelledby="f1-title">
-      <h2 id="f1-title"></h2>
-      <p class="intro" data-t="f1Intro"></p>
-      <div id="f1-body"></div>
-    </section>
-    </div>
+  </div>
 
   <div id="panel-slip" class="tab-panel" role="tabpanel" aria-labelledby="tab-slip">
-    <section id="parlay" class="card" aria-labelledby="parlay-title">
-      <h2 id="parlay-title"></h2>
-      <p class="intro" data-t="parlayIntro"></p>
+    <section id="parlay" aria-labelledby="parlay-title">
+      <h2 id="parlay-title" class="section-heading"></h2>
       <div id="parlay-body"></div>
     </section>
-    </div>
+  </div>
 
   <div id="panel-sim" class="tab-panel" role="tabpanel" aria-labelledby="tab-sim">
-    <section id="sim" class="card" aria-labelledby="sim-title">
-      <h2 id="sim-title"></h2>
-      <p class="intro" data-t="simIntro"></p>
-      <div class="sim-controls">
-        <label><span data-t="simPeriod"></span>
-          <select id="sim-weeks">
-            <option value="4">4</option>
-            <option value="13">13</option>
-            <option value="26">26</option>
-            <option value="52" selected>52</option>
-            <option value="156">156</option>
-          </select>
-        </label>
+    <section id="sim" aria-labelledby="sim-title">
+      <div class="sim-top">
+        <div>
+          <h2 id="sim-title" class="section-heading"></h2>
+          <p class="lede" data-t="simIntro"></p>
+        </div>
+        <div id="sim-periods" class="segmented" role="group"></div>
+        <select id="sim-weeks" hidden>
+          <option value="4">4</option>
+          <option value="13">13</option>
+          <option value="26">26</option>
+          <option value="52" selected>52</option>
+          <option value="156">156</option>
+        </select>
       </div>
-      <div id="sim-headline" class="sim-headline" aria-live="polite"></div>
-      <div id="sim-stats" class="stat-row"></div>
-      <div id="sim-legend" class="legend"></div>
-      <div id="sim-chart" class="chart"></div>
+      <div class="card hero-card">
+        <div id="sim-headline" class="sim-headline" aria-live="polite"></div>
+        <div id="sim-stats" class="kpis"></div>
+      </div>
+      <div class="card">
+        <div id="sim-legend" class="legend"></div>
+        <div id="sim-chart" class="chart"></div>
+      </div>
       <div id="sim-players" class="players"></div>
-      <h3 class="sub-title" data-t="habitsTitle"></h3>
-      <p id="habits-intro" class="intro"></p>
-      <ol id="sim-habits" class="ranking-list"></ol>
-      <h3 class="sub-title" data-t="fansTitle"></h3>
-      <p id="fans-intro" class="intro"></p>
-      <ol id="sim-fans" class="ranking-list"></ol>
-      <h3 class="sub-title" data-t="storiesTitle"></h3>
-      <p class="intro" data-t="storiesIntro"></p>
+      <div class="two-col">
+        <div class="card">
+          <h3 class="card-title" data-t="habitsTitle"></h3>
+          <ol id="sim-habits" class="bars-list"></ol>
+        </div>
+        <div class="card">
+          <h3 class="card-title" data-t="fansTitle"></h3>
+          <ol id="sim-fans" class="bars-list"></ol>
+        </div>
+      </div>
+      <h3 class="section-heading small" data-t="storiesTitle"></h3>
       <ul id="sim-stories" class="stories"></ul>
-      <h3 class="sub-title" data-t="truthsTitle"></h3>
-      <ul id="sim-truths" class="facts truths"></ul>
-      <h3 class="sub-title" data-t="factsTitle"></h3>
-      <ul id="sim-facts" class="facts"></ul>
-      <details class="table-view">
-        <summary data-t="simTable"></summary>
+      <div class="two-col">
+        <div class="card truth-card">
+          <h3 class="card-title" data-t="truthsTitle"></h3>
+          <ul id="sim-truths" class="facts truths"></ul>
+        </div>
+        <div class="card">
+          <h3 class="card-title" data-t="factsTitle"></h3>
+          <ul id="sim-facts" class="facts"></ul>
+        </div>
+      </div>
+      <details class="card fold table-view">
+        <summary><span class="fold-icon" aria-hidden="true">📋</span><span data-t="simTable"></span></summary>
         <div id="sim-table"></div>
       </details>
     </section>
-    </div>
+  </div>
 
   <div id="panel-math" class="tab-panel" role="tabpanel" aria-labelledby="tab-math">
-    <section id="math" class="card" aria-labelledby="math-title">
-      <h2 id="math-title"></h2>
-      <div id="math-body"></div>
+    <section id="math" aria-labelledby="math-title">
+      <h2 id="math-title" class="section-heading"></h2>
+      <div id="math-body" class="guide"></div>
     </section>
-    </div>
+  </div>
 
   <footer><p id="footer" class="muted"></p></footer>
 </main>

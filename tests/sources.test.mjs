@@ -85,15 +85,19 @@ test('F1 parser picks the next race-winner event and devigs drivers', () => {
         markets: [
           { groupItemTitle: 'Kimi Antonelli', outcomePrices: '["0.41","0.59"]' },
           { groupItemTitle: 'George Russell', outcomePrices: '["0.2","0.8"]' },
-          { groupItemTitle: 'Lando Norris', outcomePrices: '["0.4","0.6"]', closed: true }
+          { groupItemTitle: 'Lando Norris', outcomePrices: '["0.4","0.6"]', closed: true },
+          { groupItemTitle: 'Yuki Tsunoda', outcomePrices: '["0.0005","0.9995"]' },
+          { groupItemTitle: 'Driver A', outcomePrices: null },
+          { groupItemTitle: 'Other', outcomePrices: '["0.001","0.999"]' }
         ]
       }
     ],
     NOW
   );
-  assert.equal(f1.drivers.length, 2);
+  // Every priced driver is listed, however long a longshot; placeholders aren't.
+  assert.deepEqual(f1.drivers.map(d => d.name), ['Kimi Antonelli', 'George Russell', 'Yuki Tsunoda']);
   assert.equal(f1.drivers[0].name, 'Kimi Antonelli');
-  assert.ok(Math.abs(f1.drivers[0].fair + f1.drivers[1].fair - 1) < 1e-6);
+  assert.ok(Math.abs(f1.drivers.reduce((sum, d) => sum + d.fair, 0) - 1) < 1e-6);
 });
 
 const eplEspn = {
@@ -226,4 +230,19 @@ test('Premier League shows the next matchweek; MLB only to the end of tomorrow',
   const shown = lotteryGames([mlb('2026-09-26T02:00:00Z', 'tomorrow'), mlb('2026-09-26T23:00:00Z', 'day after'), ...round, ...next], now);
   assert.deepEqual(shown.filter(g => g.sport === 'mlb').map(g => g.id), ['tomorrow']);
   assert.equal(shown.filter(g => g.sport === 'epl').length, 4);
+  // A round two weeks out (after an international break) isn't listed yet.
+  const later = round.map(g => ({ ...g, startUtc: g.startUtc.replace('2026-09-2', '2026-10-1') }));
+  assert.equal(lotteryGames(later, now).length, 0);
+  assert.equal(lotteryGames(later, new Date('2026-10-14T07:00:00Z')).length, 4);
+});
+
+test('the NBA shows only from opening night to the end of June', async () => {
+  const { nbaInSeason } = await import('../public/lib/sources.mjs');
+  // 2026-27 opens on Tuesday 20 October.
+  assert.equal(nbaInSeason(new Date('2026-09-25T07:00:00Z')), false);
+  assert.equal(nbaInSeason(new Date('2026-10-19T07:00:00Z')), false);
+  assert.equal(nbaInSeason(new Date('2026-10-20T07:00:00Z')), true);
+  assert.equal(nbaInSeason(new Date('2027-03-01T07:00:00Z')), true);
+  assert.equal(nbaInSeason(new Date('2027-06-30T07:00:00Z')), true);
+  assert.equal(nbaInSeason(new Date('2027-07-15T07:00:00Z')), false);
 });

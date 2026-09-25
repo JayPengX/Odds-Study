@@ -369,21 +369,40 @@ test('the streaming crowd equals simulating everyone in full', () => {
   }
 });
 
-test('100,000 versions of a ticket match its exact chances', async () => {
-  const { simulateSlipOutcomes } = await import('../public/lib/odds.mjs');
+test('ticket analysis: exact figures, where the money goes, each leg, a year of it', async () => {
+  const { analyzeSlip } = await import('../public/lib/odds.mjs');
   const legs = [
     { odds: 1.8, fairChance: 0.5 },
-    { odds: 2, fairChance: 0.45 },
+    { odds: 1.9, fairChance: 0.45 },
     { odds: 1.7, fairChance: 0.55 },
     { odds: 1.9, fairChance: 0.5 }
   ];
-  const run = simulateSlipOutcomes({ legs, sizes: [2, 4], stake: 100 });
+  const a = analyzeSlip({ legs, sizes: [2, 4], stake: 100 });
   const exact = evaluateSlip({ legs, sizes: [2, 4], stake: 100 });
-  close(run.exact.averageNet, exact.expectedNet, 1e-9);
-  close(run.exact.paidShare, exact.anyPayout, 1e-12);
-  // Sampling error at 100,000 runs: well under a percentage point.
-  for (const row of run.byHits) assert.ok(Math.abs(row.simulated - row.exact) < 0.006, `${row.hits}`);
-  close(run.averageNet, exact.expectedNet, exact.expectedNet * 0.02);
+  close(a.expectedNet, exact.expectedNet, 1e-9);
+  close(a.paid, exact.anyPayout, 1e-12);
+  close(a.profit, exact.profit, 1e-12);
+  close(a.byHits.reduce((s, r) => s + r.chance, 0), 1, 1e-12);
+  // Cut + tax + back = 100.
+  close(a.per100.take + a.per100.tax + a.per100.back, 100, 1e-9);
+  close(a.top.chance, 0.5 * 0.45 * 0.55 * 0.5, 1e-12);
+  // The worst-value leg is the one priced furthest under its fair odds.
+  assert.equal(a.weakest, 1);
+  // Without the worst leg, the rest return more.
+  assert.ok(a.legs[1].without > a.backPer100);
+
+  // A 2-leg parlay bought 52 times: ahead = exact binomial, within sampling error.
+  const pair = [{ odds: 1.8, fairChance: 0.5 }, { odds: 1.8, fairChance: 0.5 }];
+  const y = analyzeSlip({ legs: pair, sizes: [2], stake: 100 }).year;
+  const cost = 100;
+  const win = 100 * 1.8 * 1.8;
+  let ahead = 0;
+  const p = 0.25;
+  for (let k = 0; k <= 52; k++) if (k * win > 52 * cost) ahead += choose(52, k) * p ** k * (1 - p) ** (52 - k);
+  assert.ok(Math.abs(y.ahead - ahead) < 0.01, `${y.ahead} vs ${ahead}`);
+  close(y.expected, 52 * (p * win - cost), 1e-6);
+  // Same numbers every time.
+  assert.deepEqual(analyzeSlip({ legs: pair, sizes: [2], stake: 100 }).year, y);
 });
 
 test('the sport calendar has a realistic number of games per year', async () => {
