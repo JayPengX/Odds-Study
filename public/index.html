@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>賠率研究室 Odds Study</title>
+<meta name="description" content="用數學看台灣運彩：公平機率、估計賠率、每一注平均拿回多少。教學用途。" />
+<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://sports-proxy.pengzjay.workers.dev" crossorigin />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<main class="page">
+  <header class="masthead">
+    <div>
+      <h1 id="title">賠率研究室</h1>
+      <p id="subtitle" class="subtitle"></p>
+    </div>
+    <button id="lang-toggle" class="ghost-button" type="button"></button>
+  </header>
+
+  <p id="notice" class="notice" role="note"></p>
+
+  <div class="status-row">
+    <p id="status" class="muted" aria-live="polite"></p>
+    <button id="refresh" class="ghost-button" type="button"></button>
+  </div>
+
+  <nav id="day-filter" class="day-filter" aria-label="day"></nav>
+
+  <section id="ranking" class="card" aria-labelledby="ranking-title">
+    <h2 id="ranking-title"></h2>
+    <p class="intro" data-t="rankingIntro"></p>
+    <ol id="ranking-list" class="ranking-list"></ol>
+  </section>
+
+  <section id="games" aria-labelledby="games-title">
+    <h2 id="games-title"></h2>
+    <p class="intro" data-t="gamesIntro"></p>
+    <div id="games-list" class="games-list"></div>
+  </section>
+
+  <section id="parlay" class="card" aria-labelledby="parlay-title">
+    <h2 id="parlay-title"></h2>
+    <p class="intro" data-t="parlayIntro"></p>
+    <div id="parlay-body"></div>
+  </section>
+
+  <section id="sim" class="card" aria-labelledby="sim-title">
+    <h2 id="sim-title"></h2>
+    <p class="intro" data-t="simIntro"></p>
+    <div class="sim-controls">
+      <label><span data-t="simPick"></span><select id="sim-pick"></select></label>
+      <label><span data-t="simBets"></span>
+        <select id="sim-bets">
+          <option value="100">100</option>
+          <option value="500">500</option>
+          <option value="1000" selected>1000</option>
+        </select>
+      </label>
+      <button id="sim-rerun" class="ghost-button" type="button"></button>
+    </div>
+    <div id="sim-stats" class="stat-row"></div>
+    <div id="sim-legend" class="legend"></div>
+    <div id="sim-chart" class="chart"></div>
+    <details class="table-view">
+      <summary data-t="simTable"></summary>
+      <div id="sim-table"></div>
+    </details>
+  </section>
+
+  <section id="f1" class="card" aria-labelledby="f1-title">
+    <h2 id="f1-title"></h2>
+    <p class="intro" data-t="f1Intro"></p>
+    <div id="f1-body"></div>
+  </section>
+
+  <section id="math" class="card" aria-labelledby="math-title">
+    <h2 id="math-title"></h2>
+    <div id="math-body"></div>
+  </section>
+
+  <footer><p id="footer" class="muted"></p></footer>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
