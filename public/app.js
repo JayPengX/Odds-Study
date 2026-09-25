@@ -526,7 +526,9 @@ function logoImg(sport, enName, label, size = '') {
 function leagueImg(sport, size = '') {
   // The league's name is always next to it, so a plain disc stands in.
   const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true' });
-  if (sport === 'epl') return el('span', { class: `league-epl ${size}` }, logoPicture(leagueLogo(sport), null, 'logo league', fallback));
+  // Premier League: the purple lion in light mode; in dark mode ESPN's white
+  // outline lion, cropped from its logo so the wordmark stays out.
+  if (sport === 'epl') return el('span', { class: `league-epl ${size}` }, [logoPicture(leagueLogo(sport), null, 'logo league epl-light', fallback), el('span', { class: 'epl-dark', 'aria-hidden': 'true' })]);
   return logoPicture(leagueLogo(sport), leagueLogo(sport, true), `logo league ${size}`, fallback);
 }
 
@@ -2140,6 +2142,22 @@ window.addEventListener('resize', () => {
     if (state.data) renderSim();
   }, 150);
 });
+
+// Phones: no app header. The 詳細 switch, the status and refresh move to a
+// slim row at the top of the page (the tabs are already at the bottom).
+{
+  const phone = matchMedia('(max-width: 720px)');
+  const place = () => {
+    const into = phone.matches ? $('mobile-bar') : document.querySelector('.appbar-inner');
+    if (phone.matches) into.append($('status'), $('detail-toggle'), $('refresh'));
+    else {
+      document.querySelector('.brand-text').append($('status'));
+      into.append($('detail-toggle'), $('refresh'));
+    }
+  };
+  place();
+  phone.addEventListener('change', place);
+}
 
 // Tells the page's failsafe (in index.html) that the scripts loaded and started.
 window.__oddsStarted = true;

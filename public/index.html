@@ -4,6 +4,32 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#1f5fb0" />
+<meta name="build-version" content="dev" />
+<script>
+  // Always the newest deploy: when a newer version is out than this page
+  // (a browser can keep an old copy of it), reload once under a new address,
+  // which fetches the page and every file fresh. Checked on open and whenever
+  // the tab comes back.
+  (function () {
+    var mine = document.querySelector('meta[name="build-version"]').content;
+    if (mine === 'dev') return;
+    function check() {
+      fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (latest) {
+          if (!latest || !latest.version || latest.version === mine) return;
+          try {
+            if (sessionStorage.getItem('oddsStudy.reloadedTo') === latest.version) return;
+            sessionStorage.setItem('oddsStudy.reloadedTo', latest.version);
+          } catch (e) {}
+          location.replace(location.pathname + '?v=' + latest.version + location.hash);
+        })
+        .catch(function () {});
+    }
+    check();
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') check(); });
+  })();
+</script>
 <title>賠率研究室 Odds Study</title>
 <meta name="description" content="用數學看台灣運彩：公平機率、估計賠率、每一注平均拿回多少。教學用途。" />
 <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -68,6 +94,7 @@
 </header>
 
 <main class="page">
+  <div id="mobile-bar" class="mobile-bar"></div>
   <p id="notice" class="notice" role="note"></p>
 
   <div id="panel-games" class="tab-panel" role="tabpanel" aria-labelledby="tab-games">

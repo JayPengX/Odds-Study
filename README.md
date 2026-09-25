@@ -8,7 +8,7 @@ An educational app about the math of the Taiwan Sports Lottery (台灣運彩): w
 
 ## The app
 
-Four tabs. On phones they sit in a bottom bar; on desktop they're in the top bar.
+Four tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, 詳細, refresh) sit in a slim row at the top. On desktop the tabs are in the top bar.
 
 Logos come from ESPN, with dark-background versions in dark mode: the leagues on the filters, cards and boards, and the teams on the games.
 
@@ -27,7 +27,7 @@ The choice is remembered.
   - The Premier League's next matchweek, once its first game is within 3 days.
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
   - The next F1 race winner, with **every** driver the market prices.
-- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). The Premier League's lion is shown alone, purple in light mode and light lavender in dark mode (colours inverted and turned back), in the same square box as every other logo.
+- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). The Premier League's lion is shown alone: purple in light mode, and in dark mode ESPN's white outline lion cropped out of its logo, in the same square box as every other logo.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
   - the estimated lottery odds, tinted green or red when a bet is unusually good or bad;
@@ -161,7 +161,12 @@ The page depends on that Worker:
 | `public/sim-worker.js` | Runs the crowd simulation off the main thread |
 | `public/styles.css` | Design tokens (light and dark) and components |
 
-A loading screen (logo, spinner, progress, time left) covers the page until the odds and the first simulation are ready, for 45 seconds at most. If the scripts never start, a failsafe in `index.html` offers Reload or Open anyway. On deploy, `scripts/stamp-version.mjs` adds `?v=<commit>` to every local file, so browsers never mix new files with cached old ones.
+A loading screen (logo, spinner, progress, time left) covers the page until the odds and the first simulation are ready, for 45 seconds at most. If the scripts never start, a failsafe in `index.html` offers Reload or Open anyway. On deploy, `scripts/stamp-version.mjs` does two things:
+
+- It adds `?v=<commit>` to every local file, so browsers never mix new files with cached old ones.
+- It stamps the commit into `index.html` and writes `version.json`. On open, and whenever the tab comes back, the page fetches `version.json` past every cache. If a newer deploy is out, the page reloads once under `?v=<commit>`, which fetches it and every file fresh.
+
+A browser holding an old copy of the page still gets the new version.
 
 ## Development
 
