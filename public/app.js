@@ -1989,7 +1989,7 @@ function renderLapse(bands, weeks) {
         )
       );
     }
-    return fresh;
+    return fresh ? past.at(-1) : null;
   };
   const stop = () => {
     clearTimeout(box._timer);
@@ -2001,13 +2001,16 @@ function renderLapse(bands, weeks) {
     set(w);
     play.textContent = `⏸ ${t('lapsePause')}`;
     // About 20 seconds for a year (short periods no faster than 0.6 s a
-    // week), holding 2.5 s on each new event so it can be read.
+    // week), holding 2.5 s on each new event so it can be read. Past a year
+    // the seasons repeat, so only the crowd's milestones hold, and for 1.2 s.
     const step = Math.max(80, Math.min(600, Math.round(20_000 / weeks)));
+    const long = weeks > 52;
+    const hold = e => (!e ? step : !long ? 2500 : e.sport ? step : 1200);
     const tick = () => {
       if (!box.contains(play)) return;
       const fresh = set(++w);
       if (w >= weeks) stop();
-      else box._timer = setTimeout(tick, fresh ? 2500 : step);
+      else box._timer = setTimeout(tick, hold(fresh));
     };
     box._timer = setTimeout(tick, step);
   };
