@@ -10,10 +10,14 @@ import {
   estimateFuturesOdds,
   estimateLotteryOdds,
   evaluateSlip,
+  simulateSlipOutcomes,
   expectedReturn,
   habitPools,
   lotteryTotalLines,
   lotteryRunLines,
+  fitTeamRuns,
+  lotteryTeamTotal,
+  TOP_INNING_ODDS,
   MLB_MARKET_OVERROUND,
   median,
   quantile,
@@ -53,6 +57,8 @@ const state = {
   // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
   slipSizes: new Set([2, 'all']),
   slipStake: 100,
+  // Last "run it 100,000 times" result, for the ticket it was run on.
+  slipRun: null,
   day: null,
   // True until the first simulation is ready: the loading screen covers the page.
   booting: true,
@@ -164,6 +170,8 @@ function buildBets(data) {
         ...base,
         id: `${game.id}|ml|${side}`,
         kind: 'ml',
+        market: 'ml',
+        chip: name,
         // Never below half of Polymarket's 1-cent price step.
         fairMargin: both ? Math.max(0.005, Math.abs(game.draftKings[side] - game.polymarket[side]) / 2) : null,
         errKey: game.sport,
@@ -187,6 +195,9 @@ function buildBets(data) {
           kind: 'total',
           totalLine: line,
           mainLine: main,
+          market: `total|${line}`,
+          marketLabel: String(line),
+          chip: t(side),
           // The main line's margin is the usual source gap (filled in below);
           // the lines either side add the model's error, ~1-3 points.
           fairMargin: main ? null : 0.02,
@@ -197,6 +208,51 @@ function buildBets(data) {
           estOdds: estimateLotteryOdds(p, K_DRAFTKINGS)
         });
       }
+    }
+    // MLB team totals (單隊大小): each team's runs from a model fitted to
+    // DraftKings' win chance and total; the line closest to 50/50.
+    if (game.sport === 'mlb' && game.total && game.draftKings) {
+      const means = fitTeamRuns(game.draftKings.home, game.total.line, game.total.overFair);
+      for (const team of ['away', 'home']) {
+        const { line, over } = lotteryTeamTotal(means[team]);
+        for (const side of ['over', 'under']) {
+          const p = side === 'over' ? over : 1 - over;
+          bets.push({
+            ...base,
+            id: `${game.id}|tt|${team}|${line}|${side}`,
+            kind: 'teamtotal',
+            market: `tt|${team}`,
+            marketLabel: teamName(game[team]),
+            chip: `${t(side)} ${line}`,
+            fairMargin: 0.03,
+            errKey: 'mlbTeamTotal',
+            label: `${teamName(game[team])} ${t(side)} ${line}`,
+            shortLabel: `${teamName(game[team])} ${t(side)} ${line}`,
+            fairChance: p,
+            estOdds: Math.round((1 / (p * MLB_MARKET_OVERROUND)) * 100) / 100
+          });
+        }
+      }
+    }
+    // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed.
+    if (game.sport === 'mlb') {
+      const book = TOP_INNING_ODDS.reduce((sum, o) => sum + 1 / o, 0);
+      TOP_INNING_ODDS.forEach((odds, i) => {
+        const name = i < 9 ? t('inningN', { n: i + 1 }) : t('inningTie');
+        bets.push({
+          ...base,
+          id: `${game.id}|inning|${i}`,
+          kind: 'inning',
+          market: 'inning',
+          chip: name,
+          fairMargin: null,
+          errKey: 'topInning',
+          label: `${matchup} ${t('topInning')} ${name}`,
+          shortLabel: name,
+          fairChance: 1 / odds / book,
+          estOdds: odds
+        });
+      });
     }
     // MLB run lines (讓分): true chance from DraftKings; the price from the
     // lottery's own (shrunk) chance, which differs from the true one.
@@ -211,6 +267,9 @@ function buildBets(data) {
             ...base,
             id: `${game.id}|rl|${line}|${side}`,
             kind: 'runline',
+            market: `rl|${Math.abs(line)}`,
+            marketLabel: `±${Math.abs(line)}`,
+            chip: text,
             // DraftKings' own line has one source; the extra run adds model error.
             fairMargin: i === 0 ? 0.02 : 0.03,
             errKey: 'mlbRunLine',
@@ -245,7 +304,7 @@ function buildBets(data) {
   for (const sport of ['mlb', 'epl']) {
     const gaps = bets.filter(b => b.sport === sport && b.fairMargin != null).map(b => b.fairMargin);
     const typical = median(gaps) ?? 0.02;
-    for (const b of bets) if (b.sport === sport && b.fairMargin == null) Object.assign(b, { fairMargin: typical, typicalMargin: true });
+    for (const b of bets) if (b.sport === sport && b.fairMargin == null && (b.kind === 'ml' || b.kind === 'total')) Object.assign(b, { fairMargin: typical, typicalMargin: true });
   }
   return bets;
 }
@@ -490,17 +549,91 @@ function renderGames() {
             el('span', { class: 'game-title', text: matchupText(game) }),
             el('span', { class: 'game-meta', text: meta })
           ]),
-          betTable(bets),
-          takeNote([
-            takeText(bets.filter(b => b.kind === 'ml'), 'takeMoneyline'),
-            // Each total line is its own market; they share one take, so show the first.
-            ...(bets.some(b => b.kind === 'total') ? [takeText(bets.filter(b => b.kind === 'total' && b.totalLine === bets.find(x => x.kind === 'total').totalLine), 'takeTotal')] : []),
-            ...(bets.some(b => b.kind === 'runline') ? [takeText(bets.filter(b => b.kind === 'runline').slice(0, 2), 'takeRunLine')] : [])
-          ]),
+          ...gameSections(bets),
           ...notes
         ]);
       })
   );
+}
+
+// One section per kind of bet, each with its take (one market's worth: the
+// first line of totals / run lines, one team of team totals). The inning
+// market's ten results fold away.
+const SECTIONS = [
+  { kind: 'ml', title: 'secMoneyline', market: bets => bets },
+  { kind: 'total', title: 'secTotal', market: bets => bets.slice(0, 2) },
+  { kind: 'runline', title: 'secRunLine', market: bets => bets.slice(0, 2) },
+  { kind: 'teamtotal', title: 'secTeamTotal', market: bets => bets.slice(0, 2) },
+  { kind: 'inning', title: 'secTopInning', market: bets => bets, folded: true }
+];
+
+function gameSections(bets) {
+  const t = state.t;
+  return SECTIONS.filter(s => bets.some(b => b.kind === s.kind)).map(s => {
+    const group = bets.filter(b => b.kind === s.kind);
+    const head = el('div', { class: 'section-head' }, [el('span', { class: 'section-title', text: t(s.title) }), el('span', { class: 'section-take', text: `${t('takeLabel')} ${takeText(s.market(group))}` })]);
+    if (s.folded) return el('details', { class: 'bet-section folded' }, [el('summary', {}, head), marketRows(group)]);
+    return el('div', { class: 'bet-section' }, [head, marketRows(group)]);
+  });
+}
+
+// One row per market (a line, a team), its outcomes side by side as cards.
+function marketRows(bets) {
+  const markets = groupBy(bets, b => b.market);
+  const labelled = markets.size > 1;
+  return el('div', { class: 'markets' },
+    [...markets.values()].map(options =>
+      el('div', { class: 'market' }, [
+        labelled && options[0].marketLabel ? el('div', { class: 'market-label', text: options[0].marketLabel }) : null,
+        el('div', { class: `options options-${Math.min(options.length, 3)}` }, options.map(optionCard))
+      ])
+    )
+  );
+}
+
+// One outcome: name, estimated lottery odds, fair chance, average back, a box
+// for the real odds and the bet-slip button.
+function optionCard(bet) {
+  const t = state.t;
+  const back = betReturn(bet);
+  const inSlip = state.parlay.includes(bet.id);
+  const err = ODDS_ERROR[bet.errKey];
+  const input = el('input', {
+    class: 'opt-real',
+    type: 'number',
+    inputmode: 'decimal',
+    step: '0.01',
+    min: '1.01',
+    placeholder: t('realOddsShort'),
+    'aria-label': `${bet.label} ${t('colReal')}`,
+    value: state.userOdds[bet.id] ?? null,
+    oninput: event => onUserOdds(bet, event.target.value)
+  });
+  const canAdd = bet.kind !== 'f1' && bet.kind !== 'future' && bet.kind !== 'inning';
+  const addButton = canAdd
+    ? el('button', {
+        class: 'opt-add',
+        type: 'button',
+        'aria-pressed': String(inSlip),
+        'aria-label': inSlip ? t('removeLeg') : t('addLeg'),
+        text: inSlip ? '✓' : '+',
+        onclick: () => toggleLeg(bet)
+      })
+    : null;
+  return el('div', { class: `opt ${inSlip ? 'in-slip' : ''} ${backClass(back)}` }, [
+    el('div', { class: 'opt-row' }, [el('span', { class: 'opt-name', text: bet.chip ?? bet.shortLabel }), addButton]),
+    el('div', { class: 'opt-row' }, [
+      el('span', { class: 'opt-odds' }, [
+        document.createTextNode(fmtOdds(effectiveOdds(bet))),
+        el('small', { text: hasRealOdds(bet) ? t('tagReal') : `±${fmtOdds(bet.estOdds * err.rel)}${err.checked ? '' : '?'}` })
+      ]),
+      el('span', { class: 'opt-fair', title: t('colFair'), text: `${fmtPct(bet.fairChance)}${bet.fairMargin ? ` ${fmtMarginPts(bet.fairMargin)}${bet.typicalMargin ? '*' : ''}` : ''}` })
+    ]),
+    el('div', { class: 'opt-row' }, [
+      el('span', { class: 'opt-back-wrap' }, [el('small', { text: t('backShort') }), el('span', { class: `opt-back ${backClass(back)}`, 'data-back': bet.id }, backCell(bet))]),
+      input
+    ])
+  ]);
 }
 
 function groupBy(items, key) {
@@ -513,59 +646,6 @@ function groupBy(items, key) {
   return map;
 }
 
-function betTable(bets) {
-  const t = state.t;
-  const head = el('thead', {}, el('tr', {}, [
-    el('th', { text: t('colPick') }),
-    el('th', { class: 'num', text: t('colFair') }),
-    el('th', { class: 'num', text: t('colEst') }),
-    el('th', { text: t('colReal') }),
-    el('th', { class: 'num', text: t('colBack') }),
-    el('th', {})
-  ]));
-  const rows = bets.map(bet => {
-    const back = betReturn(bet);
-    const input = el('input', {
-      class: 'odds-input',
-      type: 'number',
-      inputmode: 'decimal',
-      step: '0.01',
-      min: '1.01',
-      placeholder: fmtOdds(bet.estOdds),
-      'aria-label': `${bet.label} ${t('colReal')}`,
-      value: state.userOdds[bet.id] ?? null,
-      oninput: event => onUserOdds(bet, event.target.value)
-    });
-    const inParlay = state.parlay.includes(bet.id);
-    const legButton =
-      bet.kind === 'f1' || bet.kind === 'future'
-        ? null
-        : el('button', {
-            class: 'ghost-button leg-button',
-            type: 'button',
-            'aria-pressed': String(inParlay),
-            text: inParlay ? t('removeLeg') : t('addLeg'),
-            onclick: () => toggleLeg(bet)
-          });
-    return el('tr', {}, [
-      el('td', { class: 'pick', text: bet.shortLabel }),
-      el('td', { class: 'num', 'data-label': t('colFair') }, [
-        document.createTextNode(fmtPct(bet.fairChance)),
-        bet.fairMargin ? marginEl(`${fmtMarginPts(bet.fairMargin)}${bet.typicalMargin ? '*' : ''}`) : marginEl(t('oneSource'))
-      ]),
-      el('td', { class: 'num', 'data-label': t('colEst') }, [
-        document.createTextNode(fmtOdds(bet.estOdds)),
-        marginEl(`±${fmtOdds(bet.estOdds * ODDS_ERROR[bet.errKey].rel)}${ODDS_ERROR[bet.errKey].checked ? '' : '?'}`)
-      ]),
-      el('td', { 'data-label': t('colReal') }, input),
-      el('td', { class: `num ${backClass(back)}`, 'data-label': t('colBack'), 'data-back': bet.id }, backCell(bet)),
-      el('td', { 'data-label': '' }, legButton)
-    ]);
-  });
-  return el('table', { class: 'bet-table' }, [head, el('tbody', {}, rows)]);
-}
-
-// "Estimated house take: 13% ±2" for one market (all its outcomes).
 function takeText(bets, labelKey) {
   const { take, margin } = houseTake(bets.map(effectiveOdds), bets.map(oddsError));
   const pct = `${Math.round(take * 100)}%${margin >= 0.005 ? ` ±${Math.max(1, Math.round(margin * 100))}` : ''}`;
@@ -588,7 +668,7 @@ function onUserOdds(bet, raw) {
   const cell = document.querySelector(`[data-back="${CSS.escape(bet.id)}"]`);
   if (cell) {
     cell.replaceChildren(...backCell(bet));
-    cell.className = `num ${backClass(betReturn(bet))}`;
+    cell.className = cell.classList.contains('opt-back') ? `opt-back ${backClass(betReturn(bet))}` : `num ${backClass(betReturn(bet))}`;
   }
   renderRanking();
   renderParlay();
@@ -613,9 +693,9 @@ function renderFutures() {
           el('span', { class: 'game-title', text: matchup }),
           el('span', { class: 'game-meta', text: `${t('futureSettles')} ${t(`futureSettle_${market}`)}` })
         ]),
-        betTable(bets.slice(0, FUTURES_SHOWN)),
+        el('div', { class: 'options options-3' }, bets.slice(0, FUTURES_SHOWN).map(optionCard)),
         rest.length
-          ? el('details', { class: 'table-view' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), betTable(rest)])
+          ? el('details', { class: 'more-options' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'options options-3' }, rest.map(optionCard))])
           : null,
         takeNote([takeText(bets)]),
         ...notes
@@ -671,6 +751,41 @@ function fmtChance(p) {
 
 function sizeName(k, n) {
   return k === n ? state.t('slipAll') : state.t('slipSize', { k });
+}
+
+// The 100,000 versions of one ticket: how often it paid, how often it made a
+// profit, each result's share next to its exact chance, and a few versions.
+function slipRunView(run, legs) {
+  const t = state.t;
+  const money = v => fmtMoney(v, { sign: false });
+  const n = legs.length;
+  const worst = Math.max(...run.byHits.map(r => Math.abs(r.simulated - r.exact)));
+  const legsText = won => legs.map((b, i) => `${won & (1 << i) ? '✓' : '✗'} ${b.shortLabel}`).join('  ');
+  const story = (key, s) => s && el('li', {}, [el('strong', { text: t(key, { v: `#${fmtCount(s.version)}`, pay: money(s.net) }) }), el('small', { text: legsText(s.won) })]);
+  const scale = Math.max(...run.byHits.map(r => Math.max(r.simulated, r.exact)));
+  return el('div', { class: 'run-result' }, [
+    el('p', { class: 'run-headline' }, [
+      document.createTextNode(t('runHeadlinePre', { n: fmtCount(run.runs) })),
+      el('strong', { class: run.paidShare >= 0.5 ? 'back-high' : 'back-low', text: fmtChance(run.paidShare) }),
+      document.createTextNode(t('runHeadlineMid')),
+      el('strong', { class: run.profitShare >= 0.5 ? 'back-high' : 'back-low', text: fmtChance(run.profitShare) }),
+      document.createTextNode(t('runHeadlinePost', { avg: money(run.averageNet), cost: money(run.cost) }))
+    ]),
+    el('ol', { class: 'run-bars' },
+      [...run.byHits].reverse().map(r =>
+        el('li', {}, [
+          el('span', { class: 'run-hits', text: t('slipHitsN', { k: r.hits, n }) }),
+          el('span', { class: 'run-track' }, [
+            el('span', { class: 'run-bar', style: `width:${(r.simulated / scale) * 100}%` }),
+            el('span', { class: 'run-exact', style: `left:${(r.exact / scale) * 100}%` })
+          ]),
+          el('span', { class: 'run-share' }, [el('strong', { text: fmtChance(r.simulated) }), el('small', { text: r.max > 0 ? (r.min === r.max ? money(r.max) : `${money(r.min)}–${money(r.max)}`) : '—' })])
+        ])
+      )
+    ),
+    el('ul', { class: 'run-stories' }, [story('runFirstPayout', run.stories.firstPayout), story('runFirstAll', run.stories.firstAll), story('runBest', run.stories.best)].filter(Boolean)),
+    el('p', { class: 'note', text: t('runExactNote', { paid: fmtChance(run.exact.paidShare), profit: fmtChance(run.exact.profitShare), avg: money(run.exact.averageNet), gap: (worst * 100).toFixed(2) }) })
+  ]);
 }
 
 function renderParlay() {
@@ -815,6 +930,25 @@ function renderParlay() {
             )
           )
         ])
+      ])
+    );
+  }
+  // Play this exact ticket out 100,000 times.
+  if (sizes.length && !errors.length) {
+    const runKey = JSON.stringify([slip, sizes, stake]);
+    const run = state.slipRun?.key === runKey ? state.slipRun.result : null;
+    parts.push(
+      el('div', { class: 'slip-run' }, [
+        el('button', {
+          class: 'primary-button',
+          type: 'button',
+          text: run ? t('runAgain') : t('runButton'),
+          onclick: () => {
+            state.slipRun = { key: runKey, result: simulateSlipOutcomes({ legs: slip, sizes, stake, seed: (state.slipRun?.seed ?? 0) + 1 }), seed: (state.slipRun?.seed ?? 0) + 1 };
+            state.slipRun.result && renderParlay();
+          }
+        }),
+        run ? slipRunView(run, legs) : el('p', { class: 'note', text: t('runHint') })
       ])
     );
   }
@@ -1292,15 +1426,20 @@ function renderF1() {
   const t = state.t;
   const body = $('f1-body');
   const f1 = state.data.f1;
-  $('f1').hidden = !inSport('f1');
+  $('f1').hidden = !inSport('f1') || !f1;
   if (!f1) {
     body.replaceChildren(el('p', { class: 'muted', text: t('f1None') }));
     return;
   }
   const drivers = state.bets.filter(b => b.kind === 'f1');
-  const table = betTable(drivers.slice(0, 10));
-  table.querySelector('th').textContent = t('colDriver');
-  body.replaceChildren(el('p', { class: 'game-meta', text: `${f1.title} · ${fmtTime(f1.startUtc)}` }), table, takeNote([takeText(drivers)]));
+  const shown = drivers.slice(0, 9);
+  const rest = drivers.slice(9);
+  body.replaceChildren(
+    el('p', { class: 'game-meta', text: `${f1.title} · ${fmtTime(f1.startUtc)}` }),
+    el('div', { class: 'options options-3' }, shown.map(optionCard)),
+    rest.length ? el('details', { class: 'more-options' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'options options-3' }, rest.map(optionCard))]) : null,
+    takeNote([takeText(drivers)])
+  );
 }
 
 // ---- Boot ---------------------------------------------------------------------
@@ -1354,12 +1493,10 @@ async function load() {
 
 // ---- Tabs ---------------------------------------------------------------------
 
-const TABS = ['games', 'futures', 'f1', 'slip', 'sim', 'math'];
+const TABS = ['games', 'slip', 'sim', 'math'];
 
 function tabAvailable(tab) {
   if (!state.data) return tab === 'games' || tab === 'math';
-  if (tab === 'futures') return state.futures.some(b => inSport(b.sport));
-  if (tab === 'f1') return Boolean(state.data.f1) && inSport('f1');
   return true;
 }
 

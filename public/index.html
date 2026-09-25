@@ -47,6 +47,7 @@
 </script>
 <main class="page">
   <header class="masthead">
+    <img class="brand-logo" src="./favicon.svg" alt="" width="44" height="44" />
     <div>
       <h1 id="title">賠率研究室</h1>
       <p id="subtitle" class="subtitle"></p>
@@ -64,8 +65,6 @@
 
   <nav id="tabs" class="tabs" role="tablist">
     <button id="tab-games" class="tab" role="tab" type="button" data-tab="games" data-t="tab_games"></button>
-    <button id="tab-futures" class="tab" role="tab" type="button" data-tab="futures" data-t="tab_futures"></button>
-    <button id="tab-f1" class="tab" role="tab" type="button" data-tab="f1" data-t="tab_f1"></button>
     <button id="tab-slip" class="tab" role="tab" type="button" data-tab="slip"></button>
     <button id="tab-sim" class="tab" role="tab" type="button" data-tab="sim" data-t="tab_sim"></button>
     <button id="tab-math" class="tab" role="tab" type="button" data-tab="math" data-t="tab_math"></button>
@@ -73,28 +72,25 @@
 
   <div id="panel-games" class="tab-panel" role="tabpanel" aria-labelledby="tab-games">
     <nav id="day-filter" class="day-filter" aria-label="day"></nav>
-    <section id="ranking" class="card" aria-labelledby="ranking-title">
-      <h2 id="ranking-title"></h2>
+    <details id="ranking" class="card ranking-card">
+      <summary><h2 id="ranking-title"></h2><span class="summary-hint" data-t="rankingHint"></span></summary>
       <p class="intro" data-t="rankingIntro"></p>
       <ol id="ranking-list" class="ranking-list"></ol>
-    </section>
+    </details>
 
     <section id="games" aria-labelledby="games-title">
       <h2 id="games-title"></h2>
       <p class="intro" data-t="gamesIntro"></p>
+      <details class="explain"><summary data-t="marginsHelpTitle"></summary><p data-t="marginsHelp"></p></details>
       <div id="games-list" class="games-list"></div>
     </section>
-    </div>
 
-  <div id="panel-futures" class="tab-panel" role="tabpanel" aria-labelledby="tab-futures">
     <section id="futures" aria-labelledby="futures-title">
       <h2 id="futures-title"></h2>
       <p class="intro" data-t="futuresIntro"></p>
       <div id="futures-list" class="games-list"></div>
     </section>
-    </div>
 
-  <div id="panel-f1" class="tab-panel" role="tabpanel" aria-labelledby="tab-f1">
     <section id="f1" class="card" aria-labelledby="f1-title">
       <h2 id="f1-title"></h2>
       <p class="intro" data-t="f1Intro"></p>

@@ -10,7 +10,9 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 - **Estimated lottery odds**: `1 ÷ (fair chance × 1.15)` for MLB, fitted against 14 real lottery games on 2026-09-25 (average error about 0.04). Anyone can type the real lottery odds in, and every number switches to them.
 - **MLB totals (大小分)**: like the lottery, three lines per game: the half-run line closest to 50/50 plus one run either side. DraftKings gives one line, so total runs are modelled as negative binomial (dispersion 5) fitted to it, and the other lines are read off that. On real lottery prices from 12 games (2026-09-25) it picked the same three lines every time and landed 0.9 points of chance (2% of price) off.
 - **MLB run lines (讓分)**: the lottery posts DraftKings' 1.5-run line and the 2.5 line on the same side, but prices them at its own chances: DraftKings' pulled toward 50/50 (`0.5 + 0.732 × (p − 0.5)`), then a fixed 8.6 points for the extra run. On 38 real prices from 10 games that's 1.6% off. The fair chance stays DraftKings', so the side likelier to cover shows up as the better deal (about NT$92 back per NT$100). Calibration data: `tests/fixtures/lottery-mlb-2026-09-25.json`.
-- Every two-way MLB market the lottery posts (win, totals, run lines, team totals) adds up to about 1.158 in implied chance (81 markets: 1.143–1.173). The "highest-scoring inning" market adds up to about 1.92, a ~48% take.
+- **MLB team totals (單隊大小)**: each team's runs modelled as negative binomial (dispersion 4), fitted to DraftKings' win chance and total; the half-run line closest to 50/50. On 9 games it picked the lottery's line 17 times out of 18, about 1.1 points of chance off.
+- **Highest-scoring inning (得分最高單局)**: the lottery's own table (it barely moves between games), shown with its cut removed; it adds up to about 1.92, a ~48% take.
+- Every two-way MLB market the lottery posts (win, totals, run lines, team totals) adds up to about 1.158 in implied chance (81 markets: 1.143–1.173).
 - **Back per NT$100**: `fair chance × odds × 100`. Below 100 loses on average.
 - **Every bet of the day, ranked** from least costly.
 - **Margins of error** on every estimate: fair chance ± half the DraftKings–Polymarket gap (at least ±0.5 points; single-source games use the league's typical gap, marked *); estimated odds ± their average error against real lottery prices, as an odds number (marked ? where never checked); amount back ± both combined; bet slip results as a range; simulator results ± 95% sampling error.
@@ -24,7 +26,7 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 
 With estimated odds only, every MLB bet comes out at about NT$87, because the formula assumes the same cut everywhere. The ranking becomes informative once real lottery odds are entered.
 
-The page is split into tabs (Games, Championships, F1, Bet slip, Simulator, The math), each with its own address (`#games`, `#slip`, …). The language follows the browser: Chinese for any `zh` language, English otherwise.
+The page is split into tabs (Games, Bet slip, Simulator, The math); championships and F1 sit under the games and follow the sport filter. Each game shows one row per market with its outcomes side by side as cards, and the ranking starts collapsed. The bet slip's Run plays the ticket out 100,000 times (each game won or lost at its fair chance, each version paid exactly) and shows the results next to the exact chances, each with its own address (`#games`, `#slip`, …). The language follows the browser: Chinese for any `zh` language, English otherwise.
 
 ## How it works
 

@@ -331,3 +331,57 @@ test('MLB run lines: the lottery shrinks DraftKings toward 50/50', () => {
   const [dog] = lotteryRunLines(1.5, 0.64);
   assert.ok(dog.fair > dog.lottery);
 });
+
+test('the streaming crowd equals simulating everyone in full', () => {
+  // The slow way: every player's whole path kept, exact percentiles.
+  const pools = habitPools(examplePool());
+  const weeks = 13;
+  const perHabit = 400;
+  const seed = 9;
+  const stats = simulateCrowdStats({ pools, weeks, perHabit, seed });
+  const players = [];
+  HABITS.forEach((habit, h) => {
+    for (let i = 0; i < perHabit; i++) players.push({ index: h * perHabit + i, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, h * perHabit + i) }) });
+  });
+  // Totals match to the cent.
+  close(stats.totals.staked, players.reduce((s, p) => s + p.staked, 0), 1e-6);
+  close(stats.totals.net, players.reduce((s, p) => s + p.final, 0), 1e-6);
+  assert.equal(stats.totals.aheadShare, players.filter(p => p.final > 0).length / players.length);
+  // The highlighted players are the same people, replayed exactly.
+  const byFinal = [...players].sort((a, b) => a.final - b.final);
+  const at = q => byFinal[Math.round((byFinal.length - 1) * q)];
+  for (const [key, q] of [['best', 0.9], ['median', 0.5], ['worst', 0.1]]) {
+    assert.equal(stats.characters[key].final, at(q).final, key);
+    assert.deepEqual([...stats.characters[key].path], [...at(q).path], key);
+  }
+  // Record holders too.
+  assert.equal(stats.notable.best.final, byFinal.at(-1).final);
+  assert.equal(stats.notable.worst.final, byFinal[0].final);
+  // Weekly bands: within one histogram step of the exact percentiles.
+  const step = (2 * (2500 * weeks + 20000)) / Math.min(20000, Math.floor(2_000_000 / weeks));
+  for (let w = 0; w < weeks; w++) {
+    const values = players.map(p => p.path[w]).sort((a, b) => a - b);
+    for (const [k, q] of [['q10', 0.1], ['q50', 0.5], ['q90', 0.9]]) {
+      const exact = values[Math.floor(q * (values.length - 1))];
+      assert.ok(Math.abs(stats.bands[w][k] - exact) <= step, `week ${w} ${k}: ${stats.bands[w][k]} vs ${exact}`);
+    }
+    assert.equal(stats.bands[w].ahead, values.filter(v => v > 0).length);
+  }
+});
+
+test('100,000 versions of a ticket match its exact chances', async () => {
+  const { simulateSlipOutcomes } = await import('../public/lib/odds.mjs');
+  const legs = [
+    { odds: 1.8, fairChance: 0.5 },
+    { odds: 2, fairChance: 0.45 },
+    { odds: 1.7, fairChance: 0.55 },
+    { odds: 1.9, fairChance: 0.5 }
+  ];
+  const run = simulateSlipOutcomes({ legs, sizes: [2, 4], stake: 100 });
+  const exact = evaluateSlip({ legs, sizes: [2, 4], stake: 100 });
+  close(run.exact.averageNet, exact.expectedNet, 1e-9);
+  close(run.exact.paidShare, exact.anyPayout, 1e-12);
+  // Sampling error at 100,000 runs: well under a percentage point.
+  for (const row of run.byHits) assert.ok(Math.abs(row.simulated - row.exact) < 0.006, `${row.hits}`);
+  close(run.averageNet, exact.expectedNet, exact.expectedNet * 0.02);
+});

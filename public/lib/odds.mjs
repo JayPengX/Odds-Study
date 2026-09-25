@@ -105,6 +105,8 @@ export const ODDS_ERROR = {
   mlb: { rel: 0.022, checked: true }, // 28 prices, 14 games: ~0.04 on ~1.8
   mlbTotal: { rel: 0.02, checked: true }, // 68 total-line prices, 12 games (model)
   mlbRunLine: { rel: 0.016, checked: true }, // 38 run-line prices, 10 games
+  mlbTeamTotal: { rel: 0.03, checked: true }, // 36 team-total prices, 9 games (model)
+  topInning: { rel: 0.03, checked: true }, // the lottery's own table, 8 games
   epl: { rel: 0.1, checked: false }, // soccer never checked
   f1: { rel: 0.08, checked: true }, // 9 prices
   f1Longshot: { rel: 0.35, checked: true }, // 325 vs 500 can't be told apart
@@ -215,6 +217,99 @@ export function lotteryRunLines(awayLine, awayFair) {
     { awayLine: awayLine + toward, fair: clamp(awayFair + toward * RUN_LINE_TRUE_STEP), lottery: clamp(lottery + toward * RUN_LINE_STEP) }
   ];
 }
+
+// Each team's runs (for team totals). Runs per team are negative binomial
+// (dispersion TEAM_RUNS_DISPERSION), independent; a tie after nine goes to
+// extra innings and the winner takes it by one run. The two means are fitted
+// so the home team's win chance and the game total match DraftKings. On the
+// lottery's team totals from 9 games (2026-09-25) it picked the lottery's line
+// 17 times out of 18 and landed about 1.1 points of chance off (r = 4 fit best).
+export const TEAM_RUNS_DISPERSION = 4;
+const TEAM_RUNS_MAX = 30;
+
+function runsPmf(mu, r = TEAM_RUNS_DISPERSION, kMax = TEAM_RUNS_MAX) {
+  const p = r / (r + mu);
+  const out = new Float64Array(kMax + 1);
+  let pmf = p ** r;
+  for (let k = 0; k <= kMax; k++) {
+    out[k] = pmf;
+    pmf *= ((k + r) / (k + 1)) * (1 - p);
+  }
+  return out;
+}
+
+// Final score distribution as a flat (kMax+2)^2 grid: grid[h * size + a].
+export function scoreGrid(homeMean, awayMean, r = TEAM_RUNS_DISPERSION) {
+  const H = runsPmf(homeMean, r);
+  const A = runsPmf(awayMean, r);
+  const size = TEAM_RUNS_MAX + 2;
+  const grid = new Float64Array(size * size);
+  let homeWins = 0;
+  let awayWins = 0;
+  for (let h = 0; h <= TEAM_RUNS_MAX; h++)
+    for (let a = 0; a <= TEAM_RUNS_MAX; a++) {
+      if (h > a) homeWins += H[h] * A[a];
+      else if (a > h) awayWins += H[h] * A[a];
+    }
+  const homeExtra = homeWins / (homeWins + awayWins);
+  for (let h = 0; h <= TEAM_RUNS_MAX; h++)
+    for (let a = 0; a <= TEAM_RUNS_MAX; a++) {
+      const p = H[h] * A[a];
+      if (h !== a) grid[h * size + a] += p;
+      else {
+        grid[(h + 1) * size + a] += p * homeExtra;
+        grid[h * size + a + 1] += p * (1 - homeExtra);
+      }
+    }
+  return { grid, size };
+}
+
+function gridChance({ grid, size }, test) {
+  let sum = 0;
+  for (let h = 0; h < size; h++) for (let a = 0; a < size; a++) if (test(h, a)) sum += grid[h * size + a];
+  return sum;
+}
+
+// The two teams' mean runs matching DraftKings' home win chance and total.
+export function fitTeamRuns(homeWinFair, totalLine, overFair, r = TEAM_RUNS_DISPERSION) {
+  const overChance = g => {
+    if (totalLine % 1 !== 0) return gridChance(g, (h, a) => h + a > totalLine);
+    const push = gridChance(g, (h, a) => h + a === totalLine);
+    return gridChance(g, (h, a) => h + a > totalLine) / (1 - push);
+  };
+  const bisect = (lo, hi, f) => {
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (f(mid)) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
+  // Total mean for a given home share, then the share for the win chance.
+  const totalFor = share => bisect(1, 25, t => overChance(scoreGrid(t * share, t * (1 - share), r)) < overFair);
+  const share = bisect(0.15, 0.85, s => {
+    const t = totalFor(s);
+    return gridChance(scoreGrid(t * s, t * (1 - s), r), (h, a) => h > a) < homeWinFair;
+  });
+  const total = totalFor(share);
+  return { home: total * share, away: total * (1 - share) };
+}
+
+// The lottery's team total for one team: the half-run line closest to 50/50.
+export function lotteryTeamTotal(teamMean, r = TEAM_RUNS_DISPERSION) {
+  const pmf = runsPmf(teamMean, r);
+  const over = line => 1 - pmf.slice(0, Math.floor(line) + 1).reduce((s, p) => s + p, 0);
+  let line = 0.5;
+  while (line < 15 && Math.abs(over(line + 1) - 0.5) < Math.abs(over(line) - 0.5)) line += 1;
+  return { line, over: over(line) };
+}
+
+// 得分最高單局: which inning (1-9, extra innings excluded) scores the most runs,
+// or a tie for the most. No other source prices it, and the lottery's table
+// barely moves between games (each price within about 0.2 on 8 games,
+// 2026-09-25), so this is its average table. It adds up to about 1.92 in
+// implied chance: a take of about 48%.
+export const TOP_INNING_ODDS = [5.4, 6.38, 5.69, 6.13, 6.0, 6.04, 6.31, 5.97, 8.0, 2.19];
 
 // Implied chances of every outcome in a market, summed. 1.15 means a 15% overround.
 export function overround(oddsList) {
@@ -666,4 +761,97 @@ export function evaluateSlip({ legs, sizes, stake }) {
     row.max = Math.max(row.max, gross);
   }
   return { combos, cost, best, expected, expectedNet, anyPayout, profit, byHits };
+}
+
+// What a ticket pays for every way its legs can land: index = bit mask of the
+// legs that won. Gross is capped per ticket; net also takes Taiwan's tax off
+// each combination over NT$5,000.
+export function slipPayoutTable({ legs, sizes, stake }) {
+  const n = legs.length;
+  const sizeSet = new Set(sizes);
+  const gross = new Float64Array(1 << n);
+  const net = new Float64Array(1 << n);
+  for (let won = 0; won < 1 << n; won++) {
+    let g = 0;
+    let t = 0;
+    // Every combination made only of winning legs pays stake x its odds.
+    for (let pick = won; pick > 0; pick = (pick - 1) & won) {
+      let size = 0;
+      let product = 1;
+      for (let i = 0; i < n; i++) if (pick & (1 << i)) (size++, (product *= legs[i].odds));
+      if (!sizeSet.has(size)) continue;
+      const pay = stake * product;
+      g += pay;
+      t += afterTax(pay);
+    }
+    if (g > SLIP_RULES.maxPayout) {
+      t *= SLIP_RULES.maxPayout / g;
+      g = SLIP_RULES.maxPayout;
+    }
+    gross[won] = g;
+    net[won] = t;
+  }
+  return { gross, net };
+}
+
+// Plays the ticket out `runs` times: each leg wins at its fair chance, on
+// its own. Every version gets its exact payout from the table above. Returns
+// how often each result came up, alongside the exact chances, plus a few
+// numbered versions to show.
+export function simulateSlipOutcomes({ legs, sizes, stake, runs = 100_000, seed = 1 }) {
+  const n = legs.length;
+  const { gross, net } = slipPayoutTable({ legs, sizes, stake });
+  const cost = sizes.reduce((s, k) => s + choose(n, k), 0) * stake;
+  const random = seededRandom(seed);
+  const counts = new Uint32Array(1 << n);
+  let paid = 0;
+  let profit = 0;
+  let netSum = 0;
+  let best = { version: 0, net: -1, won: 0 };
+  let firstPayout = null;
+  let firstAll = null;
+  for (let v = 0; v < runs; v++) {
+    let won = 0;
+    for (let i = 0; i < n; i++) if (random() < legs[i].fairChance) won |= 1 << i;
+    counts[won]++;
+    const pay = net[won];
+    netSum += pay;
+    if (gross[won] > 0) {
+      paid++;
+      firstPayout ??= { version: v + 1, won, net: pay };
+    }
+    if (pay > cost) profit++;
+    if (pay > best.net) best = { version: v + 1, net: pay, won };
+    if (won === (1 << n) - 1) firstAll ??= { version: v + 1, won, net: pay };
+  }
+  // By number of legs won: simulated share next to the exact chance.
+  const exact = new Float64Array(1 << n);
+  for (let won = 0; won < 1 << n; won++) {
+    let p = 1;
+    for (let i = 0; i < n; i++) p *= won & (1 << i) ? legs[i].fairChance : 1 - legs[i].fairChance;
+    exact[won] = p;
+  }
+  const byHits = Array.from({ length: n + 1 }, (_, hits) => ({ hits, simulated: 0, exact: 0, min: Infinity, max: 0 }));
+  for (let won = 0; won < 1 << n; won++) {
+    let hits = 0;
+    for (let i = 0; i < n; i++) if (won & (1 << i)) hits++;
+    const row = byHits[hits];
+    row.simulated += counts[won] / runs;
+    row.exact += exact[won];
+    row.min = Math.min(row.min, net[won]);
+    row.max = Math.max(row.max, net[won]);
+  }
+  const exactNet = exact.reduce((s, p, won) => s + p * net[won], 0);
+  const exactPaid = exact.reduce((s, p, won) => s + (gross[won] > 0 ? p : 0), 0);
+  const exactProfit = exact.reduce((s, p, won) => s + (net[won] > cost ? p : 0), 0);
+  return {
+    runs,
+    cost,
+    paidShare: paid / runs,
+    profitShare: profit / runs,
+    averageNet: netSum / runs,
+    exact: { paidShare: exactPaid, profitShare: exactProfit, averageNet: exactNet },
+    byHits,
+    stories: { firstPayout, firstAll, best: best.net > 0 ? best : null }
+  };
 }
