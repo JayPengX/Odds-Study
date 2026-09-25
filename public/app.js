@@ -2158,7 +2158,7 @@ function renderLookup(serial) {
     el('div', { class: 'lookup-card' }, [
       el('div', { class: 'story-head' }, [
         el('span', { class: 'story-icon', 'aria-hidden': 'true', text: p.final > 0 ? '😎' : p.everAhead ? '😬' : '😶' }),
-        el('div', {}, [el('p', { class: 'story-serial', text: `#${fmtCount(n)}` }), el('div', { class: 'player-tags' }, [p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null, el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })])])
+        el('div', {}, [el('p', { class: 'story-serial' }, [document.createTextNode(`#${fmtCount(n)}`), pr ? el('span', { class: 'serial-pr', text: t('playerPR', { n: pr }) }) : null]), el('div', { class: 'player-tags' }, [p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null, el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })])])
       ]),
       el('p', { class: `story-big ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
       sparkline(p.path),
@@ -2166,7 +2166,6 @@ function renderLookup(serial) {
       el('div', { class: 'player-lines' }, [
         line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
         line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
-        pr ? line(t('playerPercentile'), t('playerPR', { n: pr })) : null,
         line(t('playerPeak'), point(hi), p.path[hi] > 0 ? 'back-high' : 'back-low'),
         line(t('playerLow'), point(lo), p.path[lo] < 0 ? 'back-low' : 'back-high'),
         line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),

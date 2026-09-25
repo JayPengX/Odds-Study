@@ -857,3 +857,4 @@ details.market[open] > summary { margin-bottom: 6px; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .buy strong { display: block; }
+.serial-pr { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.72rem; font-weight: 700; vertical-align: middle; white-space: nowrap; }
