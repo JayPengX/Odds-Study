@@ -11,7 +11,10 @@ import {
   combineParlay,
   blendOutcomes,
   devigProportional,
-  simulateRuns,
+  HABITS,
+  habitPools,
+  simulateHabit,
+  summarizeHabit,
   seededRandom,
   K_BOTH,
   K_POLYMARKET
@@ -79,46 +82,50 @@ test('proportional devig handles three outcomes', () => {
   assert.equal(devigProportional([0.5, null, 0.5]), null);
 });
 
-test('simulation is reproducible and averages to the expected loss', () => {
-  const a = simulateRuns({ fairChance: 0.5, odds: 1.8, bets: 50, runs: 2, random: seededRandom(7) });
-  const b = simulateRuns({ fairChance: 0.5, odds: 1.8, bets: 50, runs: 2, random: seededRandom(7) });
-  assert.deepEqual(a, b);
-  const runs = simulateRuns({ fairChance: 0.5, odds: 1.8, bets: 2000, runs: 50, random: seededRandom(1) });
-  const avgPerBet = runs.reduce((s, r) => s + r.at(-1), 0) / runs.length / 2000;
-  close(avgPerBet, -10, 1.5);
+// 10 games, two sides each, every price at the estimated 1.15 cut.
+function examplePool() {
+  const pool = [];
+  for (let g = 0; g < 10; g++) {
+    const p = 0.35 + g * 0.03;
+    for (const q of [p, 1 - p]) pool.push({ gameId: g, fairChance: q, odds: estimateLotteryOdds(q, 1.15) });
+  }
+  return pool;
+}
+const habit = key => HABITS.find(h => h.key === key);
+
+test('habit pools pick favorites, underdogs and the least costly bets', () => {
+  const pools = habitPools(examplePool());
+  assert.ok(pools.favorite.every(b => b.fairChance >= 0.55));
+  assert.ok(pools.underdog.every(b => b.fairChance <= 0.4));
+  assert.equal(pools.best.length, 5);
+  // Nothing to pick falls back to the whole pool.
+  const even = [{ gameId: 1, fairChance: 0.5, odds: 1.74 }, { gameId: 2, fairChance: 0.5, odds: 1.74 }];
+  assert.equal(habitPools(even).favorite.length, 2);
 });
 
-test('chanceAhead matches a hand count and shrinks with more bets', async () => {
-  const { chanceAhead } = await import('../public/lib/odds.mjs');
-  // 1 bet: ahead only by winning.
-  assert.ok(Math.abs(chanceAhead(0.5, 1.8, 1) - 0.5) < 1e-12);
-  // 2 bets at 1.8: one win gives +80 - 100 = -20, so both must win.
-  assert.ok(Math.abs(chanceAhead(0.5, 1.8, 2) - 0.25) < 1e-12);
-  // Even odds at 2.0: exactly break-even isn't ahead.
-  assert.ok(Math.abs(chanceAhead(0.5, 2, 2) - 0.25) < 1e-12);
-  assert.ok(chanceAhead(0.5, 1.8, 1000) < chanceAhead(0.5, 1.8, 100));
-  assert.ok(chanceAhead(0.5, 1.8, 10000) < 1e-6);
+test('a season is reproducible and its path adds up', () => {
+  const pools = habitPools(examplePool());
+  const run = () => simulateHabit({ habit: habit('casual'), pools, weeks: 52, random: seededRandom(5) });
+  assert.deepEqual(run(), run());
+  const a = run();
+  assert.equal(a.path.length, 52);
+  assert.equal(a.final, a.path.at(-1));
+  assert.ok(a.wonTickets <= a.tickets && a.staked >= a.tickets * 100);
+  assert.equal(a.everAhead, a.peak > 0);
 });
 
-test('luckCrossover is where average loss equals typical luck', async () => {
-  const { luckCrossover, chanceAhead } = await import('../public/lib/odds.mjs');
-  // mean -0.1, sd 0.9 per unit -> (0.9 / 0.1)^2 = 81.
-  assert.equal(luckCrossover(0.5, 1.8), 81);
-  assert.equal(luckCrossover(0.5, 2.2), null);
-  // Around the crossover roughly 1 in 6 players is still ahead.
-  const p = chanceAhead(0.5, 1.8, 81);
-  assert.ok(p > 0.1 && p < 0.25);
+test('the chaser doubles after a losing week and stays under the cap', () => {
+  const pools = habitPools(examplePool());
+  const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2) });
+  assert.ok(run.maxStake > 100 && run.maxStake <= 3200);
+  assert.ok([100, 200, 400, 800, 1600, 3200].includes(run.maxStake));
 });
 
-test('describeRun reads wins, peak, streaks and the biggest drop', async () => {
-  const { describeRun } = await import('../public/lib/odds.mjs');
-  // win, win, lose, lose, lose, win at odds 1.8
-  const run = describeRun([80, 160, 60, -40, -140, -60]);
-  assert.equal(run.wins, 3);
-  assert.equal(run.peak, 160);
-  assert.equal(run.peakAt, 1);
-  assert.equal(run.longestLosing, 3);
-  assert.equal(run.maxDrop, 300);
-  assert.equal(run.everAhead, true);
-  assert.equal(describeRun([-100, -200]).everAhead, false);
+test('each extra parlay leg takes the cut again', () => {
+  const pools = habitPools(examplePool());
+  const back = key => summarizeHabit({ habit: habit(key), pools, weeks: 52, players: 400, random: seededRandom(1) }).back;
+  // 2 legs: (1 / 1.15)^2 = 75.6; 4-6 legs: about 50.
+  close(back('casual'), 75.6, 5);
+  const dreamer = back('dreamer');
+  assert.ok(dreamer > 40 && dreamer < 62, `${dreamer}`);
 });

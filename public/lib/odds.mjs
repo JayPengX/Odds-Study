@@ -87,22 +87,6 @@ export function blendOutcomes(draftKings, polymarket) {
   return null;
 }
 
-// Simulates `runs` bettors each placing `bets` identical bets of `stake`.
-// Returns each run's running profit, one value per bet (index 0 = after bet 1).
-export function simulateRuns({ fairChance, odds, stake = 100, bets = 1000, runs = 20, random = Math.random }) {
-  const out = [];
-  for (let r = 0; r < runs; r++) {
-    const path = new Array(bets);
-    let profit = 0;
-    for (let i = 0; i < bets; i++) {
-      profit += random() < fairChance ? stake * (odds - 1) : -stake;
-      path[i] = profit;
-    }
-    out.push(path);
-  }
-  return out;
-}
-
 // Mulberry32: small seedable PRNG so a simulation can be replayed.
 export function seededRandom(seed) {
   let a = seed >>> 0;
@@ -115,65 +99,138 @@ export function seededRandom(seed) {
   };
 }
 
-// Per-bet profit for 1 unit staked: its average and its standard deviation
-// (how far luck typically moves a single bet away from that average).
-export function betMoments(fairChance, odds) {
-  return { mean: fairChance * odds - 1, sd: odds * Math.sqrt(fairChance * (1 - fairChance)) };
+// Betting habits for the season simulator. Each week a player buys a random
+// number of tickets (Poisson around `perWeek`, so some weeks none), each with
+// `legs` legs from different games (most lottery MLB games need 2+), a stake
+// drawn from `stakes`, and legs chosen by `pick`. A chaser doubles the stake
+// after a losing week, up to `chaseCap`, and drops back after a winning one.
+export const HABITS = [
+  { key: 'casual', perWeek: 1, legs: [2, 2], stakes: [100, 100, 200], pick: 'any' },
+  { key: 'fan', perWeek: 3, legs: [2, 2], stakes: [200, 300, 500], pick: 'favorite' },
+  { key: 'underdog', perWeek: 2, legs: [2, 3], stakes: [100, 200], pick: 'underdog' },
+  { key: 'dreamer', perWeek: 2, legs: [4, 6], stakes: [100], pick: 'any' },
+  { key: 'chaser', perWeek: 2, legs: [2, 2], stakes: [100], pick: 'any', chaseCap: 3200 },
+  { key: 'careful', perWeek: 1, legs: [2, 2], stakes: [100, 200], pick: 'best' }
+];
+
+// Splits a pool of bets ({gameId, fairChance, odds}) into the lists each
+// `pick` style draws from. A style with nothing to pick falls back to all.
+export function habitPools(pool) {
+  const byBack = [...pool].sort((a, b) => b.fairChance * b.odds - a.fairChance * a.odds);
+  const lists = {
+    any: pool,
+    favorite: pool.filter(b => b.fairChance >= 0.55),
+    underdog: pool.filter(b => b.fairChance <= 0.4),
+    best: byBack.slice(0, Math.max(1, Math.ceil(pool.length / 4)))
+  };
+  for (const k of Object.keys(lists)) if (lists[k].length === 0) lists[k] = pool;
+  return lists;
 }
 
-// Exact chance of being strictly ahead after n bets. Ahead means wins x odds > n,
-// and the number of wins follows a binomial distribution.
-export function chanceAhead(fairChance, odds, n) {
-  if (fairChance <= 0) return 0;
-  if (fairChance >= 1) return odds > 1 ? 1 : 0;
-  const minWins = Math.floor(n / odds + 1e-9) + 1;
-  if (minWins > n) return 0;
-  const lp = Math.log(fairChance);
-  const lq = Math.log(1 - fairChance);
-  let logChoose = 0;
-  let total = 0;
-  for (let w = 0; w <= n; w++) {
-    if (w >= minWins) total += Math.exp(logChoose + w * lp + (n - w) * lq);
-    logChoose += Math.log(n - w) - Math.log(w + 1);
+function poisson(mean, random) {
+  const limit = Math.exp(-mean);
+  let k = 0;
+  let p = random();
+  while (p > limit) {
+    k++;
+    p *= random();
   }
-  return Math.min(1, total);
+  return k;
 }
 
-// Bets until the house's cut outweighs typical luck: the average loss grows
-// like n, luck's swing grows like sqrt(n), and they meet at n = (sd / mean)^2.
-// Null when the bet doesn't lose on average.
-export function luckCrossover(fairChance, odds) {
-  const { mean, sd } = betMoments(fairChance, odds);
-  if (mean >= 0) return null;
-  return Math.max(1, Math.round((sd / mean) ** 2));
+function pickOne(list, random) {
+  return list[Math.floor(random() * list.length)];
 }
 
-// Story of one simulated player, from their running profit path.
-export function describeRun(path) {
-  let wins = 0;
-  let peak = 0;
-  let peakAt = -1;
-  let high = 0;
-  let maxDrop = 0;
+// Up to `n` legs, each from a different game.
+function pickLegs(list, n, random) {
+  const legs = [];
+  const games = new Set();
+  for (let tries = 0; legs.length < n && tries < n * 20; tries++) {
+    const bet = pickOne(list, random);
+    if (games.has(bet.gameId)) continue;
+    games.add(bet.gameId);
+    legs.push(bet);
+  }
+  return legs;
+}
+
+// One player's `weeks` of betting with `habit`. `path` is the running profit
+// at the end of each week; the rest is the player's story.
+export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
+  const list = pools[habit.pick];
+  const path = new Array(weeks);
+  let profit = 0;
+  let tickets = 0;
+  let wonTickets = 0;
+  let staked = 0;
+  let biggestWin = 0;
   let losing = 0;
   let longestLosing = 0;
-  let prev = 0;
-  for (let i = 0; i < path.length; i++) {
-    const v = path[i];
-    if (v > prev) {
-      wins++;
-      losing = 0;
-    } else {
-      losing++;
-      if (losing > longestLosing) longestLosing = losing;
+  let chaseStake = habit.stakes[0];
+  let maxStake = 0;
+  let peak = 0;
+  let peakWeek = -1;
+  let maxDrop = 0;
+  for (let w = 0; w < weeks; w++) {
+    const count = poisson(habit.perWeek, random);
+    let week = 0;
+    for (let i = 0; i < count; i++) {
+      const [lo, hi] = habit.legs;
+      const legs = pickLegs(list, lo + Math.floor(random() * (hi - lo + 1)), random);
+      if (legs.length === 0) continue;
+      const stake = habit.chaseCap ? chaseStake : pickOne(habit.stakes, random);
+      let won = true;
+      let odds = 1;
+      for (const leg of legs) {
+        odds *= leg.odds;
+        if (random() >= leg.fairChance) won = false;
+      }
+      const result = won ? stake * (odds - 1) : -stake;
+      tickets++;
+      staked += stake;
+      week += result;
+      if (stake > maxStake) maxStake = stake;
+      if (won) {
+        wonTickets++;
+        losing = 0;
+        if (result > biggestWin) biggestWin = result;
+      } else if (++losing > longestLosing) longestLosing = losing;
     }
-    if (v > peak) {
-      peak = v;
-      peakAt = i;
+    if (habit.chaseCap && count > 0) chaseStake = week < 0 ? Math.min(chaseStake * 2, habit.chaseCap) : habit.stakes[0];
+    profit += week;
+    path[w] = profit;
+    if (profit > peak) {
+      peak = profit;
+      peakWeek = w;
     }
-    if (v > high) high = v;
-    if (high - v > maxDrop) maxDrop = high - v;
-    prev = v;
+    if (peak - profit > maxDrop) maxDrop = peak - profit;
   }
-  return { final: path.at(-1), wins, peak, peakAt, everAhead: peak > 0, longestLosing, maxDrop };
+  return { path, final: profit, tickets, wonTickets, staked, biggestWin, longestLosing, maxStake, peak, peakWeek, everAhead: peak > 0, maxDrop };
+}
+
+// Many players with one habit: average amount back per NT$100 staked, share
+// still ahead at the end, and the average running profit week by week.
+export function summarizeHabit({ habit, pools, weeks, players = 300, random = Math.random }) {
+  const meanPath = new Array(weeks).fill(0);
+  let staked = 0;
+  let net = 0;
+  let ahead = 0;
+  let tickets = 0;
+  for (let p = 0; p < players; p++) {
+    const run = simulateHabit({ habit, pools, weeks, random });
+    for (let w = 0; w < weeks; w++) meanPath[w] += run.path[w] / players;
+    staked += run.staked;
+    net += run.final;
+    tickets += run.tickets;
+    if (run.final > 0) ahead++;
+  }
+  return {
+    back: staked > 0 ? ((staked + net) / staked) * 100 : 100,
+    aheadShare: ahead / players,
+    avgFinal: net / players,
+    avgStaked: staked / players,
+    avgTickets: tickets / players,
+    meanPath
+  };
 }

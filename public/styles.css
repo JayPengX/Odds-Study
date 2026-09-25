@@ -246,17 +246,12 @@ footer { margin-top: 24px; }
 .player-line { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--grid); padding: 4px 0; }
 .player-line span { color: var(--text-muted); }
 .player-line strong { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-.chance-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.chance-row { display: grid; grid-template-columns: 6.5em 1fr 9.5em; gap: 10px; align-items: center; font-size: 0.88rem; }
-.chance-n { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.chance-track { grid-column: auto; background: var(--grid); border-radius: 4px; overflow: hidden; }
-.chance-track .bar { border-radius: 4px; }
-.chance-value { display: flex; flex-direction: column; text-align: right; line-height: 1.25; }
-.chance-value strong { font-variant-numeric: tabular-nums; }
-.chance-value small { color: var(--text-muted); font-size: 0.72rem; }
+/* Habit comparison: name and amount back on top, bar, then the details. */
+.habit-item { grid-template-columns: 1fr 5em; }
+.habit-item .bar-track { grid-column: 1 / 2; background: var(--grid); border-radius: 4px; }
+.habit-meta { grid-column: 1 / 3; font-size: 0.8rem; color: var(--text-muted); }
+.habit-tag { font-size: 0.72rem; font-weight: 500; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+.headline-big strong.good { color: var(--good); }
 .facts { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: 0.92rem; color: var(--text-secondary); }
 .facts li::marker { color: var(--series-1); }
-@media (max-width: 480px) {
-  .chance-row { grid-template-columns: 6.8em 1fr 7.5em; gap: 8px; font-size: 0.82rem; }
-}
 #sim-table { overflow-x: auto; }

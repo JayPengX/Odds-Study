@@ -10,7 +10,7 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 - **Estimated lottery odds**: `1 ÷ (fair chance × 1.15)` for MLB, fitted against 14 real lottery games on 2026-09-25 (average error about 0.04). Anyone can type the real lottery odds in, and every number switches to them.
 - **Back per NT$100**: `fair chance × odds × 100`. Below 100 loses on average.
 - **Least costly ranking** per day, and a **parlay calculator** (most MLB games on the lottery require 2+ games per ticket).
-- **Simulator**: 20 players repeat one bet. It follows the Lucky, Typical and Unlucky player (wins, highest point, losing streak, biggest drop), says after about how many bets the cut outweighs luck (`(sd ÷ average loss)²`), lists the exact chance of still being ahead after 1 to 10,000 bets, and adds facts that change with each run (break-even win rate, how many were ever ahead vs. still ahead, loss in minimum-wage hours).
+- **Simulator**: 24 people with realistic habits play for 1 month to 3 years, drawing their picks from the real games on the board. Each week they buy a random number of parlay tickets with varying stakes. Habits: Casual, Big fan (favorites), Upset hunter (underdogs), Parlay dreamer (4–6 games), Chaser (doubles after a losing week) and Careful (least costly bets). It follows the Lucky, Typical and Unlucky player, then compares the habits over 300 simulated people each: amount back per NT$100, share still ahead, average result.
 - **Premier League**: uses the same MLB formula, which has **not** been checked against real lottery soccer prices yet. Real prices typed in override it.
 - **F1 race winner**: `1 ÷ fair chance^0.69`, fitted on only 5 prices, so rough.
 
