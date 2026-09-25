@@ -99,6 +99,35 @@ export function expectedReturn(fairChance, odds, stake = 100) {
   return fairChance * odds * stake;
 }
 
+// How far estimated lottery odds can be off, as a share of the odds (average
+// error against real lottery prices). `checked: false` marks a guess.
+export const ODDS_ERROR = {
+  mlb: { rel: 0.022, checked: true }, // 28 prices, 14 games: ~0.04 on ~1.8
+  epl: { rel: 0.1, checked: false }, // soccer never checked
+  f1: { rel: 0.08, checked: true }, // 9 prices
+  f1Longshot: { rel: 0.35, checked: true }, // 325 vs 500 can't be told apart
+  future_al: { rel: 0.06, checked: true },
+  future_nl: { rel: 0.2, checked: true },
+  future_ws: { rel: 0.15, checked: true },
+  future_epl: { rel: 0.16, checked: true },
+  futureLongshot: { rel: 0.5, checked: true }, // 133-500 from one rough step
+  future_nba: { rel: 0.15, checked: false } // not on the lottery
+};
+
+// Margin of the average amount back (fair chance x odds x 100), from the
+// fair chance's margin (absolute, may be null) and the odds' (relative).
+export function backMargin(fairChance, fairMargin, odds, oddsRel) {
+  const relFair = fairMargin ? fairMargin / fairChance : 0;
+  return fairChance * odds * 100 * Math.hypot(relFair, oddsRel || 0);
+}
+
+// Middle value of a list (null when empty).
+export function median(values) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return quantile(sorted, 0.5);
+}
+
 // Implied chances of every outcome in a market, summed. 1.15 means a 15% overround.
 export function overround(oddsList) {
   return oddsList.reduce((s, o) => s + 1 / o, 0);
@@ -262,10 +291,18 @@ export function summarizeCrowd(players) {
     const group = players.filter(p => p.habit === habit);
     const staked = group.reduce((s, p) => s + p.staked, 0);
     const net = group.reduce((s, p) => s + p.final, 0);
+    const back = staked > 0 ? (staked + net) / staked : 1;
+    const aheadShare = group.filter(p => p.final > 0).length / group.length;
+    // 95% sampling margins: a ratio estimate for the amount back, binomial for the share.
+    const n = group.length;
+    const meanStaked = staked / n;
+    const spread = group.reduce((s, p) => s + (p.staked + p.final - back * p.staked) ** 2, 0);
     return {
       habit,
-      back: staked > 0 ? ((staked + net) / staked) * 100 : 100,
-      aheadShare: group.filter(p => p.final > 0).length / group.length,
+      back: back * 100,
+      backMargin: n > 1 && meanStaked > 0 ? (1.96 * Math.sqrt(spread / (n * (n - 1))) * 100) / meanStaked : 0,
+      aheadShare,
+      aheadMargin: 1.96 * Math.sqrt((aheadShare * (1 - aheadShare)) / n),
       avgFinal: net / group.length,
       avgStaked: staked / group.length,
       avgTickets: group.reduce((s, p) => s + p.tickets, 0) / group.length

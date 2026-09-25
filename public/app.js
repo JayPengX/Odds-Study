@@ -3,12 +3,15 @@ import {
   K_DRAFTKINGS,
   blendOutcomes,
   FUTURES_OVERROUND,
+  ODDS_ERROR,
+  backMargin,
   estimateF1LotteryOdds,
   estimateFuturesOdds,
   estimateLotteryOdds,
   evaluateSlip,
   expectedReturn,
   habitPools,
+  median,
   quantile,
   SLIP_RULES,
   choose,
@@ -29,7 +32,6 @@ const SIM_PLAYERS = HABITS.length * PER_HABIT;
 const SIM_SEED = 1;
 const THIN_LIQUIDITY = 10_000;
 const TIE_BAND = 2;
-const RANKING_SIZE = 8;
 // Championship teams shown before the rest fold away.
 const FUTURES_SHOWN = 6;
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
@@ -47,7 +49,8 @@ const state = {
   slipSizes: new Set([2, 'all']),
   slipStake: 100,
   day: null,
-  sport: 'all'
+  sport: 'all',
+  tab: 'games'
 };
 state.t = makeT(state.locale);
 
@@ -148,10 +151,15 @@ function buildBets(data) {
     for (const side of sides) {
       const p = blend.probs[side];
       const name = side === 'draw' ? t('draw') : teamName(game[side]);
+      // The two sources' disagreement is the margin; one source gets the typical one below.
+      const both = game.draftKings && game.polymarket;
       bets.push({
         ...base,
         id: `${game.id}|ml|${side}`,
         kind: 'ml',
+        // Never below half of Polymarket's 1-cent price step.
+        fairMargin: both ? Math.max(0.005, Math.abs(game.draftKings[side] - game.polymarket[side]) / 2) : null,
+        errKey: game.sport,
         label: side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`,
         shortLabel: name,
         fairChance: p,
@@ -166,6 +174,8 @@ function buildBets(data) {
           ...base,
           id: `${game.id}|tot|${side}`,
           kind: 'total',
+          fairMargin: null,
+          errKey: game.sport,
           label: `${matchup} ${t(side)} ${total.line}`,
           shortLabel: `${t(side)} ${total.line}`,
           fairChance: p,
@@ -186,9 +196,17 @@ function buildBets(data) {
         label: `F1 ${d.name}`,
         shortLabel: d.name,
         fairChance: d.fair,
+        fairMargin: null,
+        errKey: d.fair < 0.01 ? 'f1Longshot' : 'f1',
         estOdds: estimateF1LotteryOdds(d.fair)
       });
     }
+  }
+  // Single-source games: the typical DraftKings-Polymarket gap of that sport.
+  for (const sport of ['mlb', 'epl']) {
+    const gaps = bets.filter(b => b.sport === sport && b.fairMargin != null).map(b => b.fairMargin);
+    const typical = median(gaps) ?? 0.02;
+    for (const b of bets) if (b.sport === sport && b.fairMargin == null) Object.assign(b, { fairMargin: typical, typicalMargin: true });
   }
   return bets;
 }
@@ -209,6 +227,8 @@ function buildFutures(data) {
       label: `${title} ${teamName(team.name)}`,
       shortLabel: teamName(team.name),
       fairChance: team.fair,
+      fairMargin: null,
+      errKey: team.fair < 0.004 && market.sport !== 'nba' ? 'futureLongshot' : `future_${market.key}`,
       estOdds: odds[i]
     }));
   });
@@ -221,6 +241,28 @@ function effectiveOdds(bet) {
 
 function betReturn(bet) {
   return expectedReturn(bet.fairChance, effectiveOdds(bet), STAKE);
+}
+
+function hasRealOdds(bet) {
+  return Number(state.userOdds[bet.id]) >= 1.01;
+}
+
+// Relative margin of the odds used: none once real odds are typed in.
+function oddsError(bet) {
+  return hasRealOdds(bet) ? 0 : ODDS_ERROR[bet.errKey]?.rel ?? 0;
+}
+
+function betBackMargin(bet) {
+  return backMargin(bet.fairChance, bet.fairMargin, effectiveOdds(bet), oddsError(bet));
+}
+
+// "±1.5" (percentage points), "±4%" or "±NT$3" in small muted text.
+function marginEl(text) {
+  return el('small', { class: 'margin', text });
+}
+
+function fmtMarginPts(m) {
+  return `±${(m * 100).toFixed(m < 0.01 ? 1 : 0)}`;
 }
 
 // Days follow Taiwan time, like the lottery.
@@ -242,6 +284,7 @@ function rankedBets() {
 
 function rerenderFiltered() {
   renderSportFilter();
+  renderTabs();
   renderDayFilter();
   renderRanking();
   renderGames();
@@ -310,7 +353,6 @@ function renderStatic() {
   $('title').textContent = t('title');
   $('subtitle').textContent = t('subtitle');
   $('notice').textContent = t('notice');
-  $('lang-toggle').textContent = t('langToggle');
   $('refresh').textContent = t('refresh');
   for (const option of $('sim-weeks').options) option.textContent = t(`period_${option.value}`);
   $('footer').textContent = t('footer');
@@ -347,15 +389,12 @@ function renderRanking() {
     list.replaceChildren(el('li', { class: 'muted', text: t('noBets') }));
     return;
   }
-  const top = ranked.slice(0, RANKING_SIZE);
-  const worst = ranked.at(-1);
-  const shown = ranked.length > RANKING_SIZE ? [...top, worst] : top;
+  const top = ranked;
   const scaleMax = Math.max(100, betReturn(ranked[0])) * 1.04;
   const best = betReturn(ranked[0]);
   const hasReal = id => Number(state.userOdds[id]) >= 1.01;
-  const items = shown.map((bet, i) => {
+  const items = ranked.map((bet, i) => {
     const back = betReturn(bet);
-    const isWorst = i >= top.length;
     const track = el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
       el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
       el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
@@ -363,13 +402,13 @@ function renderRanking() {
     const context = bet.label.includes(bet.matchup) ? fmtTime(bet.start) : `${bet.matchup} · ${fmtTime(bet.start)}`;
     const tag = hasReal(bet.id) ? t('tagReal') : t('tagEstimated');
     return el('li', { class: 'ranking-item' }, [
-      el('span', { class: 'rank', text: isWorst ? t('worst') : String(i + 1) }),
+      el('span', { class: 'rank', text: String(i + 1) }),
       el('span', { class: 'rank-label' }, [
         document.createTextNode(`${bet.label} @ ${fmtOdds(effectiveOdds(bet))} `),
         el('span', { class: `tag ${hasReal(bet.id) ? 'tag-real' : ''}`, text: tag }),
         el('small', { text: ` ${context}` })
       ]),
-      el('span', { class: `rank-value ${backClass(back)}`, text: fmtMoney(back, { sign: false }) }),
+      el('span', { class: `rank-value ${backClass(back)}` }, [document.createTextNode(fmtMoney(back, { sign: false })), marginEl(`±${Math.round(betBackMargin(bet))}`)]),
       track
     ]);
   });
@@ -465,14 +504,24 @@ function betTable(bets) {
           });
     return el('tr', {}, [
       el('td', { class: 'pick', text: bet.shortLabel }),
-      el('td', { class: 'num', 'data-label': t('colFair'), text: fmtPct(bet.fairChance) }),
-      el('td', { class: 'num', 'data-label': t('colEst'), text: fmtOdds(bet.estOdds) }),
+      el('td', { class: 'num', 'data-label': t('colFair') }, [
+        document.createTextNode(fmtPct(bet.fairChance)),
+        bet.fairMargin ? marginEl(`${fmtMarginPts(bet.fairMargin)}${bet.typicalMargin ? '*' : ''}`) : marginEl(t('oneSource'))
+      ]),
+      el('td', { class: 'num', 'data-label': t('colEst') }, [
+        document.createTextNode(fmtOdds(bet.estOdds)),
+        marginEl(`±${Math.round(ODDS_ERROR[bet.errKey].rel * 100)}%${ODDS_ERROR[bet.errKey].checked ? '' : '?'}`)
+      ]),
       el('td', { 'data-label': t('colReal') }, input),
-      el('td', { class: `num ${backClass(back)}`, 'data-label': t('colBack'), 'data-back': bet.id, text: fmtMoney(back, { sign: false }) }),
+      el('td', { class: `num ${backClass(back)}`, 'data-label': t('colBack'), 'data-back': bet.id }, backCell(bet)),
       el('td', { 'data-label': '' }, legButton)
     ]);
   });
   return el('table', { class: 'bet-table' }, [head, el('tbody', {}, rows)]);
+}
+
+function backCell(bet) {
+  return [document.createTextNode(fmtMoney(betReturn(bet), { sign: false })), marginEl(`±${Math.round(betBackMargin(bet))}`)];
 }
 
 function onUserOdds(bet, raw) {
@@ -482,9 +531,8 @@ function onUserOdds(bet, raw) {
   saveUserOdds();
   const cell = document.querySelector(`[data-back="${CSS.escape(bet.id)}"]`);
   if (cell) {
-    const back = betReturn(bet);
-    cell.textContent = fmtMoney(back, { sign: false });
-    cell.className = `num ${backClass(back)}`;
+    cell.replaceChildren(...backCell(bet));
+    cell.className = `num ${backClass(betReturn(bet))}`;
   }
   renderRanking();
   renderParlay();
@@ -548,8 +596,12 @@ function slipLegs() {
   return { legs: legs.filter(b => !started(b)), dropped: live.length };
 }
 
-function statTile(label, value, extraClass = '') {
-  return el('div', { class: 'stat' }, [el('p', { class: 'stat-label', text: label }), el('p', { class: `stat-value ${extraClass}`, text: value })]);
+function statTile(label, value, extraClass = '', range = null) {
+  return el('div', { class: 'stat' }, [
+    el('p', { class: 'stat-label', text: label }),
+    el('p', { class: `stat-value ${extraClass}`, text: value }),
+    range ? el('p', { class: 'stat-range', text: state.t('rangeLabel', { range }) }) : null
+  ]);
 }
 
 function fmtChance(p) {
@@ -569,6 +621,7 @@ function renderParlay() {
   const body = $('parlay-body');
   const { legs, dropped } = slipLegs();
   const n = legs.length;
+  renderTabs();
   const mode = state.slipMode;
   const chosen = [...state.slipSizes].map(k => (k === 'all' ? n : k));
   const sizes = slipSizes(mode, n, chosen);
@@ -662,16 +715,31 @@ function renderParlay() {
   if (sizes.length && !errors.includes('stakeUnit')) {
     const r = evaluateSlip({ legs: slip, sizes, stake });
     const backPer100 = r.cost > 0 ? (r.expectedNet / r.cost) * 100 : 0;
+    // Range if every fair chance and estimated price is off by its margin, all
+    // the same way (the realistic worst and best case).
+    const shifted = dir =>
+      evaluateSlip({
+        legs: legs.map(b => ({
+          gameId: b.gameId,
+          odds: Math.max(1.01, effectiveOdds(b) * (1 + dir * oddsError(b))),
+          fairChance: Math.min(0.999, Math.max(0.001, b.fairChance + dir * (b.fairMargin ?? 0)))
+        })),
+        sizes,
+        stake
+      });
+    const [low, high] = [shifted(-1), shifted(1)];
+    const range = (a, b, fmt) => `${fmt(Math.min(a, b))} – ${fmt(Math.max(a, b))}`;
     parts.push(
       el('div', { class: 'stat-row' }, [
         statTile(t('slipCombosTotal'), `${fmtCount(r.combos)} × ${fmtMoney(stake, { sign: false })}`),
         statTile(t('slipCost'), fmtMoney(r.cost, { sign: false })),
         statTile(t('slipBest'), fmtMoney(r.best, { sign: false }), 'back-high'),
-        statTile(t('slipExpected'), fmtMoney(r.expectedNet, { sign: false }), backPer100 < 100 ? 'back-low' : 'back-high'),
-        statTile(t('slipAny'), fmtChance(r.anyPayout)),
-        statTile(t('slipProfit'), fmtChance(r.profit), r.profit < 0.5 ? 'back-low' : '')
+        statTile(t('slipExpected'), fmtMoney(r.expectedNet, { sign: false }), backPer100 < 100 ? 'back-low' : 'back-high', range(low.expectedNet, high.expectedNet, v => fmtMoney(v, { sign: false }))),
+        statTile(t('slipAny'), fmtChance(r.anyPayout), '', range(low.anyPayout, high.anyPayout, fmtChance)),
+        statTile(t('slipProfit'), fmtChance(r.profit), r.profit < 0.5 ? 'back-low' : '', range(low.profit, high.profit, fmtChance))
       ]),
-      el('p', { class: 'note', text: t('slipExpectedNote', { back: fmtMoney(backPer100, { sign: false }), gross: fmtMoney(r.expected, { sign: false }) }) })
+      el('p', { class: 'note', text: t('slipExpectedNote', { back: fmtMoney(backPer100, { sign: false }), gross: fmtMoney(r.expected, { sign: false }) }) }),
+      el('p', { class: 'note', text: t('slipRangeNote') })
     );
     parts.push(
       el('div', { class: 'table-view slip-table' }, [
@@ -821,6 +889,7 @@ function renderSimHeadline(players, period) {
   const tickets = players.reduce((s, p) => s + p.tickets, 0) / players.length;
   const inTen = Math.round(share * 10);
   const back = staked > 0 ? ((staked + net) / staked) * 100 : 100;
+  const shareMargin = 1.96 * Math.sqrt((share * (1 - share)) / players.length);
   $('sim-headline').replaceChildren(
     el('p', { class: 'headline-label', text: t('simHeadlineLabel', { period, n: fmtCount(SIM_PLAYERS) }) }),
     el('p', { class: 'headline-big' }, [
@@ -831,7 +900,8 @@ function renderSimHeadline(players, period) {
     el('p', {
       class: 'headline-sub',
       text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked / players.length, { sign: false }), back: fmtMoney(back, { sign: false }) })
-    })
+    }),
+    el('p', { class: 'headline-sub margin-note', text: t('simMarginNote', { share: fmtShare(share), margin: Math.max(1, Math.round(shareMargin * 100)) }) })
   );
 }
 
@@ -873,14 +943,14 @@ function renderHabits(summaries, period) {
           el('strong', { text: t(`habit_${h.habit.key}`) }),
           el('small', { text: ` ${t(`habitDesc_${h.habit.key}`)}` })
         ]),
-        el('span', { class: `rank-value ${backClass(h.back)}`, text: fmtMoney(h.back, { sign: false }) }),
+        el('span', { class: `rank-value ${backClass(h.back)}` }, [document.createTextNode(fmtMoney(h.back, { sign: false })), marginEl(`±${Math.max(1, Math.round(h.backMargin))}`)]),
         el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
           el('div', { class: 'bar', style: `width:${(h.back / scaleMax) * 100}%` }),
           el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
         ]),
         el('span', {
           class: 'habit-meta',
-          text: t('habitMeta', { ahead: fmtShare(h.aheadShare), staked: fmtMoney(h.avgStaked, { sign: false }), final: fmtMoney(h.avgFinal) })
+          text: t('habitMeta', { ahead: `${fmtShare(h.aheadShare)} ±${Math.max(1, Math.round(h.aheadMargin * 100))}`, staked: fmtMoney(h.avgStaked, { sign: false }), final: fmtMoney(h.avgFinal) })
         })
       ])
     )
@@ -1077,6 +1147,7 @@ function renderAll() {
   state.futures = buildFutures(state.data);
   state.parlay = state.parlay.filter(id => state.bets.some(b => b.id === id));
   renderStatus('ok');
+  renderTabs();
   renderSportFilter();
   renderDayFilter();
   renderRanking();
@@ -1101,15 +1172,56 @@ async function load() {
   }
 }
 
-$('lang-toggle').addEventListener('click', () => {
-  state.locale = state.locale === 'zh' ? 'en' : 'zh';
-  state.t = makeT(state.locale);
+// ---- Tabs ---------------------------------------------------------------------
+
+const TABS = ['games', 'futures', 'f1', 'slip', 'sim', 'math'];
+
+function tabAvailable(tab) {
+  if (!state.data) return tab === 'games' || tab === 'math';
+  if (tab === 'futures') return state.futures.some(b => inSport(b.sport));
+  if (tab === 'f1') return Boolean(state.data.f1) && inSport('f1');
+  return true;
+}
+
+function renderTabs() {
+  const t = state.t;
+  if (!tabAvailable(state.tab)) state.tab = 'games';
+  const legs = state.parlay.length;
+  $('tab-slip').textContent = legs ? `${t('tab_slip')} (${legs})` : t('tab_slip');
+  for (const tab of TABS) {
+    const button = $(`tab-${tab}`);
+    button.hidden = !tabAvailable(tab);
+    button.setAttribute('aria-selected', String(tab === state.tab));
+    button.tabIndex = tab === state.tab ? 0 : -1;
+    $(`panel-${tab}`).hidden = tab !== state.tab;
+  }
+}
+
+function showTab(tab) {
+  state.tab = tab;
   try {
-    localStorage.setItem('oddsStudy.lang', state.locale);
+    history.replaceState(null, '', `#${tab}`);
   } catch {}
-  renderAll();
-  if (!state.data) renderStatus('loading');
+  renderTabs();
+  // The chart sizes itself to its container, which is hidden until now.
+  if (tab === 'sim' && state.data) renderSim();
+}
+
+for (const button of document.querySelectorAll('#tabs .tab')) button.addEventListener('click', () => showTab(button.dataset.tab));
+$('tabs').addEventListener('keydown', event => {
+  const visible = TABS.filter(tab => !$(`tab-${tab}`).hidden);
+  const i = visible.indexOf(state.tab);
+  const next = event.key === 'ArrowRight' ? visible[(i + 1) % visible.length] : event.key === 'ArrowLeft' ? visible[(i - 1 + visible.length) % visible.length] : null;
+  if (!next) return;
+  event.preventDefault();
+  showTab(next);
+  $(`tab-${next}`).focus();
 });
+{
+  const fromHash = location.hash.slice(1);
+  if (TABS.includes(fromHash)) state.tab = fromHash;
+}
+
 $('refresh').addEventListener('click', load);
 $('sim-weeks').addEventListener('change', renderSim);
 // Redraw only when the width changes: phones fire resize when the address bar
@@ -1126,4 +1238,5 @@ window.addEventListener('resize', () => {
 });
 
 renderStatic();
+renderTabs();
 load();

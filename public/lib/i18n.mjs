@@ -2,7 +2,6 @@ const STRINGS = {
   zh: {
     title: '賠率研究室',
     subtitle: '用數學看運彩：每一注平均拿回多少？',
-    langToggle: 'English',
     notice:
       '這是教學工具，不是下注建議。運彩的賠率已經內含約 13% 的抽成，幾乎每一注長期下來都是虧的；這裡只告訴你「哪一注虧得最少」和「為什麼」。購買運彩須年滿 18 歲；在海外網站（包含 Polymarket）下注在台灣屬於違法賭博。',
     loading: '正在載入賠率…',
@@ -10,7 +9,17 @@ const STRINGS = {
     updated: '資料時間',
     sources: '公平機率來源：DraftKings（經 ESPN）、Polymarket',
     refresh: '重新整理',
-    rankingTitle: '這一天最不虧的注',
+    simMarginNote: '{share} 是 3,000 人模擬的結果，抽樣誤差約 ±{margin} 個百分點（95%）。各習慣的 ± 同樣是抽樣誤差；估計賠率本身的誤差（MLB 約 ±2%）另計。',
+    slipRangeNote: '誤差範圍：假設每場的公平機率和估計賠率都往同一個方向偏到誤差邊緣時的結果。填入真實賠率後，賠率的誤差就不算了。',
+    rangeLabel: '誤差範圍 {range}',
+    oneSource: '單一來源',
+    tab_math: '數學說明',
+    tab_sim: '模擬',
+    tab_slip: '投注單',
+    tab_f1: 'F1',
+    tab_futures: '冠軍',
+    tab_games: '賽事',
+    rankingTitle: '這一天所有的注，由最不虧排起',
     rankingIntro: '每一注都用「公平機率 × 運彩賠率」算出每 NT$100 長期平均拿回多少。灰色直線是打平（NT$100），沒碰到線就是平均會虧。',
     rankingEstimateNote:
       '目前全部使用估計賠率。公式假設運彩對每一注抽一樣的成數，所以 MLB 每一注都大約拿回 NT$87，排名只是四捨五入的差異。到運彩網站看真實賠率、填進下方賽事的「真實賠率」欄，排行才看得出哪一注運彩開得比較大方。',
@@ -43,7 +52,7 @@ const STRINGS = {
     futureEplNote: '機率不到 0.4% 的球隊，Polymarket 的價格分不出高低，估計賠率只給大約的 133 或 300；運彩實際開 133 到 500。',
     draw: '和局',
     soccerUnverified: '足球的估計賠率沿用 MLB 的公式（÷1.15），還沒有用運彩真實的足球價格驗證過；看到運彩的數字請填進來比較。',
-    gamesIntro: '跟運彩一樣，只列到明天（台灣時間）結束前開打的比賽。「估計賠率」是用公式模仿運彩開出的數字；如果你看到了運彩的真實賠率，填進框內，計算會改用你的數字。',
+    gamesIntro: '跟運彩一樣：MLB 只列到明天（台灣時間）結束前開打的比賽，英超列出下一輪的所有比賽。「估計賠率」是用公式模仿運彩開出的數字；如果你看到了運彩的真實賠率，填進框內，計算會改用你的數字。小字的 ± 是誤差：公平機率的 ± 是 DraftKings 和 Polymarket 差距的一半（* 表示只有一個來源，用同聯盟的典型差距）；估計賠率的 ± 是和運彩真實價格比對的平均誤差（? 表示還沒驗證過，只是猜測）；平均拿回的 ± 是兩者合計。',
     colPick: '選項',
     colFair: '公平機率',
     colEst: '估計運彩賠率',
@@ -187,7 +196,6 @@ const STRINGS = {
   en: {
     title: 'Odds Study',
     subtitle: 'The math of the Taiwan Sports Lottery: what does each bet return on average?',
-    langToggle: '中文',
     notice:
       'This is a teaching tool, not betting advice. The lottery builds a ~13% cut into its odds, so nearly every bet loses money over time; this page only shows which bets lose the least, and why. You must be 18+ to buy lottery tickets, and betting on overseas sites (Polymarket included) is illegal gambling in Taiwan.',
     loading: 'Loading odds…',
@@ -195,7 +203,17 @@ const STRINGS = {
     updated: 'Data as of',
     sources: 'Fair chances from DraftKings (via ESPN) and Polymarket',
     refresh: 'Refresh',
-    rankingTitle: 'Least costly bets that day',
+    simMarginNote: '{share} comes from 3,000 simulated people; sampling error is about ±{margin} percentage points (95%). Each habit\'s ± is sampling error too; the estimated odds themselves add their own error (about ±2% for MLB).',
+    slipRangeNote: 'Range: the result if every fair chance and estimated price were off by its full margin, all in the same direction. Once you type in real odds, their margin drops out.',
+    rangeLabel: 'range {range}',
+    oneSource: 'one source',
+    tab_math: 'The math',
+    tab_sim: 'Simulator',
+    tab_slip: 'Bet slip',
+    tab_f1: 'F1',
+    tab_futures: 'Championships',
+    tab_games: 'Games',
+    rankingTitle: 'Every bet of the day, least costly first',
     rankingIntro: 'Each bet: fair chance × lottery odds = average amount back per NT$100. The gray line is break-even (NT$100); a bar short of it loses on average.',
     rankingEstimateNote:
       "Every bet here uses estimated odds. The formula assumes the lottery takes the same cut on every bet, so every MLB bet comes out at about NT$87 and the order is just rounding. Type the real lottery odds into the games below to see which bets the lottery priced a little more generously.",
@@ -228,7 +246,7 @@ const STRINGS = {
     futureEplNote: "Below about 0.4%, Polymarket's prices can't tell clubs apart, so the estimate is only a rough 133 or 300; the lottery's real prices run from 133 to 500.",
     draw: 'Draw',
     soccerUnverified: "Soccer estimates reuse the MLB formula (÷1.15) and haven't been checked against real lottery soccer prices yet. If you see the lottery's numbers, type them in to compare.",
-    gamesIntro: 'Like the lottery, only games starting before the end of tomorrow (Taiwan time) are listed. "Estimated odds" copies what the lottery would post using the formula. If you can see the real lottery odds, type them in and the math switches to your numbers.',
+    gamesIntro: 'Like the lottery: MLB games are listed up to the end of tomorrow (Taiwan time), and the Premier League\'s whole next matchweek. "Estimated odds" copies what the lottery would post using the formula. If you can see the real lottery odds, type them in and the math switches to your numbers. The small ± numbers are margins of error: for the fair chance, half the gap between DraftKings and Polymarket (* means one source only, so the league\'s typical gap); for estimated odds, the average error against real lottery prices (? means not checked yet, just a guess); for the amount back, both combined.',
     colPick: 'Pick',
     colFair: 'Fair chance',
     colEst: 'Est. lottery odds',
@@ -371,12 +389,10 @@ const STRINGS = {
   }
 };
 
+// The browser's language decides: Chinese for any zh-*, English otherwise.
 export function detectLocale() {
-  try {
-    const saved = localStorage.getItem('oddsStudy.lang');
-    if (saved === 'zh' || saved === 'en') return saved;
-  } catch {}
-  return /^zh/i.test(navigator.language || '') ? 'zh' : 'en';
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language || ''];
+  return languages.some(l => /^zh/i.test(l)) ? 'zh' : 'en';
 }
 
 export function makeT(locale) {

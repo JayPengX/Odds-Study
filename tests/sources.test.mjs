@@ -206,3 +206,24 @@ test('futures parser reads teams from questions and drops placeholders', async (
   assert.deepEqual(epl.teams.map(t => t.name.zh), ['兵工廠', '布萊頓']);
   assert.equal(epl.season, '2026/27');
 });
+
+test('Premier League shows the next matchweek; MLB only to the end of tomorrow', async () => {
+  const { lotteryGames, nextMatchweek } = await import('../public/lib/sources.mjs');
+  const epl = (startUtc, away, home) => ({ sport: 'epl', startUtc, away: { en: away }, home: { en: home } });
+  const round = [
+    epl('2026-09-26T11:30:00Z', 'Chelsea', 'Arsenal'),
+    epl('2026-09-26T14:00:00Z', 'Everton', 'Fulham'),
+    epl('2026-09-27T15:30:00Z', 'Liverpool FC', 'Brighton'),
+    epl('2026-09-28T19:00:00Z', 'Leeds United', 'Burnley')
+  ];
+  // Next round starts the day after: Arsenal again ends this matchweek.
+  const next = [epl('2026-09-29T18:45:00Z', 'Arsenal', 'Everton'), epl('2026-09-29T19:00:00Z', 'Tottenham', 'Wolves')];
+  assert.deepEqual(nextMatchweek([...next, ...round]), round);
+  // A long break ends it too.
+  assert.equal(nextMatchweek([round[0], epl('2026-10-10T14:00:00Z', 'Everton', 'Fulham')]).length, 1);
+  const mlb = (startUtc, id) => ({ sport: 'mlb', startUtc, id, away: { en: 'A' }, home: { en: 'B' } });
+  const now = new Date('2026-09-25T07:00:00Z'); // 15:00 on 09-25 in Taiwan
+  const shown = lotteryGames([mlb('2026-09-26T02:00:00Z', 'tomorrow'), mlb('2026-09-26T23:00:00Z', 'day after'), ...round, ...next], now);
+  assert.deepEqual(shown.filter(g => g.sport === 'mlb').map(g => g.id), ['tomorrow']);
+  assert.equal(shown.filter(g => g.sport === 'epl').length, 4);
+});

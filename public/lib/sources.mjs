@@ -21,10 +21,39 @@ export function taipeiDayKey(date) {
   return new Date(new Date(date).getTime() + TAIPEI_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-// The lottery sells single games up to the end of tomorrow, Taiwan time.
+// MLB games are listed up to the end of tomorrow, Taiwan time.
 export function lotteryWindowEnd(now) {
   const [y, m, d] = taipeiDayKey(now).split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + 2) - TAIPEI_OFFSET_MS);
+}
+
+const MATCHWEEK_MAX_GAP_MS = 4 * DAY_MS;
+
+// Premier League games of the next matchweek. ESPN doesn't label rounds, but
+// every club plays once per round: from the next game, take games in order
+// until a club would play twice (or the fixtures stop for over 4 days).
+export function nextMatchweek(games) {
+  const sorted = [...games].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+  const clubs = new Set();
+  const week = [];
+  for (const game of sorted) {
+    const teams = [normalizeTeamName(game.away.en ?? game.away), normalizeTeamName(game.home.en ?? game.home)];
+    const last = week.at(-1);
+    if (teams.some(team => clubs.has(team))) break;
+    if (last && Date.parse(game.startUtc) - Date.parse(last.startUtc) > MATCHWEEK_MAX_GAP_MS) break;
+    teams.forEach(team => clubs.add(team));
+    week.push(game);
+  }
+  return week;
+}
+
+// What the page lists, like the lottery: MLB up to the end of tomorrow (Taiwan
+// time), the Premier League's whole next matchweek (it has far fewer games).
+export function lotteryGames(games, now) {
+  const windowEnd = lotteryWindowEnd(now).getTime();
+  const mlb = games.filter(g => g.sport === 'mlb' && Date.parse(g.startUtc) < windowEnd);
+  const epl = nextMatchweek(games.filter(g => g.sport === 'epl'));
+  return [...mlb, ...epl].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 }
 
 // Championship markets. Polymarket lists next season's market before this
@@ -327,12 +356,9 @@ export async function loadOdds(now = new Date()) {
   ]);
   if (results.every(r => r.status === 'rejected')) throw results[0].reason;
   const [mlbDk, mlbPm, eplDk, eplPm, f1, nbaPm] = results.map(r => (r.status === 'fulfilled' ? r.value : []));
-  const windowEnd = lotteryWindowEnd(now).getTime();
   return {
     loadedAt: now.toISOString(),
-    games: mergeGames([...mlbDk, ...eplDk], [...parsePolymarketMlb(mlbPm, now), ...parsePolymarketEpl(eplPm, now)]).filter(
-      g => Date.parse(g.startUtc) < windowEnd
-    ),
+    games: lotteryGames(mergeGames([...mlbDk, ...eplDk], [...parsePolymarketMlb(mlbPm, now), ...parsePolymarketEpl(eplPm, now)]), now),
     f1: parseF1RaceWinner(f1, now),
     futures: [...parseFutures(mlbPm, 'mlb'), ...parseFutures(eplPm, 'epl'), ...parseFutures(nbaPm, 'nba')]
   };

@@ -6,10 +6,11 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 
 ## What it shows
 
-- **Fair chance** for each MLB game and Premier League match (home/draw/away): DraftKings (via ESPN) and Polymarket, each with its own margin removed, averaged. Like the lottery, only games starting before the end of tomorrow in Taiwan time are listed, and days and times are Taiwan time. Filter by sport (All / MLB / Premier League / NBA / F1) and by day.
+- **Fair chance** for each MLB game and Premier League match (home/draw/away): DraftKings (via ESPN) and Polymarket, each with its own margin removed, averaged. Like the lottery, MLB games are listed up to the end of tomorrow in Taiwan time, and the Premier League's whole next matchweek (ESPN doesn't label rounds, so a round ends where a club would play a second time). Days and times are Taiwan time. Filter by sport (All / MLB / Premier League / NBA / F1) and by day.
 - **Estimated lottery odds**: `1 ÷ (fair chance × 1.15)` for MLB, fitted against 14 real lottery games on 2026-09-25 (average error about 0.04). Anyone can type the real lottery odds in, and every number switches to them.
 - **Back per NT$100**: `fair chance × odds × 100`. Below 100 loses on average.
-- **Least costly ranking** per day.
+- **Every bet of the day, ranked** from least costly.
+- **Margins of error** on every estimate: fair chance ± half the DraftKings–Polymarket gap (at least ±0.5 points; single-source games use the league's typical gap, marked *); estimated odds ± their average error against real lottery prices (marked ? where never checked); amount back ± both combined; bet slip results as a range; simulator results ± 95% sampling error.
 - **Bet slip** under the lottery's ticket rules, in three modes: 一關 (singles), 全部過關 (parlay) and 過關組合 (system, choosing any of 過2關 … 過11關 and 全過). Up to 12 games, one pick per game, NT$10 units per combination, NT$100–100,000 per ticket, NT$20 million payout cap, 20% tax on any combination paying over NT$5,000. Type an amount per combination to see the ticket total, the most you can get back, the average back after tax, the chance of any payout or a profit, and every result by number of correct picks (computed exactly over all outcomes). Games already under way are removed: no live betting.
 - **Simulator**: 3,000 people (500 per habit) play for 1 month to 3 years, drawing their picks from the real games on the board. Each week they buy a random number of parlay tickets; most are NT$100–500, now and then one is NT$1,000–3,000, never more than NT$3,000. Habits: Casual, Big fan (favorites), Upset hunter (underdogs), Parlay dreamer (4–6 games), Chaser (doubles after a losing week, up to NT$3,000) and Careful (least costly bets). The chart shows the crowd's middle 80% and 50% as bands, the median, and the players at the top 10%, middle and bottom 10%. A fixed seed and the large crowd keep the result the same every time. The habits are ranked by amount back per NT$100 and share still ahead.
 - **Premier League**: uses the same MLB formula, which has **not** been checked against real lottery soccer prices yet. Real prices typed in override it.
@@ -17,6 +18,8 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 - **F1 race winner**: `1 ÷ fair chance^0.69` for drivers the lottery prices one by one (checked on 9 prices from the 2026 Azerbaijan GP, average error about 8%). Drivers under 1% get the lottery's fixed longshot prices instead: 65, 325 or 500. The lottery sometimes rates drivers differently from Polymarket, which no formula can predict.
 
 With estimated odds only, every MLB bet comes out at about NT$87, because the formula assumes the same cut everywhere. The ranking becomes informative once real lottery odds are entered.
+
+The page is split into tabs (Games, Championships, F1, Bet slip, Simulator, The math), each with its own address (`#games`, `#slip`, …). The language follows the browser: Chinese for any `zh` language, English otherwise.
 
 ## How it works
 

@@ -16,7 +16,6 @@
       <h1 id="title">賠率研究室</h1>
       <p id="subtitle" class="subtitle"></p>
     </div>
-    <button id="lang-toggle" class="ghost-button" type="button"></button>
   </header>
 
   <p id="notice" class="notice" role="note"></p>
@@ -27,72 +26,93 @@
   </div>
 
   <nav id="sport-filter" class="day-filter" aria-label="sport"></nav>
-  <nav id="day-filter" class="day-filter" aria-label="day"></nav>
 
-  <section id="ranking" class="card" aria-labelledby="ranking-title">
-    <h2 id="ranking-title"></h2>
-    <p class="intro" data-t="rankingIntro"></p>
-    <ol id="ranking-list" class="ranking-list"></ol>
-  </section>
+  <nav id="tabs" class="tabs" role="tablist">
+    <button id="tab-games" class="tab" role="tab" type="button" data-tab="games" data-t="tab_games"></button>
+    <button id="tab-futures" class="tab" role="tab" type="button" data-tab="futures" data-t="tab_futures"></button>
+    <button id="tab-f1" class="tab" role="tab" type="button" data-tab="f1" data-t="tab_f1"></button>
+    <button id="tab-slip" class="tab" role="tab" type="button" data-tab="slip"></button>
+    <button id="tab-sim" class="tab" role="tab" type="button" data-tab="sim" data-t="tab_sim"></button>
+    <button id="tab-math" class="tab" role="tab" type="button" data-tab="math" data-t="tab_math"></button>
+  </nav>
 
-  <section id="games" aria-labelledby="games-title">
-    <h2 id="games-title"></h2>
-    <p class="intro" data-t="gamesIntro"></p>
-    <div id="games-list" class="games-list"></div>
-  </section>
+  <div id="panel-games" class="tab-panel" role="tabpanel" aria-labelledby="tab-games">
+    <nav id="day-filter" class="day-filter" aria-label="day"></nav>
+    <section id="ranking" class="card" aria-labelledby="ranking-title">
+      <h2 id="ranking-title"></h2>
+      <p class="intro" data-t="rankingIntro"></p>
+      <ol id="ranking-list" class="ranking-list"></ol>
+    </section>
 
-  <section id="futures" aria-labelledby="futures-title">
-    <h2 id="futures-title"></h2>
-    <p class="intro" data-t="futuresIntro"></p>
-    <div id="futures-list" class="games-list"></div>
-  </section>
-
-  <section id="parlay" class="card" aria-labelledby="parlay-title">
-    <h2 id="parlay-title"></h2>
-    <p class="intro" data-t="parlayIntro"></p>
-    <div id="parlay-body"></div>
-  </section>
-
-  <section id="sim" class="card" aria-labelledby="sim-title">
-    <h2 id="sim-title"></h2>
-    <p class="intro" data-t="simIntro"></p>
-    <div class="sim-controls">
-      <label><span data-t="simPeriod"></span>
-        <select id="sim-weeks">
-          <option value="4">4</option>
-          <option value="13">13</option>
-          <option value="26">26</option>
-          <option value="52" selected>52</option>
-          <option value="156">156</option>
-        </select>
-      </label>
+    <section id="games" aria-labelledby="games-title">
+      <h2 id="games-title"></h2>
+      <p class="intro" data-t="gamesIntro"></p>
+      <div id="games-list" class="games-list"></div>
+    </section>
     </div>
-    <div id="sim-headline" class="sim-headline" aria-live="polite"></div>
-    <div id="sim-stats" class="stat-row"></div>
-    <div id="sim-legend" class="legend"></div>
-    <div id="sim-chart" class="chart"></div>
-    <div id="sim-players" class="players"></div>
-    <h3 class="sub-title" data-t="habitsTitle"></h3>
-    <p id="habits-intro" class="intro"></p>
-    <ol id="sim-habits" class="ranking-list"></ol>
-    <h3 class="sub-title" data-t="factsTitle"></h3>
-    <ul id="sim-facts" class="facts"></ul>
-    <details class="table-view">
-      <summary data-t="simTable"></summary>
-      <div id="sim-table"></div>
-    </details>
-  </section>
 
-  <section id="f1" class="card" aria-labelledby="f1-title">
-    <h2 id="f1-title"></h2>
-    <p class="intro" data-t="f1Intro"></p>
-    <div id="f1-body"></div>
-  </section>
+  <div id="panel-futures" class="tab-panel" role="tabpanel" aria-labelledby="tab-futures">
+    <section id="futures" aria-labelledby="futures-title">
+      <h2 id="futures-title"></h2>
+      <p class="intro" data-t="futuresIntro"></p>
+      <div id="futures-list" class="games-list"></div>
+    </section>
+    </div>
 
-  <section id="math" class="card" aria-labelledby="math-title">
-    <h2 id="math-title"></h2>
-    <div id="math-body"></div>
-  </section>
+  <div id="panel-f1" class="tab-panel" role="tabpanel" aria-labelledby="tab-f1">
+    <section id="f1" class="card" aria-labelledby="f1-title">
+      <h2 id="f1-title"></h2>
+      <p class="intro" data-t="f1Intro"></p>
+      <div id="f1-body"></div>
+    </section>
+    </div>
+
+  <div id="panel-slip" class="tab-panel" role="tabpanel" aria-labelledby="tab-slip">
+    <section id="parlay" class="card" aria-labelledby="parlay-title">
+      <h2 id="parlay-title"></h2>
+      <p class="intro" data-t="parlayIntro"></p>
+      <div id="parlay-body"></div>
+    </section>
+    </div>
+
+  <div id="panel-sim" class="tab-panel" role="tabpanel" aria-labelledby="tab-sim">
+    <section id="sim" class="card" aria-labelledby="sim-title">
+      <h2 id="sim-title"></h2>
+      <p class="intro" data-t="simIntro"></p>
+      <div class="sim-controls">
+        <label><span data-t="simPeriod"></span>
+          <select id="sim-weeks">
+            <option value="4">4</option>
+            <option value="13">13</option>
+            <option value="26">26</option>
+            <option value="52" selected>52</option>
+            <option value="156">156</option>
+          </select>
+        </label>
+      </div>
+      <div id="sim-headline" class="sim-headline" aria-live="polite"></div>
+      <div id="sim-stats" class="stat-row"></div>
+      <div id="sim-legend" class="legend"></div>
+      <div id="sim-chart" class="chart"></div>
+      <div id="sim-players" class="players"></div>
+      <h3 class="sub-title" data-t="habitsTitle"></h3>
+      <p id="habits-intro" class="intro"></p>
+      <ol id="sim-habits" class="ranking-list"></ol>
+      <h3 class="sub-title" data-t="factsTitle"></h3>
+      <ul id="sim-facts" class="facts"></ul>
+      <details class="table-view">
+        <summary data-t="simTable"></summary>
+        <div id="sim-table"></div>
+      </details>
+    </section>
+    </div>
+
+  <div id="panel-math" class="tab-panel" role="tabpanel" aria-labelledby="tab-math">
+    <section id="math" class="card" aria-labelledby="math-title">
+      <h2 id="math-title"></h2>
+      <div id="math-body"></div>
+    </section>
+    </div>
 
   <footer><p id="footer" class="muted"></p></footer>
 </main>

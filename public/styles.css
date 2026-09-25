@@ -266,3 +266,17 @@ footer { margin-top: 24px; }
 .facts { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: 0.92rem; color: var(--text-secondary); }
 .facts li::marker { color: var(--series-1); }
 #sim-table { overflow-x: auto; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); margin: 0 0 18px; position: sticky; top: 0; z-index: 3; background: var(--page); scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: none; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-secondary); padding: 10px 12px; font-size: 0.92rem; white-space: nowrap; }
+.tab:hover { color: var(--text-primary); }
+.tab[aria-selected='true'] { color: var(--text-primary); border-bottom-color: var(--series-1); font-weight: 600; }
+.tab[hidden], .tab-panel[hidden] { display: none; }
+
+/* Margins of error */
+.margin { display: block; font-size: 0.72rem; font-weight: 400; color: var(--text-muted); line-height: 1.2; }
+.rank-value .margin { text-align: right; }
+.stat-range { margin: 2px 0 0; font-size: 0.75rem; color: var(--text-muted); }
+.margin-note { font-size: 0.8rem; margin-top: 6px; }
