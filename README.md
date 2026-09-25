@@ -27,7 +27,7 @@ The choice is remembered.
   - The Premier League's next matchweek, once its first game is within 3 days.
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
   - The next F1 race winner, with **every** driver the market prices.
-- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). The Premier League's lion sits on a small white disc so it stays crisp in dark mode.
+- **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). The Premier League's lion is shown alone, purple in light mode and light lavender in dark mode (colours inverted and turned back), in the same square box as every other logo.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
   - the estimated lottery odds, tinted green or red when a bet is unusually good or bad;
@@ -97,6 +97,10 @@ The choice is remembered.
   - the group's range from its biggest loser to its biggest winner;
   - the typical loss in bubble teas.
 - **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart and their story. The numbers in the stories are clickable too.
+- **One shared world:** each week every game and F1 race has a single real result that everyone who bet on it shares. This is a hash of (seed, week, market, which real game), so it takes no storage and any player can still be replayed alone.
+  - Sports keep their real number of distinct games per week.
+  - With 24 races a year, F1 long shots come in only as rarely as they should.
+  - Picks are weighted by each option's chance, so a 0.1% driver gets about 0.1% of the bets.
 - **Periods:** 1 month to 3 years. The seed is fixed, so the same period always gives the same result.
   - The default 1-year run records 1, 3 and 6 months along the way, so switching to them is instant.
   - 3 years carries every player on from week 52 and plays only the extra two years. Tests check it matches a straight 3-year run exactly.

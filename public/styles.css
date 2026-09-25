@@ -565,8 +565,12 @@ body:not(.detail) .detail-only, body:not(.detail) .margin, body:not(.detail) .st
   width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.8rem; font-weight: 800;
   color: var(--badge); background: color-mix(in srgb, var(--badge) 14%, var(--surface)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--badge) 35%, transparent);
 }
-.bar-item > .badge, .bar-item > .logo-wrap, .bar-item > .logo { grid-row: 1 / 3; justify-self: center; }
+/* The first child is the row's icon, whatever it is (badge, logo, the
+   Premier League disc): it spans both lines, so the bar stays in column 2. */
+.bar-item > :first-child { grid-row: 1 / 3; grid-column: 1; justify-self: center; }
+.bar-item > .bar-name, .bar-item > .bar-track { grid-column: 2; }
 .bar-item > .logo-wrap .logo, .bar-item > .logo { width: 28px; height: 28px; }
+.bar-item > .league-epl.league-epl { width: 28px; height: 28px; }
 .board-emblem { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
 .board-emblem .logo { width: 28px; height: 28px; }
 .empty-icon { width: 56px; height: 56px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -651,41 +655,78 @@ details.market[open] > summary { margin-bottom: 6px; }
 .day-tile[aria-pressed='true'] .day-week { color: rgba(255, 255, 255, 0.85); }
 .day-tile[aria-pressed='true'] .day-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
 
-/* Premier League: the lion in its own purple on a small white disc. */
-.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 1px rgba(55, 0, 60, 0.18); }
+/* Premier League: the lion alone, in its own purple, in the same square box
+   as every other logo. In dark mode the colours invert and turn back round,
+   so the purple becomes a light lavender and the face lines stay visible. */
+.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; }
 .league-epl.logo-xs { width: 18px; height: 18px; }
-.league-epl.logo-sm { width: 22px; height: 22px; }
-.league-epl.logo-tile { width: 26px; height: 26px; }
-.league-epl .logo { width: 78%; height: 78%; }
-.board-emblem .league-epl { width: 30px; height: 30px; }
+.league-epl.logo-sm { width: 20px; height: 20px; }
+.league-epl.logo-tile { width: 24px; height: 24px; }
+.league-epl .logo-wrap, .league-epl .logo { width: 100%; height: 100%; object-fit: contain; }
+.board-emblem .league-epl { width: 28px; height: 28px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .league-epl .logo { filter: invert(1) hue-rotate(180deg) saturate(1.4) brightness(1.15); } }
+:root[data-theme='dark'] .league-epl .logo { filter: invert(1) hue-rotate(180deg) saturate(1.4) brightness(1.15); }
 
 /* ---- Best value of the day: podium, then the full list ---------------------------- */
 .ranking-card { padding: 16px; }
 .ranking-head { margin-bottom: 12px; }
 .ranking-head h2 { font-size: 1.05rem; margin-bottom: 6px; }
 .ranking-head .lede { margin: 0; }
-.podium { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
-.podium-card { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border); position: relative; }
+.podium { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+/* Desktop: a card each. Medal and logo on top, the pick, then back and odds. */
+.podium-card {
+  display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto auto; align-items: center; gap: 4px 8px;
+  padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border);
+}
 .podium-card:first-child { background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 14%, var(--surface-raised)), var(--surface-raised) 70%); border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
-.podium-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .podium-medal { font-size: 1.3rem; line-height: 1; }
-.podium-pick { font-weight: 800; font-size: 0.98rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.podium-game { font-size: 0.74rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.podium-back { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.podium-body { grid-column: 1 / -1; min-width: 0; }
+.podium-side { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.podium-pick { font-weight: 800; font-size: 0.96rem; line-height: 1.3; }
+.podium-game { font-size: 0.74rem; color: var(--text-muted); }
+.podium-back { display: flex; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; }
 .podium-back small { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; }
-.podium-back strong { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.01em; }
-.podium-odds { position: absolute; top: 10px; right: 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.podium-back strong { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; }
+.podium-odds { flex: none; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-weight: 800; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
 .podium-odds:hover { border-color: var(--accent); }
 .podium-odds.in-slip { background: var(--accent); border-color: var(--accent); color: #fff; }
 .podium-odds span { color: var(--accent); }
 .podium-odds.in-slip span { color: #fff; }
+/* Phones: three compact rows, nothing cut off. */
+@media (max-width: 720px) {
+  .podium { grid-template-columns: 1fr; gap: 6px; }
+  .podium-card { grid-template-columns: auto auto 1fr auto; grid-template-rows: auto; padding: 9px 10px; gap: 8px; }
+  .podium-medal { font-size: 1.15rem; }
+  .podium-body { grid-column: auto; }
+  .podium-pick { font-size: 0.88rem; }
+  .podium-game { font-size: 0.7rem; }
+  .podium-side { grid-column: auto; display: grid; justify-items: end; gap: 3px; margin: 0; }
+  .podium-back small { display: none; }
+  .podium-back strong { font-size: 1rem; }
+  .podium-odds { padding: 3px 9px; font-size: 0.8rem; }
+}
 .ranking-notes .tie-note { margin-top: 10px; }
 .ranking-more { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .ranking-more > summary { cursor: pointer; list-style: none; text-align: center; color: var(--accent); font-weight: 700; font-size: 0.86rem; padding: 4px; }
 .ranking-more > summary::-webkit-details-marker { display: none; }
 .ranking-more[open] > summary { margin-bottom: 8px; }
+
+/* Games heading: the day inline, the tap hint beside it. */
+.games-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; margin: 6px 0 10px; }
+.games-head .section-heading { margin: 0; }
+.games-hint { font-size: 0.78rem; color: var(--text-muted); }
+.ranking-notes .info { margin-top: 10px; }
 @media (max-width: 720px) {
-  .podium { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
-  .podium::-webkit-scrollbar { display: none; }
-  .podium-card { flex: 0 0 78%; scroll-snap-align: start; }
+  .sport-tile { height: 40px; padding: 0 12px 0 8px; gap: 6px; border-radius: 12px; }
+  .sport-tile .tile-count { display: none; }
+  .logo-tile, .league-epl.logo-tile { width: 22px; height: 22px; }
+  .tile-name { font-size: 0.84rem; }
+  .day-tile { height: 40px; border-radius: 12px; }
+  .ranking-card { padding: 14px 12px; }
+  .ranking-head { margin-bottom: 10px; }
+  .ranking-head h2 { font-size: 1rem; margin: 0; }
+  .notice { font-size: 0.74rem; padding: 6px 12px; margin-bottom: 10px; }
 }
+.logo-fallback { white-space: nowrap; overflow: hidden; line-height: 1; }
+.logo-fallback.logo-sm, .logo-fallback.logo-xs { font-size: 0.6rem; }
+.bar-item > .badge { width: 28px; height: 28px; }

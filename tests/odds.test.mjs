@@ -146,9 +146,10 @@ test('each extra parlay leg takes the cut again, and a big crowd is stable', () 
   // over NT$5,000 loses 20.4% to tax, so a bit less. 4-6 legs: about 50.
   assert.ok(back('casual') > 66 && back('casual') < 76, `${back('casual')}`);
   assert.ok(back('dreamer') > 38 && back('dreamer') < 60, `${back('dreamer')}`);
-  // Another seed moves each habit's amount back by about its margin at most.
-  const b = crowd(2);
-  for (let i = 0; i < a.summaries.length; i++) close(a.summaries[i].back, b.summaries[i].back, 3 * (a.summaries[i].backMargin + 0.5));
+  // The same seed is the same world: identical results. (Another seed is
+  // another world, with its own lucky and unlucky results for everyone.)
+  const b = crowd(1);
+  for (let i = 0; i < a.summaries.length; i++) assert.equal(a.summaries[i].back, b.summaries[i].back);
   // Bands are ordered and every week is counted.
   for (const w of a.bands) assert.ok(w.q10 <= w.q25 && w.q25 <= w.q50 && w.q50 <= w.q75 && w.q75 <= w.q90);
   assert.equal(a.players, 2000 * HABITS.length);
@@ -341,7 +342,7 @@ test('the streaming crowd equals simulating everyone in full', () => {
   const stats = simulateCrowdStats({ pools, weeks, perHabit, seed });
   const players = [];
   HABITS.forEach((habit, h) => {
-    for (let i = 0; i < perHabit; i++) players.push({ index: h * perHabit + i, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, h * perHabit + i) }) });
+    for (let i = 0; i < perHabit; i++) players.push({ index: h * perHabit + i, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, h * perHabit + i), seed }) });
   });
   // Totals match to the cent.
   close(stats.totals.staked, players.reduce((s, p) => s + p.staked, 0), 1e-6);
@@ -425,9 +426,16 @@ test('the multi-sport crowd splits by fan type and replays players exactly', asy
   const stats = simulateCrowdStats({ sportPools, startWeek: 38, weeks: 26, perGroup: 60, seed: 3 });
   assert.equal(stats.players, 60 * HABITS.length * FANS.length);
   assert.equal(stats.fanSummaries.length, FANS.length);
-  // F1 fans face the biggest cut.
-  const back = key => stats.fanSummaries.find(f => f.fan.key === key).back;
-  assert.ok(back('f1') < back('mlb'), `${back('f1')} vs ${back('mlb')}`);
+  // F1 fans face the biggest cut: on average over several seasons (one season
+  // has only ~24 real races, so it can go either way).
+  let f1 = 0;
+  let mlb = 0;
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    const year = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 30, seed });
+    f1 += year.fanSummaries.find(f => f.fan.key === 'f1').back;
+    mlb += year.fanSummaries.find(f => f.fan.key === 'mlb').back;
+  }
+  assert.ok(f1 < mlb, `${f1 / 6} vs ${mlb / 6}`);
   // Replaying a record holder gives the same person.
   const again = simulateCrowdStats({ sportPools, startWeek: 38, weeks: 26, perGroup: 60, seed: 3 });
   assert.equal(again.notable.best.serial, stats.notable.best.serial);
@@ -491,4 +499,22 @@ test('any player can be replayed on their own, and groups add up', async () => {
   assert.equal(stats.groupStats.length, 30);
   assert.equal(stats.groupStats.reduce((n, g) => n + g.players, 0), stats.players);
   for (const g of stats.groupStats) assert.ok(g.worst <= g.q10 && g.q10 <= g.median && g.median <= g.q90 && g.q90 <= g.best);
+});
+
+test('everyone bets into one world: a race has one winner for all', async () => {
+  const { simulateCrowdStats, sportTemplate, estimateF1LotteryOdds, SPORTS } = await import('../public/lib/odds.mjs');
+  // An F1 field with long shots, as the lottery prices it.
+  const raw = [0.41, 0.22, 0.145, 0.115, 0.0555, 0.034, 0.0275, 0.0065, ...Array(14).fill(0.0015), 0.0025, 0.002, 0.0005];
+  const sum = raw.reduce((a, b) => a + b);
+  const f1 = raw.map((p, i) => ({ gameId: 'race', key: `f1|race|win|${i}`.replace(/\|\d+$/, ''), fairChance: p / sum, odds: estimateF1LotteryOdds(p / sum) }));
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sp === 'f1' ? f1 : sportTemplate(sp))]));
+  // Over many worlds, a 0.1-0.25% driver comes in rarely: the longest shot
+  // anyone cashes in a season is usually a normal price.
+  let longshotSeasons = 0;
+  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    const stats = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed });
+    if (stats.notable.longshot.longshotOdds >= 300) longshotSeasons++;
+  }
+  // 24 races, each with ~2% combined chance for a 300+ driver: ~40% of seasons at most.
+  assert.ok(longshotSeasons <= 5, `${longshotSeasons} of 8 seasons`);
 });
