@@ -9,7 +9,8 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 - **Fair chance** for each MLB game and Premier League match (home/draw/away): DraftKings (via ESPN) and Polymarket, each with its own margin removed, averaged. Like the lottery, only games starting before the end of tomorrow in Taiwan time are listed, and days and times are Taiwan time. Filter by sport (All / MLB / Premier League / NBA / F1) and by day.
 - **Estimated lottery odds**: `1 ÷ (fair chance × 1.15)` for MLB, fitted against 14 real lottery games on 2026-09-25 (average error about 0.04). Anyone can type the real lottery odds in, and every number switches to them.
 - **Back per NT$100**: `fair chance × odds × 100`. Below 100 loses on average.
-- **Least costly ranking** per day, and a **parlay calculator** (most MLB games on the lottery require 2+ games per ticket).
+- **Least costly ranking** per day.
+- **Bet slip** under the lottery's ticket rules, in three modes: 一關 (singles), 全部過關 (parlay) and 過關組合 (system, choosing any of 過2關 … 過11關 and 全過). Up to 12 games, one pick per game, NT$10 units per combination, NT$100–100,000 per ticket, NT$20 million payout cap, 20% tax on any combination paying over NT$5,000. Type an amount per combination to see the ticket total, the most you can get back, the average back after tax, the chance of any payout or a profit, and every result by number of correct picks (computed exactly over all outcomes). Games already under way are removed: no live betting.
 - **Simulator**: 3,000 people (500 per habit) play for 1 month to 3 years, drawing their picks from the real games on the board. Each week they buy a random number of parlay tickets; most are NT$100–500, now and then one is NT$1,000–3,000, never more than NT$3,000. Habits: Casual, Big fan (favorites), Upset hunter (underdogs), Parlay dreamer (4–6 games), Chaser (doubles after a losing week, up to NT$3,000) and Careful (least costly bets). The chart shows the crowd's middle 80% and 50% as bands, the median, and the players at the top 10%, middle and bottom 10%. A fixed seed and the large crowd keep the result the same every time. The habits are ranked by amount back per NT$100 and share still ahead.
 - **Premier League**: uses the same MLB formula, which has **not** been checked against real lottery soccer prices yet. Real prices typed in override it.
 - **Championships (futures)**: World Series, AL and NL champion, Premier League title and NBA title (NBA isn't on the lottery yet), from Polymarket. Estimated lottery odds: each team's implied chance is `fair^0.7`, scaled so the market adds up to the lottery's total (about 200% for MLB and 160% for the Premier League, fitted on real prices from 2026-09-25; MLB within about 5–15%). Below 0.4%, Polymarket can't tell teams apart, so those get a rough 133 or 300. These bets pay out only when the season's result is in.
@@ -29,7 +30,7 @@ The page has no direct-fetch fallback, so it depends on that Worker:
 
 | File | Purpose |
 | --- | --- |
-| `public/lib/odds.mjs` | The math: devig, estimated lottery odds, expected return, parlays, simulation |
+| `public/lib/odds.mjs` | The math: devig, estimated lottery odds, expected return, bet slip, simulation |
 | `public/lib/sources.mjs` | Fetching and parsing ESPN and Polymarket (MLB, Premier League, F1) through the proxy |
 | `public/lib/teams.mjs` | Chinese team names (MLB, Premier League) and name matching |
 | `public/lib/i18n.mjs` | Traditional Chinese and English text |

@@ -279,3 +279,105 @@ export function quantile(sorted, q) {
   const lo = Math.floor(i);
   return sorted[lo] + (sorted[Math.ceil(i)] - sorted[lo]) * (i - lo);
 }
+
+// ---- Bet slip ---------------------------------------------------------------
+
+// Taiwan Sports Lottery ticket rules: 1-12 games per ticket (never two picks
+// from one game), NT$10 units per combination, NT$100-100,000 per ticket,
+// payouts capped at NT$20 million per ticket, and 20% tax withheld from any
+// single combination paying over NT$5,000.
+export const SLIP_RULES = {
+  maxLegs: 12,
+  unit: 10,
+  minTicket: 100,
+  maxTicket: 100_000,
+  maxPayout: 20_000_000,
+  taxFree: 5000,
+  taxRate: 0.2
+};
+
+export function choose(n, k) {
+  if (k < 0 || k > n) return 0;
+  let c = 1;
+  for (let i = 1; i <= k; i++) c = (c * (n - k + i)) / i;
+  return Math.round(c);
+}
+
+// Combination sizes each mode buys for n legs: 一關 = every game on its own,
+// 全部過關 = all n together, 過關組合 = the chosen sizes.
+export function slipSizes(mode, n, chosen = []) {
+  if (mode === 'single') return n >= 1 ? [1] : [];
+  if (mode === 'parlay') return n >= 2 ? [n] : [];
+  return [...new Set(chosen)].filter(k => k >= 2 && k <= n).sort((a, b) => a - b);
+}
+
+// Rule problems with a ticket, as codes the page turns into text.
+export function slipErrors({ mode, legs, sizes, stake }) {
+  const errors = [];
+  const n = legs.length;
+  if (n === 0) return ['empty'];
+  if (n > SLIP_RULES.maxLegs) errors.push('tooManyLegs');
+  if (new Set(legs.map(l => l.gameId)).size !== n) errors.push('sameGame');
+  if (mode === 'parlay' && n < 2) errors.push('parlayNeedsTwo');
+  if (mode === 'system' && n < 3) errors.push('systemNeedsThree');
+  if (mode === 'system' && n >= 3 && sizes.length === 0) errors.push('noSizes');
+  if (!(stake >= SLIP_RULES.unit) || stake % SLIP_RULES.unit !== 0) errors.push('stakeUnit');
+  const combos = sizes.reduce((s, k) => s + choose(n, k), 0);
+  const cost = combos * stake;
+  if (combos > 0 && cost < SLIP_RULES.minTicket) errors.push('ticketMin');
+  if (cost > SLIP_RULES.maxTicket) errors.push('ticketMax');
+  return errors;
+}
+
+// Everything about one ticket, exactly: every way the legs can land (2^n, at
+// most 4,096), and for each one every winning combination, taxed one by one.
+// Fair chances are treated as independent (different games).
+export function evaluateSlip({ legs, sizes, stake }) {
+  const n = legs.length;
+  const sizeSet = new Set(sizes);
+  const combos = sizes.reduce((s, k) => s + choose(n, k), 0);
+  const cost = combos * stake;
+  const byHits = Array.from({ length: n + 1 }, (_, hits) => ({ hits, chance: 0, min: Infinity, max: 0 }));
+  let expected = 0;
+  let expectedNet = 0;
+  let anyPayout = 0;
+  let profit = 0;
+  let best = 0;
+  for (let won = 0; won < 1 << n; won++) {
+    let chance = 1;
+    const odds = [];
+    for (let i = 0; i < n; i++) {
+      if (won & (1 << i)) {
+        chance *= legs[i].fairChance;
+        odds.push(legs[i].odds);
+      } else chance *= 1 - legs[i].fairChance;
+    }
+    // Every combination made only of winning legs pays stake x its odds.
+    let gross = 0;
+    let net = 0;
+    const m = odds.length;
+    for (let pick = 1; pick < 1 << m; pick++) {
+      let size = 0;
+      let product = 1;
+      for (let j = 0; j < m; j++) if (pick & (1 << j)) (size++, (product *= odds[j]));
+      if (!sizeSet.has(size)) continue;
+      const pay = stake * product;
+      gross += pay;
+      net += pay > SLIP_RULES.taxFree ? pay * (1 - SLIP_RULES.taxRate) : pay;
+    }
+    if (gross > SLIP_RULES.maxPayout) {
+      net *= SLIP_RULES.maxPayout / gross;
+      gross = SLIP_RULES.maxPayout;
+    }
+    expected += chance * gross;
+    expectedNet += chance * net;
+    if (gross > 0) anyPayout += chance;
+    if (net > cost) profit += chance;
+    if (gross > best) best = gross;
+    const row = byHits[m];
+    row.chance += chance;
+    row.min = Math.min(row.min, gross);
+    row.max = Math.max(row.max, gross);
+  }
+  return { combos, cost, best, expected, expectedNet, anyPayout, profit, byHits };
+}

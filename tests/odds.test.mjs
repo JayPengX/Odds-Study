@@ -7,6 +7,10 @@ import {
   estimateLotteryOdds,
   estimateF1LotteryOdds,
   estimateFuturesOdds,
+  evaluateSlip,
+  slipErrors,
+  slipSizes,
+  choose,
   expectedReturn,
   overround,
   combineParlay,
@@ -158,4 +162,61 @@ test('futures estimate reproduces the lottery AL prices and its longshot steps',
   // Implied chances add up to the overround.
   close(est.reduce((s, o) => s + 1 / o, 0), 2.0, 0.01);
   assert.deepEqual(estimateFuturesOdds([0.9, 0.003, 0.001], 1.6).slice(1), [133, 300]);
+});
+
+const slipLegs = [
+  { gameId: 1, odds: 1.8, fairChance: 0.5 },
+  { gameId: 2, odds: 2, fairChance: 0.45 },
+  { gameId: 3, odds: 1.7, fairChance: 0.55 }
+];
+
+test('slip modes buy the right combinations', () => {
+  assert.deepEqual(slipSizes('single', 3), [1]);
+  assert.deepEqual(slipSizes('parlay', 3), [3]);
+  assert.deepEqual(slipSizes('parlay', 1), []);
+  assert.deepEqual(slipSizes('system', 3, [3, 2, 2, 5]), [2, 3]);
+  // 12 games, every size from 2 up: 2^12 - 1 - 12 combinations.
+  const all = slipSizes('system', 12, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.equal(all.reduce((s, k) => s + choose(12, k), 0), 4083);
+});
+
+test('slip follows the lottery ticket rules', () => {
+  const ok = { mode: 'parlay', legs: slipLegs, sizes: [3], stake: 100 };
+  assert.deepEqual(slipErrors(ok), []);
+  assert.ok(slipErrors({ ...ok, stake: 105 }).includes('stakeUnit'));
+  assert.ok(slipErrors({ ...ok, stake: 50 }).includes('ticketMin'));
+  assert.ok(slipErrors({ ...ok, stake: 100_010 }).includes('ticketMax'));
+  assert.ok(slipErrors({ ...ok, legs: [slipLegs[0], { ...slipLegs[1], gameId: 1 }], sizes: [2] }).includes('sameGame'));
+  const thirteen = Array.from({ length: 13 }, (_, i) => ({ gameId: i, odds: 1.8, fairChance: 0.5 }));
+  assert.ok(slipErrors({ ...ok, legs: thirteen, sizes: [13] }).includes('tooManyLegs'));
+  assert.ok(slipErrors({ mode: 'system', legs: slipLegs.slice(0, 2), sizes: [], stake: 100 }).includes('systemNeedsThree'));
+  // Three NT$10 singles total NT$30: under the NT$100 ticket minimum.
+  assert.ok(slipErrors({ mode: 'single', legs: slipLegs, sizes: [1], stake: 10 }).includes('ticketMin'));
+});
+
+test('slip payouts, averages and chances are exact', () => {
+  const parlay = evaluateSlip({ legs: slipLegs, sizes: [3], stake: 100 });
+  close(parlay.best, 612);
+  close(parlay.expected, 0.5 * 0.45 * 0.55 * 612, 1e-9);
+  close(parlay.anyPayout, 0.5 * 0.45 * 0.55, 1e-12);
+  close(parlay.byHits.reduce((s, r) => s + r.chance, 0), 1, 1e-12);
+  // Singles: average back is each leg's own chance x odds.
+  const single = evaluateSlip({ legs: slipLegs, sizes: [1], stake: 100 });
+  close(single.expected, 90 + 90 + 93.5, 1e-9);
+  close(single.anyPayout, 1 - 0.5 * 0.55 * 0.45, 1e-12);
+  // System 2+3 of 3: all three pairs plus the treble.
+  const system = evaluateSlip({ legs: slipLegs, sizes: [2, 3], stake: 100 });
+  assert.equal(system.combos, 4);
+  close(system.best, 100 * (3.6 + 3.06 + 3.4 + 6.12));
+  // Exactly 2 right pays one pair: between 1.8x1.7 and 2x1.8.
+  close(system.byHits[2].min, 306);
+  close(system.byHits[2].max, 360);
+});
+
+test('slip withholds 20% from each combination over NT$5,000 and caps a ticket', () => {
+  const big = evaluateSlip({ legs: [{ gameId: 1, odds: 3, fairChance: 1 }, { gameId: 2, odds: 3, fairChance: 1 }], sizes: [2], stake: 1000 });
+  close(big.expected, 9000);
+  close(big.expectedNet, 7200);
+  const huge = evaluateSlip({ legs: Array.from({ length: 12 }, (_, i) => ({ gameId: i, odds: 10, fairChance: 1 })), sizes: [12], stake: 100 });
+  assert.equal(huge.best, 20_000_000);
 });

@@ -2,16 +2,20 @@ import {
   HABITS,
   K_DRAFTKINGS,
   blendOutcomes,
-  combineParlay,
   FUTURES_OVERROUND,
   estimateF1LotteryOdds,
   estimateFuturesOdds,
   estimateLotteryOdds,
+  evaluateSlip,
   expectedReturn,
   habitPools,
   quantile,
+  SLIP_RULES,
+  choose,
   seededRandom,
   simulateCrowd,
+  slipErrors,
+  slipSizes,
   summarizeCrowd
 } from './lib/odds.mjs';
 import { loadOdds, taipeiDayKey } from './lib/sources.mjs';
@@ -28,7 +32,6 @@ const TIE_BAND = 2;
 const RANKING_SIZE = 8;
 // Championship teams shown before the rest fold away.
 const FUTURES_SHOWN = 6;
-const MAX_LEGS = 10;
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
 
 const state = {
@@ -39,6 +42,10 @@ const state = {
   futures: [],
   userOdds: loadUserOdds(),
   parlay: [],
+  slipMode: 'parlay',
+  // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
+  slipSizes: new Set([2, 'all']),
+  slipStake: 100,
   day: null,
   sport: 'all'
 };
@@ -512,59 +519,179 @@ function renderFutures() {
   );
 }
 
-// ---- Parlay -------------------------------------------------------------------
+// ---- Bet slip -----------------------------------------------------------------
 
 function toggleLeg(bet) {
   if (state.parlay.includes(bet.id)) {
     state.parlay = state.parlay.filter(id => id !== bet.id);
   } else {
+    // One pick per game: a new pick from the same game replaces the old one.
     const sameGame = state.bets.filter(b => b.gameId === bet.gameId).map(b => b.id);
     state.parlay = state.parlay.filter(id => !sameGame.includes(id));
     state.parlay.push(bet.id);
-    if (state.parlay.length > MAX_LEGS) state.parlay.shift();
+    if (state.parlay.length > SLIP_RULES.maxLegs) state.parlay.shift();
   }
   renderGames();
   renderParlay();
 }
 
-function parlayLegs() {
-  return state.parlay.map(id => state.bets.find(b => b.id === id)).filter(Boolean);
+function started(bet) {
+  return Date.parse(bet.start) <= Date.now();
 }
 
-function parlayResult() {
-  const legs = parlayLegs();
-  if (legs.length === 0) return null;
-  const combined = combineParlay(legs.map(b => ({ odds: effectiveOdds(b), fairChance: b.fairChance })));
-  return { legs, ...combined, back: expectedReturn(combined.fairChance, combined.odds, STAKE) };
+// Picks on the slip. Games already under way are dropped: the page doesn't
+// cover live (in-play) betting.
+function slipLegs() {
+  const legs = state.parlay.map(id => state.bets.find(b => b.id === id)).filter(Boolean);
+  const live = legs.filter(started);
+  if (live.length) state.parlay = state.parlay.filter(id => !live.some(b => b.id === id));
+  return { legs: legs.filter(b => !started(b)), dropped: live.length };
 }
 
 function statTile(label, value, extraClass = '') {
   return el('div', { class: 'stat' }, [el('p', { class: 'stat-label', text: label }), el('p', { class: `stat-value ${extraClass}`, text: value })]);
 }
 
+function fmtChance(p) {
+  if (p >= 0.995) return p >= 1 ? '100%' : '>99%';
+  if (p >= 0.1) return `${Math.round(p * 100)}%`;
+  if (p >= 0.001) return `${(p * 100).toFixed(1)}%`;
+  if (p >= 0.0001) return `${(p * 100).toFixed(2)}%`;
+  return p > 0 ? '<0.01%' : '0%';
+}
+
+function sizeName(k, n) {
+  return k === n ? state.t('slipAll') : state.t('slipSize', { k });
+}
+
 function renderParlay() {
   const t = state.t;
   const body = $('parlay-body');
-  const result = parlayResult();
-  if (!result) {
-    body.replaceChildren(el('p', { class: 'muted', text: t('parlayEmpty') }));
+  const { legs, dropped } = slipLegs();
+  const n = legs.length;
+  const mode = state.slipMode;
+  const chosen = [...state.slipSizes].map(k => (k === 'all' ? n : k));
+  const sizes = slipSizes(mode, n, chosen);
+  const stake = state.slipStake;
+  const slip = legs.map(b => ({ gameId: b.gameId, odds: effectiveOdds(b), fairChance: b.fairChance }));
+  const errors = slipErrors({ mode, legs: slip, sizes, stake });
+  const rerender = () => renderParlay();
+
+  const modeButtons = el('div', { class: 'button-row slip-modes', role: 'group', 'aria-label': t('slipMode') },
+    ['single', 'parlay', 'system'].map(m =>
+      el('button', {
+        class: 'ghost-button',
+        type: 'button',
+        'aria-pressed': String(m === mode),
+        text: t(`slipMode_${m}`),
+        onclick: () => {
+          state.slipMode = m;
+          rerender();
+        }
+      })
+    )
+  );
+  const parts = [modeButtons, el('p', { class: 'note', text: t(`slipModeNote_${mode}`) })];
+  if (dropped) parts.push(el('p', { class: 'note back-low', text: t('slipDroppedLive', { n: dropped }) }));
+  if (n === 0) {
+    parts.push(el('p', { class: 'muted', text: t('parlayEmpty') }));
+    body.replaceChildren(...parts);
     return;
   }
-  body.replaceChildren(
+
+  parts.push(
     el('ul', { class: 'parlay-legs' },
-      result.legs.map(b =>
+      legs.map(b =>
         el('li', {}, [
-          el('span', { text: b.label.includes(b.matchup) ? b.label : `${b.label} · ${b.matchup}` }),
-          el('span', { class: 'num', text: fmtOdds(effectiveOdds(b)) })
+          // The start time tells doubleheader games apart.
+          el('span', {}, [el('strong', { text: b.shortLabel }), el('small', { class: 'slip-leg-game', text: `${b.matchup} · ${fmtTime(b.start)}` })]),
+          el('span', { class: 'slip-leg-right' }, [
+            el('span', { class: 'num', text: fmtOdds(effectiveOdds(b)) }),
+            el('button', { class: 'ghost-button leg-button', type: 'button', 'aria-label': t('removeLeg'), text: '×', onclick: () => toggleLeg(b) })
+          ])
         ])
       )
-    ),
-    el('div', { class: 'stat-row' }, [
-      statTile(t('parlayOdds'), fmtOdds(result.odds)),
-      statTile(t('parlayChance'), fmtPct(result.fairChance)),
-      statTile(t('parlayBack'), fmtMoney(result.back, { sign: false }), backClass(result.back))
-    ]),
-    el('p', { class: 'note', text: t('parlayCut') }),
+    )
+  );
+
+  if (mode === 'system' && n >= 3) {
+    const options = [...Array.from({ length: n - 2 }, (_, i) => i + 2), 'all'];
+    parts.push(
+      el('div', { class: 'slip-sizes', role: 'group', 'aria-label': t('slipSizes') },
+        options.map(k => {
+          const size = k === 'all' ? n : k;
+          const on = state.slipSizes.has(k);
+          return el('button', {
+            class: 'ghost-button leg-button',
+            type: 'button',
+            'aria-pressed': String(on),
+            text: `${sizeName(size, n)} · ${t(choose(n, size) === 1 ? 'slipCombo1' : 'slipCombos', { n: choose(n, size) })}`,
+            onclick: () => {
+              if (on) state.slipSizes.delete(k);
+              else state.slipSizes.add(k);
+              rerender();
+            }
+          });
+        })
+      )
+    );
+  }
+
+  const stakeInput = el('input', {
+    class: 'odds-input slip-stake',
+    type: 'number',
+    inputmode: 'numeric',
+    min: String(SLIP_RULES.unit),
+    step: String(SLIP_RULES.unit),
+    value: String(stake),
+    'aria-label': t('slipStake'),
+    onchange: event => {
+      const value = Math.max(0, Math.round(Number(event.target.value) || 0));
+      if (value === state.slipStake) return;
+      state.slipStake = value;
+      // Redraw after the event: redrawing removes this input, and removing a
+      // focused input fires another change while the first is still running.
+      setTimeout(rerender);
+    }
+  });
+  parts.push(el('label', { class: 'slip-stake-row' }, [el('span', { text: t('slipStake') }), stakeInput, el('small', { class: 'muted', text: t('slipStakeHint') })]));
+
+  if (errors.length) {
+    parts.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit }) }))));
+  }
+  if (sizes.length && !errors.includes('stakeUnit')) {
+    const r = evaluateSlip({ legs: slip, sizes, stake });
+    const backPer100 = r.cost > 0 ? (r.expectedNet / r.cost) * 100 : 0;
+    parts.push(
+      el('div', { class: 'stat-row' }, [
+        statTile(t('slipCombosTotal'), `${fmtCount(r.combos)} × ${fmtMoney(stake, { sign: false })}`),
+        statTile(t('slipCost'), fmtMoney(r.cost, { sign: false })),
+        statTile(t('slipBest'), fmtMoney(r.best, { sign: false }), 'back-high'),
+        statTile(t('slipExpected'), fmtMoney(r.expectedNet, { sign: false }), backPer100 < 100 ? 'back-low' : 'back-high'),
+        statTile(t('slipAny'), fmtChance(r.anyPayout)),
+        statTile(t('slipProfit'), fmtChance(r.profit), r.profit < 0.5 ? 'back-low' : '')
+      ]),
+      el('p', { class: 'note', text: t('slipExpectedNote', { back: fmtMoney(backPer100, { sign: false }), gross: fmtMoney(r.expected, { sign: false }) }) })
+    );
+    parts.push(
+      el('div', { class: 'table-view slip-table' }, [
+        el('table', {}, [
+          el('thead', {}, el('tr', {}, [t('slipHits'), t('slipHitsChance'), t('slipHitsPayout')].map(h => el('th', { text: h })))),
+          el('tbody', {},
+            [...r.byHits].reverse().map(row =>
+              el('tr', {}, [
+                el('td', { text: t('slipHitsN', { k: row.hits, n }) }),
+                el('td', { text: fmtChance(row.chance) }),
+                el('td', { class: row.max > r.cost ? 'back-high' : row.max === 0 ? 'muted' : '', text: row.max === 0 ? '—' : row.min === row.max ? fmtMoney(row.max, { sign: false }) : `${fmtMoney(row.min, { sign: false })} – ${fmtMoney(row.max, { sign: false })}` })
+              ])
+            )
+          )
+        ])
+      ])
+    );
+  }
+  parts.push(
+    el('p', { class: 'note', text: t('slipRulesNote') }),
     el('div', { class: 'button-row' }, [
       el('button', {
         class: 'ghost-button',
@@ -578,6 +705,7 @@ function renderParlay() {
       })
     ])
   );
+  body.replaceChildren(...parts);
 }
 
 // ---- Simulator ----------------------------------------------------------------
