@@ -779,6 +779,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
   const span = weeks - from;
   const hist = new Uint32Array(span * bins);
   const aheadByWeek = new Uint32Array(span);
+  const netByWeek = new Float64Array(span);
   const path = new Float64Array(weeks);
   const states = new Array(total);
   const rngs = new Uint32Array(total);
@@ -866,6 +867,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
           bin = bin < 0 ? 0 : bin >= bins ? bins - 1 : bin;
           hist[(w - 1 - from) * bins + bin]++;
           if (v > 0) aheadByWeek[w - 1 - from]++;
+          netByWeek[w - 1 - from] += v;
           const tally = tallies.get(w);
           if (tally) count(tally, g, index, storyOf(now));
         }
@@ -887,7 +889,19 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
   };
   const bands = [
     ...(resume?.bands ?? []),
-    ...Array.from({ length: span }, (_, w) => ({ q10: at(w, 0.1), q25: at(w, 0.25), q50: at(w, 0.5), q75: at(w, 0.75), q90: at(w, 0.9), ahead: aheadByWeek[w] }))
+    ...Array.from({ length: span }, (_, w) => ({
+      q01: at(w, 0.01),
+      q05: at(w, 0.05),
+      q10: at(w, 0.1),
+      q25: at(w, 0.25),
+      q50: at(w, 0.5),
+      q75: at(w, 0.75),
+      q90: at(w, 0.9),
+      q95: at(w, 0.95),
+      q99: at(w, 0.99),
+      ahead: aheadByWeek[w],
+      mean: netByWeek[w] / total
+    }))
   ];
   // Per habit and per fan type, merged over the other dimension.
   const summarize = members => {

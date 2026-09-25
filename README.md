@@ -81,7 +81,7 @@ The choice is remembered.
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;
-  - a time-lapse: 100 dots of 1,000 people each, lit while they're ahead, played week by week or scrubbed with a slider, with the week the most people were ahead;
+  - a time-lapse, which plays itself when it scrolls into view: 100 dots of 1,000 people each, coloured from big win (NT$5,000+) to heavy loss; the date; the share ahead, the typical result and the lottery's running take; a feed of what happens (each league's season starting, its playoffs and its end, the week most people were ahead, the share ahead dropping under 20/10/5%, the typical loss passing NT$1,000/5,000/10,000, the lottery's take passing NT$100 million and NT$1 billion, each year's mark); and a small chart of the share ahead with those events marked, which can be tapped to jump to a week.
   - what the crowd's total loss would buy: bubble teas, bowls of beef noodles, iPhones and scooters;
   - the luckiest 10%, the middle player and the unluckiest 10%;
   - habits and fans ranked by money back;

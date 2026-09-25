@@ -30,6 +30,7 @@ import {
   choose,
   seededRandom,
   simulateCrowd,
+  gamesInWeek,
   MONTH_WEEKS,
   monthWeeks,
   replayPlayer,
@@ -1855,72 +1856,202 @@ const BOBA_PRICE = 65;
 
 // ---- Simulator extras: a time-lapse, what the losses buy --------------------
 
-// Week by week: 100 dots, each 1,000 people, lit while they're ahead.
+// Week by week: 100 dots of 1,000 people each, coloured by how each one
+// stands (big win to heavy loss), with the date, the lottery's running take,
+// what happened that week (seasons starting and ending, milestones) and a
+// small chart of the share ahead with a playhead. Plays itself the first
+// time it scrolls into view.
+const LAPSE_LEVELS = [
+  { key: 'gold', min: 5000 },
+  { key: 'win', min: 0 },
+  { key: 'lose1', min: -1000 },
+  { key: 'lose2', min: -5000 },
+  { key: 'lose3', min: -Infinity }
+];
+
+// A dot's result from the week's percentiles (dot 0 is the best 1%).
+function lapseValue(b, rank) {
+  const q = 1 - (rank + 0.5) / 100;
+  const points = [[0.01, b.q01 ?? b.q10], [0.05, b.q05 ?? b.q10], [0.1, b.q10], [0.25, b.q25], [0.5, b.q50], [0.75, b.q75], [0.9, b.q90], [0.95, b.q95 ?? b.q90], [0.99, b.q99 ?? b.q90]];
+  if (q <= points[0][0]) return points[0][1];
+  for (let i = 1; i < points.length; i++) {
+    const [q1, v1] = points[i];
+    if (q <= q1) {
+      const [q0, v0] = points[i - 1];
+      return v0 + ((v1 - v0) * (q - q0)) / (q1 - q0);
+    }
+  }
+  return points.at(-1)[1];
+}
+
+// What happens along the way: seasons starting, turning to playoffs and ending
+// (from each league's calendar), and the crowd's milestones.
+function lapseEvents(bands, weeks, startWeek) {
+  const t = state.t;
+  const events = [];
+  const games = (sport, w) => gamesInWeek(sport, startWeek + w - 1);
+  const quiet = (sport, from, to) => {
+    for (let w = from; w <= to; w++) if (games(sport, w) > 0) return false;
+    return true;
+  };
+  for (let w = 1; w <= weeks; w++) {
+    for (const sport of ['mlb', 'epl', 'nba', 'f1']) {
+      const now = games(sport, w);
+      const before = games(sport, w - 1);
+      const name = t(`sport_${sport}`);
+      if (now > 0 && quiet(sport, w - 5, w - 1)) events.push({ w, sport, text: t('lapseSeasonStart', { sport: name }) });
+      else if (before > 0 && now > 0 && before >= 3 * now) events.push({ w, sport, text: t('lapsePlayoffs', { sport: name }) });
+      if (now > 0 && w < weeks && quiet(sport, w + 1, w + 5)) events.push({ w, sport, text: t('lapseSeasonEnd', { sport: name }) });
+    }
+  }
+  const money = v => fmtMoney(v, { sign: false });
+  const first = (test, make) => {
+    const i = bands.findIndex(test);
+    if (i >= 0) events.push({ w: i + 1, ...make(bands[i], i) });
+  };
+  let peak = 0;
+  bands.forEach((b, i) => b.ahead > bands[peak].ahead && (peak = i));
+  events.push({ w: peak + 1, icon: '⛰️', text: t('lapsePeakEv', { v: fmtShare(bands[peak].ahead / SIM_PLAYERS) }) });
+  for (const share of [0.2, 0.1, 0.05]) first((b, i) => i > peak && b.ahead / SIM_PLAYERS < share, () => ({ icon: '📉', text: t('lapseBelow', { v: fmtShare(share) }) }));
+  for (const loss of [1000, 5000, 10_000]) first(b => b.q50 <= -loss, () => ({ icon: '🧍', text: t('lapseMedian', { v: money(loss) }) }));
+  for (const take of [1e8, 1e9]) first(b => (b.mean ?? 0) * -SIM_PLAYERS_SHOWN >= take, () => ({ icon: '🏦', text: t('lapseHouse', { v: money(take) }) }));
+  for (let y = 1; y * 52 <= weeks; y++) events.push({ w: y * 52, icon: '🎂', text: t('lapseYear', { n: y }) });
+  return events.sort((a, b) => a.w - b.w);
+}
+
 function renderLapse(bands, weeks) {
   const t = state.t;
   const box = $('sim-lapse');
   if (!box) return;
+  clearInterval(box._timer);
+  box._observer?.disconnect();
+  const startWeek = weekOfYear(new Date());
+  const events = lapseEvents(bands, weeks, startWeek);
   const random = seededRandom(3);
   const order = Array.from({ length: 100 }, (_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
+  // Where each dot sits in the crowd: its rank, 0 = the best 1,000 people.
   const rank = new Array(100);
   order.forEach((dot, r) => (rank[dot] = r));
   const dots = Array.from({ length: 100 }, () => el('span', { class: 'lapse-dot' }));
-  const week = el('strong', { class: 'lapse-week' });
-  const ahead = el('strong', { class: 'lapse-ahead' });
+  const date = el('p', { class: 'lapse-date' });
+  const ahead = el('strong');
   const median = el('strong');
-  const slider = el('input', { type: 'range', min: '1', max: String(weeks), value: String(weeks), 'aria-label': t('lapseWeek', { w: '' }) });
+  const house = el('strong', { class: 'back-low' });
+  const feed = el('ol', { class: 'lapse-feed', 'aria-live': 'polite' });
+  const slider = el('input', { type: 'range', min: '1', max: String(weeks), value: '1', 'aria-label': t('lapseTitle') });
   const play = el('button', { class: 'primary-button lapse-play', type: 'button' });
-  let timer = null;
+
+  // The share ahead over the whole period, with event ticks and a playhead.
+  const W = 300;
+  const H = 56;
+  const top = Math.max(...bands.map(b => b.ahead)) || 1;
+  const x = w => ((w - 1) / Math.max(1, weeks - 1)) * W;
+  const y = a => H - 4 - (a / top) * (H - 12);
+  let line = '';
+  bands.forEach((b, i) => (line += `${i ? 'L' : 'M'}${x(i + 1).toFixed(1)},${y(b.ahead).toFixed(1)}`));
+  const chart = svgEl('svg', { class: 'lapse-chart', viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': t('lapseAhead') });
+  chart.append(svgEl('path', { class: 'lapse-area', d: `${line}L${W},${H}L0,${H}Z` }), svgEl('path', { class: 'lapse-line', d: line }));
+  for (const e of events) chart.append(svgEl('line', { class: 'lapse-tick', x1: x(e.w), x2: x(e.w), y1: 0, y2: 5 }));
+  const head = svgEl('line', { class: 'lapse-head', y1: 0, y2: H });
+  chart.append(head);
+  chart.addEventListener('click', event => {
+    const r = chart.getBoundingClientRect();
+    stop();
+    set(Math.max(1, Math.min(weeks, Math.round(1 + ((event.clientX - r.left) / r.width) * (weeks - 1)))));
+  });
+
+  const eventIcon = e => (e.sport ? leagueImg(e.sport, 'logo-xs') : el('span', { class: 'lapse-ev-icon', 'aria-hidden': 'true', text: e.icon }));
+  let shownEvents = -1;
   const set = w => {
     const b = bands[w - 1];
-    const share = b.ahead / SIM_PLAYERS;
-    const lit = Math.round(share * 100);
-    dots.forEach((dot, i) => dot.classList.toggle('up', rank[i] < lit));
-    week.textContent = t('lapseWeek', { w });
-    ahead.textContent = fmtShare(share);
+    const lit = Math.round((b.ahead / SIM_PLAYERS) * 100);
+    dots.forEach((dot, i) => {
+      const r = rank[i];
+      let v = lapseValue(b, r);
+      // The exact share ahead decides green or not; the percentiles, how much.
+      if (r < lit) v = Math.max(v, 1);
+      else v = Math.min(v, 0);
+      const level = LAPSE_LEVELS.find(l => v > l.min);
+      dot.className = `lapse-dot ${level.key}`;
+      dot.title = fmtMoney(v);
+    });
+    const day = new Date(Date.now() + w * 7 * 86_400_000);
+    date.textContent = t('lapseDate', { date: day.toLocaleDateString(numberLocale(), { year: 'numeric', month: 'numeric', day: 'numeric' }), w });
+    ahead.textContent = fmtShare(b.ahead / SIM_PLAYERS);
     median.textContent = fmtMoney(b.q50);
     median.className = b.q50 < 0 ? 'back-low' : 'back-high';
+    // Short, like 1.7億 or 168M: it grows to hundreds of millions.
+    house.textContent = `NT$${Math.max(0, -(b.mean ?? 0) * SIM_PLAYERS_SHOWN).toLocaleString(numberLocale(), { notation: 'compact', maximumFractionDigits: 1 })}`;
+    head.setAttribute('x1', x(w));
+    head.setAttribute('x2', x(w));
     slider.value = String(w);
+    // The latest three things that have happened, newest first.
+    const past = events.filter(e => e.w <= w);
+    if (past.length !== shownEvents) {
+      const fresh = past.length > shownEvents && shownEvents >= 0;
+      shownEvents = past.length;
+      const recent = past.slice(-3).reverse();
+      feed.replaceChildren(
+        ...(recent.length ? recent : [{ w: 0, icon: '🎫', text: t('lapseKickoff') }]).map((e, i) =>
+          el('li', { class: `${i === 0 && fresh ? 'new' : ''} ${i ? 'old' : ''}` }, [eventIcon(e), el('span', { text: e.text }), el('small', { text: e.w ? t('lapseWeek', { w: e.w }) : '' })])
+        )
+      );
+    }
   };
   const stop = () => {
-    clearInterval(timer);
-    timer = null;
+    clearInterval(box._timer);
+    box._timer = null;
     play.textContent = `▶ ${t('lapsePlay')}`;
   };
-  play.addEventListener('click', () => {
-    if (timer) return stop();
+  const start = () => {
     let w = Number(slider.value) >= weeks ? 1 : Number(slider.value);
     set(w);
     play.textContent = `⏸ ${t('lapsePause')}`;
-    timer = setInterval(() => {
-      if (!box.contains(play)) return clearInterval(timer);
-      w++;
-      set(w);
+    box._timer = setInterval(() => {
+      if (!box.contains(play)) return clearInterval(box._timer);
+      set(++w);
       if (w >= weeks) stop();
-    }, Math.max(45, Math.round(6000 / weeks)));
-  });
+    }, Math.max(30, Math.min(250, Math.round(8000 / weeks))));
+  };
+  play.addEventListener('click', () => (box._timer ? stop() : start()));
   slider.addEventListener('input', () => (stop(), set(Number(slider.value))));
-  let peak = 0;
-  bands.forEach((b, i) => b.ahead > bands[peak].ahead && (peak = i));
+
   box.replaceChildren(
     el('div', { class: 'lapse' }, [
-      el('div', { class: 'lapse-grid', role: 'img', 'aria-label': t('lapseLegend') }, dots),
+      el('div', {}, [
+        el('div', { class: 'lapse-grid', role: 'img', 'aria-label': t('lapseLegend') }, dots),
+        el('div', { class: 'lapse-legend' }, LAPSE_LEVELS.map(l => el('span', {}, [el('i', { class: `lapse-dot ${l.key}` }), document.createTextNode(t(`lapse_${l.key}`))])))
+      ]),
       el('div', { class: 'lapse-side' }, [
-        week,
-        el('p', { class: 'lapse-line' }, [el('span', { text: t('lapseAhead') }), ahead]),
-        el('p', { class: 'lapse-line' }, [el('span', { text: t('youMedian') }), median]),
+        date,
+        el('div', { class: 'lapse-stats' }, [
+          el('p', {}, [el('span', { text: t('lapseAhead') }), ahead]),
+          el('p', {}, [el('span', { text: t('youMedian') }), median]),
+          el('p', {}, [el('span', { text: t('lapseHouseNow') }), house])
+        ]),
+        feed,
+        chart,
         el('div', { class: 'lapse-controls' }, [play, slider]),
-        el('p', { class: 'note', text: t('lapseLegend') }),
-        el('p', { class: 'note', text: t('lapsePeak', { w: peak + 1, v: fmtShare(bands[peak].ahead / SIM_PLAYERS) }) })
+        el('p', { class: 'note', text: t('lapseLegend') })
       ])
     ])
   );
   stop();
-  set(weeks);
+  set(1);
+  // Play once when it first comes into view.
+  if ('IntersectionObserver' in window) {
+    box._observer = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) {
+        box._observer.disconnect();
+        if (!box._timer) start();
+      }
+    }, { threshold: 0.5 });
+    box._observer.observe(box);
+  } else set(weeks);
 }
 
 // What the crowd's total loss would have bought instead.
