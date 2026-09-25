@@ -63,6 +63,32 @@ export function estimateLotteryOdds(fairChance, k) {
   return round2(1 / (fairChance * k));
 }
 
+// Championship (futures) markets, fitted on 2026-09-25 against the lottery's
+// AL, NL, World Series (14 teams) and EPL title prices. The lottery's implied
+// chances add up to about FUTURES_OVERROUND per market (single games: ~1.15)
+// and lean on longshots: each team's implied chance is fair^FUTURES_EXPONENT,
+// scaled so the market adds up to that total. MLB markets fit within ~5-15%.
+export const FUTURES_EXPONENT = 0.7;
+export const FUTURES_OVERROUND = { mlb: 2.0, epl: 1.6, nba: 2.0 };
+// Below 0.4% Polymarket's 0.1-cent price step can't tell teams apart. The
+// lottery priced 0.2-0.4% clubs at 133 and those below at 159-500.
+export const FUTURES_LONGSHOT_STEPS = [
+  [0.004, null],
+  [0.002, 133],
+  [0, 300]
+];
+export const LOTTERY_MAX_ODDS = 500;
+
+// Estimated lottery odds for every team of one market, in the same order.
+export function estimateFuturesOdds(fairChances, overround) {
+  const total = fairChances.reduce((s, p) => s + p ** FUTURES_EXPONENT, 0);
+  return fairChances.map(p => {
+    const [, step] = FUTURES_LONGSHOT_STEPS.find(([min]) => p >= min);
+    if (step) return step;
+    return Math.min(LOTTERY_MAX_ODDS, round2(total / (overround * p ** FUTURES_EXPONENT)));
+  });
+}
+
 export function estimateF1LotteryOdds(fairChance, exponent = F1_EXPONENT) {
   const [, step] = F1_LONGSHOT_STEPS.find(([min]) => fairChance >= min);
   return step ?? round2(1 / fairChance ** exponent);

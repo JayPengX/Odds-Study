@@ -156,12 +156,53 @@ test('soccer games merge across name styles and get Chinese names', () => {
   const [game] = mergeGames(parseEspnScoreboard(eplEspn, 'epl'), parsePolymarketEpl(eplPolymarket, NOW));
   assert.equal(game.sport, 'epl');
   assert.equal(game.home.en, 'Arsenal');
-  assert.equal(game.home.zh, '阿森納');
-  assert.equal(game.away.zh, '里茲聯');
+  assert.equal(game.home.zh, '兵工廠');
+  assert.equal(game.away.zh, '利茲聯');
   assert.ok(game.draftKings.draw > 0 && game.polymarket.draw > 0);
 });
 
 test('eplMatchdays keeps calendar dates in the coming three weeks', () => {
   const days = eplMatchdays({ leagues: [{ calendar: ['2026-09-20T07:00Z', '2026-10-10T07:00Z', '2026-10-11T07:00Z', '2026-10-31T07:00Z'] }] }, NOW);
   assert.deepEqual(days.map(d => d.toISOString().slice(0, 10)), ['2026-10-10', '2026-10-11']);
+});
+
+test('lottery window ends at the end of tomorrow, Taiwan time', async () => {
+  const { lotteryWindowEnd, taipeiDayKey } = await import('../public/lib/sources.mjs');
+  // 2026-09-25 23:30 in Taiwan is 15:30 UTC; the window ends 2026-09-27 00:00 Taiwan = 09-26 16:00 UTC.
+  assert.equal(lotteryWindowEnd(new Date('2026-09-25T15:30:00Z')).toISOString(), '2026-09-26T16:00:00.000Z');
+  // 00:30 Taiwan on 09-26 is still 09-25 in UTC, but already the 26th in Taiwan.
+  assert.equal(taipeiDayKey('2026-09-25T16:30:00Z'), '2026-09-26');
+  assert.equal(lotteryWindowEnd(new Date('2026-09-25T16:30:00Z')).toISOString(), '2026-09-27T16:00:00.000Z');
+});
+
+test('futures parser reads teams from questions and drops placeholders', async () => {
+  const { parseFutures } = await import('../public/lib/sources.mjs');
+  const market = (question, yes) => ({ question, outcomes: '["Yes","No"]', outcomePrices: JSON.stringify([String(yes), String(1 - yes)]) });
+  const events = [
+    { title: 'MLB World Series Champion 2027', markets: [market('Will the New York Yankees win the 2027 World Series?', 0.2)] },
+    {
+      title: 'MLB World Series Champion 2026',
+      markets: [
+        market('Will the Los Angeles Dodgers win the 2026 World Series?', 0.6),
+        market('Will the New York Yankees win the 2026 World Series?', 0.44),
+        market('Will the Toronto Blue Jays win the 2026 World Series?', 0),
+        market('Will another team win the 2026 World Series?', 0.5)
+      ]
+    },
+    { title: 'MLB: 2026 AL Central Champion', markets: [market('Will Detroit Tigers win the AL Central?', 0.5)] },
+    { title: 'Dodgers vs. Padres', startTime: '2026-09-26T02:00:00Z', markets: [] }
+  ];
+  const [ws, ...others] = parseFutures(events, 'mlb');
+  assert.equal(others.length, 0);
+  assert.equal(ws.key, 'ws');
+  assert.equal(ws.season, '2026');
+  assert.deepEqual(ws.teams.map(t => t.name.en), ['Los Angeles Dodgers', 'New York Yankees']);
+  assert.equal(ws.teams[0].name.zh, '洛杉磯道奇');
+  assert.ok(Math.abs(ws.teams[0].fair + ws.teams[1].fair - 1) < 1e-9);
+  const [epl] = parseFutures(
+    [{ title: 'EPL: 2027 Champion', markets: [market('Will Arsenal win the 2026-27 English Premier League (EPL) Championship?', 0.5), market('Will Team C win the 2026-27 English Premier League (EPL) Championship?', 0.5), market('Will Brighton win the 2026-27 English Premier League (EPL) Championship?', 0.02)] }],
+    'epl'
+  );
+  assert.deepEqual(epl.teams.map(t => t.name.zh), ['兵工廠', '布萊頓']);
+  assert.equal(epl.season, '2026/27');
 });

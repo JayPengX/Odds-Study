@@ -6,6 +6,7 @@ import {
   devigPower,
   estimateLotteryOdds,
   estimateF1LotteryOdds,
+  estimateFuturesOdds,
   expectedReturn,
   overround,
   combineParlay,
@@ -145,4 +146,16 @@ test('quantile interpolates a sorted list', () => {
   assert.equal(quantile([1, 2, 3, 4, 5], 0.5), 3);
   assert.equal(quantile([0, 10], 0.25), 2.5);
   assert.equal(quantile([7], 0.9), 7);
+});
+
+test('futures estimate reproduces the lottery AL prices and its longshot steps', () => {
+  // Polymarket fair chances and real lottery prices, 2026-09-25.
+  const fair = [0.276, 0.219, 0.154, 0.119, 0.118, 0.071, 0.042];
+  const real = [2.2, 2.45, 3.5, 3.95, 3.95, 4.85, 7.25];
+  const est = estimateFuturesOdds(fair, 2.0);
+  const err = est.reduce((s, o, i) => s + Math.abs(o - real[i]) / real[i], 0) / real.length;
+  assert.ok(err < 0.08, `${err}`);
+  // Implied chances add up to the overround.
+  close(est.reduce((s, o) => s + 1 / o, 0), 2.0, 0.01);
+  assert.deepEqual(estimateFuturesOdds([0.9, 0.003, 0.001], 1.6).slice(1), [133, 300]);
 });

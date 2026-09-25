@@ -1,18 +1,41 @@
 // Fetches upcoming MLB and Premier League odds (DraftKings via ESPN,
-// Polymarket) and the next F1 race-winner market through the shared sports
-// proxy, which adds the CORS headers Polymarket doesn't send.
+// Polymarket), the next F1 race-winner market and championship (futures)
+// markets through the shared sports proxy, which adds the CORS headers
+// Polymarket doesn't send.
 import { americanToProbability, devigProportional, devigPower } from './odds.mjs';
 import { normalizeTeamName, teamZh } from './teams.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const ESPN = 'https://site.api.espn.com/apis/site/v2/sports';
 const GAMMA = 'https://gamma-api.polymarket.com';
-const POLYMARKET_TAG = { mlb: 100381, epl: 306, f1: 100389 };
+const POLYMARKET_TAG = { mlb: 100381, epl: 306, f1: 100389, nba: 745 };
 const MLB_DAYS_AHEAD = 4;
 // Soccer rounds can be two weeks apart (international breaks).
 const EPL_DAYS_AHEAD = 21;
 const MATCH_TOLERANCE_MS = 6 * 60 * 60 * 1000;
 const DAY_MS = 86_400_000;
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// Taiwan date (YYYY-MM-DD) of a moment. Taiwan has no daylight saving time.
+export function taipeiDayKey(date) {
+  return new Date(new Date(date).getTime() + TAIPEI_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+// The lottery sells single games up to the end of tomorrow, Taiwan time.
+export function lotteryWindowEnd(now) {
+  const [y, m, d] = taipeiDayKey(now).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 2) - TAIPEI_OFFSET_MS);
+}
+
+// Championship markets. Polymarket lists next season's market before this
+// one ends, so the lowest year in the title wins.
+export const FUTURES = [
+  { key: 'ws', sport: 'mlb', title: /World Series Champion/i },
+  { key: 'al', sport: 'mlb', title: /American League Champion$/i },
+  { key: 'nl', sport: 'mlb', title: /National League Champion$/i },
+  { key: 'epl', sport: 'epl', title: /^EPL: \d{4} Champion$/i },
+  { key: 'nba', sport: 'nba', title: /^NBA: \d{4} Champion$/i }
+];
 
 export function proxied(url, trim) {
   return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}${trim ? `&trim=${trim}` : ''}`;
@@ -211,6 +234,50 @@ export function parseF1RaceWinner(events, now) {
   };
 }
 
+// ---- Futures ---------------------------------------------------------------
+
+// "2026" for MLB; "2026/27" for leagues whose season spans two years (the
+// questions say "2026-27", the titles only "2027").
+function seasonLabel(event, sport) {
+  const span = /(\d{4})-(\d{2})\b/.exec((event.markets || []).map(m => m.question).join(' '));
+  if (span) return `${span[1]}/${span[2]}`;
+  const year = Number(/\d{4}/.exec(event.title)?.[0]);
+  if (!year) return '';
+  return sport === 'mlb' ? String(year) : `${year - 1}/${String(year).slice(2)}`;
+}
+
+// "Will (the) Los Angeles Dodgers win the 2026 World Series?" -> the team.
+// Polymarket's placeholder markets ("Team C", "another team") are dropped, and
+// so are eliminated teams (price 0).
+export function parseFutures(events, sport) {
+  const out = [];
+  for (const market of FUTURES.filter(f => f.sport === sport)) {
+    const year = e => Number(/\d{4}/.exec(e.title)?.[0] ?? 9999);
+    const event = events.filter(e => market.title.test(e.title || '')).sort((a, b) => year(a) - year(b))[0];
+    if (!event) continue;
+    const teams = [];
+    for (const m of event.markets || []) {
+      const name = /^Will (?:the )?(.+?) win the /i.exec(m.question || '')?.[1];
+      if (!name || /^(team [a-z]|another team|other)$/i.test(name)) continue;
+      const outcomes = parseJsonArray(m.outcomes);
+      const prices = parseJsonArray(m.outcomePrices);
+      const price = Number(prices?.[outcomes?.findIndex(o => /^yes$/i.test(o)) ?? 0]);
+      if (price > 0) teams.push({ name, price });
+    }
+    const fair = devigProportional(teams.map(t => t.price));
+    if (!fair || teams.length < 2) continue;
+    out.push({
+      key: market.key,
+      sport,
+      season: seasonLabel(event, sport),
+      teams: teams
+        .map((t, i) => ({ name: { en: t.name, zh: teamZh(sport, t.name) }, fair: fair[i] }))
+        .sort((a, b) => b.fair - a.fair)
+    });
+  }
+  return out;
+}
+
 // ---- Merge --------------------------------------------------------------------
 
 function sameGame(a, b) {
@@ -255,13 +322,18 @@ export async function loadOdds(now = new Date()) {
     fetchPolymarketEvents(POLYMARKET_TAG.mlb, 'polymarket-events'),
     fetchEspnEpl(now),
     fetchPolymarketEvents(POLYMARKET_TAG.epl, 'polymarket-events'),
-    fetchPolymarketEvents(POLYMARKET_TAG.f1)
+    fetchPolymarketEvents(POLYMARKET_TAG.f1),
+    fetchPolymarketEvents(POLYMARKET_TAG.nba, 'polymarket-events')
   ]);
   if (results.every(r => r.status === 'rejected')) throw results[0].reason;
-  const [mlbDk, mlbPm, eplDk, eplPm, f1] = results.map(r => (r.status === 'fulfilled' ? r.value : []));
+  const [mlbDk, mlbPm, eplDk, eplPm, f1, nbaPm] = results.map(r => (r.status === 'fulfilled' ? r.value : []));
+  const windowEnd = lotteryWindowEnd(now).getTime();
   return {
     loadedAt: now.toISOString(),
-    games: mergeGames([...mlbDk, ...eplDk], [...parsePolymarketMlb(mlbPm, now), ...parsePolymarketEpl(eplPm, now)]),
-    f1: parseF1RaceWinner(f1, now)
+    games: mergeGames([...mlbDk, ...eplDk], [...parsePolymarketMlb(mlbPm, now), ...parsePolymarketEpl(eplPm, now)]).filter(
+      g => Date.parse(g.startUtc) < windowEnd
+    ),
+    f1: parseF1RaceWinner(f1, now),
+    futures: [...parseFutures(mlbPm, 'mlb'), ...parseFutures(eplPm, 'epl'), ...parseFutures(nbaPm, 'nba')]
   };
 }

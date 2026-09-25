@@ -3,7 +3,9 @@ import {
   K_DRAFTKINGS,
   blendOutcomes,
   combineParlay,
+  FUTURES_OVERROUND,
   estimateF1LotteryOdds,
+  estimateFuturesOdds,
   estimateLotteryOdds,
   expectedReturn,
   habitPools,
@@ -12,7 +14,7 @@ import {
   simulateCrowd,
   summarizeCrowd
 } from './lib/odds.mjs';
-import { loadOdds } from './lib/sources.mjs';
+import { loadOdds, taipeiDayKey } from './lib/sources.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 
 const STAKE = 100;
@@ -24,6 +26,8 @@ const SIM_SEED = 1;
 const THIN_LIQUIDITY = 10_000;
 const TIE_BAND = 2;
 const RANKING_SIZE = 8;
+// Championship teams shown before the rest fold away.
+const FUTURES_SHOWN = 6;
 const MAX_LEGS = 10;
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
 
@@ -32,6 +36,7 @@ const state = {
   t: null,
   data: null,
   bets: [],
+  futures: [],
   userOdds: loadUserOdds(),
   parlay: [],
   day: null,
@@ -99,6 +104,7 @@ function fmtOdds(o) {
   return o.toFixed(2);
 }
 
+// Taiwan time, like the lottery, wherever the page is opened.
 function fmtTime(iso) {
   return new Intl.DateTimeFormat(numberLocale(), {
     month: 'numeric',
@@ -106,7 +112,8 @@ function fmtTime(iso) {
     weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
-    hourCycle: 'h23'
+    hourCycle: 'h23',
+    timeZone: 'Asia/Taipei'
   }).format(new Date(iso));
 }
 
@@ -179,6 +186,27 @@ function buildBets(data) {
   return bets;
 }
 
+// One bet per team of every championship market.
+function buildFutures(data) {
+  const t = state.t;
+  return (data.futures || []).flatMap(market => {
+    const odds = estimateFuturesOdds(market.teams.map(team => team.fair), FUTURES_OVERROUND[market.sport]);
+    const title = t(`future_${market.key}`, { season: market.season });
+    return market.teams.map((team, i) => ({
+      id: `fut|${market.key}|${team.name.en}`,
+      gameId: `fut|${market.key}`,
+      kind: 'future',
+      market: market.key,
+      sport: market.sport,
+      matchup: title,
+      label: `${title} ${teamName(team.name)}`,
+      shortLabel: teamName(team.name),
+      fairChance: team.fair,
+      estOdds: odds[i]
+    }));
+  });
+}
+
 function effectiveOdds(bet) {
   const user = Number(state.userOdds[bet.id]);
   return user >= 1.01 ? user : bet.estOdds;
@@ -188,9 +216,9 @@ function betReturn(bet) {
   return expectedReturn(bet.fairChance, effectiveOdds(bet), STAKE);
 }
 
+// Days follow Taiwan time, like the lottery.
 function dayKey(iso) {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return taipeiDayKey(iso);
 }
 
 function inSport(sport) {
@@ -210,14 +238,15 @@ function rerenderFiltered() {
   renderDayFilter();
   renderRanking();
   renderGames();
+  renderFutures();
   renderSim();
   renderF1();
 }
 
 function renderSportFilter() {
   const t = state.t;
-  const present = new Set(state.bets.map(b => b.sport));
-  const sports = ['all', 'mlb', 'epl', 'f1'].filter(s => s === 'all' || present.has(s));
+  const present = new Set([...state.bets, ...state.futures].map(b => b.sport));
+  const sports = ['all', 'mlb', 'epl', 'nba', 'f1'].filter(s => s === 'all' || present.has(s));
   if (!sports.includes(state.sport)) state.sport = 'all';
   $('sport-filter').replaceChildren(
     ...sports.map(sport =>
@@ -281,6 +310,7 @@ function renderStatic() {
   for (const [id, key] of [
     ['ranking-title', 'rankingTitle'],
     ['games-title', 'gamesTitle'],
+    ['futures-title', 'futuresTitle'],
     ['parlay-title', 'parlayTitle'],
     ['sim-title', 'simTitle'],
     ['f1-title', 'f1Title'],
@@ -417,7 +447,7 @@ function betTable(bets) {
     });
     const inParlay = state.parlay.includes(bet.id);
     const legButton =
-      bet.kind === 'f1'
+      bet.kind === 'f1' || bet.kind === 'future'
         ? null
         : el('button', {
             class: 'ghost-button leg-button',
@@ -452,6 +482,34 @@ function onUserOdds(bet, raw) {
   renderRanking();
   renderParlay();
   renderSim();
+}
+
+// ---- Futures ------------------------------------------------------------------
+
+function renderFutures() {
+  const t = state.t;
+  const markets = Map.groupBy ? Map.groupBy(state.futures.filter(b => inSport(b.sport)), b => b.market) : groupBy(state.futures.filter(b => inSport(b.sport)), b => b.market);
+  $('futures').hidden = markets.size === 0;
+  $('futures-list').replaceChildren(
+    ...[...markets.values()].map(bets => {
+      const { market, matchup, sport } = bets[0];
+      const notes = [];
+      if (sport === 'nba') notes.push(el('p', { class: 'note', text: t('futureNbaNote') }));
+      if (sport === 'epl') notes.push(el('p', { class: 'note', text: t('futureEplNote') }));
+      const rest = bets.slice(FUTURES_SHOWN);
+      return el('article', { class: 'game' }, [
+        el('div', { class: 'game-head' }, [
+          el('span', { class: 'game-title', text: matchup }),
+          el('span', { class: 'game-meta', text: `${t('futureSettles')} ${t(`futureSettle_${market}`)}` })
+        ]),
+        betTable(bets.slice(0, FUTURES_SHOWN)),
+        rest.length
+          ? el('details', { class: 'table-view' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), betTable(rest)])
+          : null,
+        ...notes
+      ]);
+    })
+  );
 }
 
 // ---- Parlay -------------------------------------------------------------------
@@ -888,12 +946,14 @@ function renderAll() {
   renderStatic();
   if (!state.data) return;
   state.bets = buildBets(state.data);
+  state.futures = buildFutures(state.data);
   state.parlay = state.parlay.filter(id => state.bets.some(b => b.id === id));
   renderStatus('ok');
   renderSportFilter();
   renderDayFilter();
   renderRanking();
   renderGames();
+  renderFutures();
   renderParlay();
   renderSim();
   renderF1();

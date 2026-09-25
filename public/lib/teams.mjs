@@ -33,23 +33,25 @@ export const MLB_TEAM_ZH = {
   'Washington Nationals': '華盛頓國民'
 };
 
-// Premier League clubs, keyed by normalizeTeamName(). Includes recently
-// promoted/relegated clubs, since the league changes every season.
+// Premier League clubs, keyed by normalizeTeamName(), as the lottery wrote
+// them on 2026-09-25. Includes recently promoted/relegated clubs, since the
+// league changes every season.
 const EPL_TEAM_ZH_BY_KEY = {
-  arsenal: '阿森納',
+  arsenal: '兵工廠',
   'aston villa': '阿斯頓維拉',
   bournemouth: '伯恩茅斯',
-  brentford: '布倫特福',
+  brentford: '布倫特福德',
+  brighton: '布萊頓',
   'brighton hove albion': '布萊頓',
   burnley: '伯恩利',
   chelsea: '切爾西',
-  'coventry city': '考文垂城',
+  'coventry city': '科芬特里城',
   'crystal palace': '水晶宮',
-  everton: '埃弗頓',
+  everton: '艾佛頓',
   fulham: '富勒姆',
   'hull city': '赫爾城',
   'ipswich town': '伊普斯維奇',
-  'leeds united': '里茲聯',
+  'leeds united': '利茲聯',
   'leicester city': '萊斯特城',
   liverpool: '利物浦',
   'manchester city': '曼城',
@@ -58,9 +60,46 @@ const EPL_TEAM_ZH_BY_KEY = {
   'nottingham forest': '諾丁漢森林',
   southampton: '南安普頓',
   sunderland: '桑德蘭',
+  tottenham: '托特納姆熱刺',
   'tottenham hotspur': '托特納姆熱刺',
   'west ham united': '西漢姆聯',
   'wolverhampton wanderers': '狼隊'
+};
+
+// NBA teams in the usual Taiwanese names. The lottery doesn't offer the NBA
+// title yet, so these aren't checked against it.
+export const NBA_TEAM_ZH = {
+  'Atlanta Hawks': '亞特蘭大老鷹',
+  'Boston Celtics': '波士頓塞爾提克',
+  'Brooklyn Nets': '布魯克林籃網',
+  'Charlotte Hornets': '夏洛特黃蜂',
+  'Chicago Bulls': '芝加哥公牛',
+  'Cleveland Cavaliers': '克里夫蘭騎士',
+  'Dallas Mavericks': '達拉斯獨行俠',
+  'Denver Nuggets': '丹佛金塊',
+  'Detroit Pistons': '底特律活塞',
+  'Golden State Warriors': '金州勇士',
+  'Houston Rockets': '休士頓火箭',
+  'Indiana Pacers': '印第安納溜馬',
+  'Los Angeles Clippers': '洛杉磯快艇',
+  'LA Clippers': '洛杉磯快艇',
+  'Los Angeles Lakers': '洛杉磯湖人',
+  'Memphis Grizzlies': '曼菲斯灰熊',
+  'Miami Heat': '邁阿密熱火',
+  'Milwaukee Bucks': '密爾瓦基公鹿',
+  'Minnesota Timberwolves': '明尼蘇達灰狼',
+  'New Orleans Pelicans': '紐奧良鵜鶘',
+  'New York Knicks': '紐約尼克',
+  'Oklahoma City Thunder': '奧克拉荷馬雷霆',
+  'Orlando Magic': '奧蘭多魔術',
+  'Philadelphia 76ers': '費城 76 人',
+  'Phoenix Suns': '鳳凰城太陽',
+  'Portland Trail Blazers': '波特蘭拓荒者',
+  'Sacramento Kings': '沙加緬度國王',
+  'San Antonio Spurs': '聖安東尼奧馬刺',
+  'Toronto Raptors': '多倫多暴龍',
+  'Utah Jazz': '猶他爵士',
+  'Washington Wizards': '華盛頓巫師'
 };
 
 // Strips club-suffix boilerplate so ESPN's "Liverpool" matches Polymarket's
@@ -78,5 +117,6 @@ export function normalizeTeamName(name) {
 
 export function teamZh(sport, name) {
   if (sport === 'epl') return EPL_TEAM_ZH_BY_KEY[normalizeTeamName(name)] ?? name;
+  if (sport === 'nba') return NBA_TEAM_ZH[name] ?? name;
   return MLB_TEAM_ZH[name] ?? name;
 }
