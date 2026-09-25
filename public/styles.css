@@ -432,8 +432,8 @@ button.pick:active { transform: scale(0.98); }
 .headline-big strong { color: #fde68a; font-size: 1.6rem; }
 .headline-sub { color: rgba(255, 255, 255, 0.85); font-size: 0.86rem; }
 .margin-note { font-size: 0.72rem; color: rgba(255, 255, 255, 0.7); }
-.people { display: flex; gap: 4px; flex-wrap: wrap; }
-.person { width: 30px; height: 38px; }
+.people { display: flex; gap: 4px; }
+.person { width: min(30px, 7.4vw); height: auto; aspect-ratio: 24 / 30; flex: none; }
 .person path, .person circle { fill: rgba(255, 255, 255, 0.28); }
 .person.won path, .person.won circle { fill: #86efac; }
 .legend { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 0.76rem; color: var(--text-secondary); margin-bottom: 6px; }
@@ -462,7 +462,7 @@ button.pick:active { transform: scale(0.98); }
 .players { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 12px; margin-bottom: 14px; }
 .player { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; font-size: 0.82rem; position: relative; overflow: hidden; }
 .player::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--player); }
-.player-head { display: grid; }
+.player-head { display: flex; align-items: center; gap: 10px; }
 .avatar { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-size: 1.35rem; background: color-mix(in srgb, var(--player) 16%, var(--surface)); flex: none; }
 .player-name { font-weight: 800; color: var(--player); font-size: 0.95rem; }
 .player-rank { font-size: 0.72rem; color: var(--text-muted); }
@@ -486,7 +486,9 @@ button.pick:active { transform: scale(0.98); }
 .bar-item .habit-meta { grid-column: 2 / 4; font-size: 0.72rem; color: var(--text-muted); }
 
 .stories { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
-.story { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; display: grid; gap: 2px; align-content: start; }
+.story { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; display: grid; grid-template-columns: 46px 1fr; gap: 0 12px; align-content: start; }
+.story > :not(.story-icon) { grid-column: 2; }
+.story-icon { grid-row: 1 / 4; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 1.45rem; background: var(--surface-sunken); }
 .story-title { font-weight: 700; font-size: 0.86rem; color: var(--text-secondary); }
 .story-serial { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 800; font-size: 1.3rem; letter-spacing: -0.01em; }
 .story-text { color: var(--text-secondary); font-size: 0.82rem; }
@@ -568,6 +570,12 @@ body:not(.detail) .detail-only, body:not(.detail) .margin, body:not(.detail) .st
 .board-emblem .logo { width: 28px; height: 28px; }
 .empty-icon { width: 56px; height: 56px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .guide-icon { font-size: 1.25rem; }
-.story-icon { margin-right: 8px; font-size: 1.15rem; }
+
 .notice::before { content: '⚠️'; flex: none; }
 .game-top .logo-wrap, .game-top > .logo { margin-right: 2px; }
+
+/* Emoji as standalone icons: in tiles, soft circles and boxes, never in titles. */
+.stat-icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; font-size: 1.05rem; background: var(--surface-sunken); margin-bottom: 6px; }
+.stat-value { white-space: nowrap; }
+.hero-card .stat-icon { background: rgba(255, 255, 255, 0.14); }
+.badge.emoji { font-size: 1rem; }

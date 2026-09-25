@@ -50,7 +50,8 @@ const THIN_LIQUIDITY = 10_000;
 const TIE_BAND = 2;
 // Championship teams shown before the rest fold away.
 const FUTURES_SHOWN = 8;
-// One colour per betting habit, for its badge.
+// One icon and colour per betting habit.
+const HABIT_ICON = { casual: '🎟️', fan: '📣', underdog: '🎯', dreamer: '🎰', chaser: '🔁', careful: '🧮' };
 const HABIT_COLOR = { casual: '#0ea5e9', fan: '#f59e0b', underdog: '#8b5cf6', dreamer: '#ec4899', chaser: '#ef4444', careful: '#10b981' };
 const DETAIL_KEY = 'oddsStudy.detail';
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
@@ -511,16 +512,16 @@ function renderStatic() {
   $('refresh').title = t('refresh');
   for (const option of $('sim-weeks').options) option.textContent = t(`period_${option.value}`);
   $('footer').textContent = t('footer');
-  for (const [id, key, icon] of [
-    ['ranking-title', 'rankingTitle', '🏅'],
-    ['games-title', 'gamesTitle', '📅'],
-    ['futures-title', 'futuresTitle', '🏆'],
-    ['parlay-title', 'parlayTitle', '🎫'],
-    ['sim-title', 'simTitle', '🎲'],
-    ['f1-title', 'f1Title', '🏁'],
-    ['math-title', 'mathTitle', '📘']
+  for (const [id, key] of [
+    ['ranking-title', 'rankingTitle'],
+    ['games-title', 'gamesTitle'],
+    ['futures-title', 'futuresTitle'],
+    ['parlay-title', 'parlayTitle'],
+    ['sim-title', 'simTitle'],
+    ['f1-title', 'f1Title'],
+    ['math-title', 'mathTitle']
   ])
-    $(id).textContent = `${icon} ${t(key)}`;
+    $(id).textContent = t(key);
   for (const node of document.querySelectorAll('[data-t]')) node.textContent = t(node.dataset.t);
   for (const tab of TABS) $(`tab-${tab}`).querySelector('.tab-label').textContent = t(`tab_${tab}`);
   renderLegend();
@@ -953,8 +954,9 @@ function slipLegs() {
 }
 
 // A number with its label; `detail` tiles show only with 詳細 on.
-function statTile(label, value, extraClass = '', range = null, detail = false) {
-  return el('div', { class: `stat ${detail ? 'detail-only' : ''}` }, [
+function statTile(label, value, extraClass = '', range = null, detail = false, icon = null) {
+  return el('div', { class: `stat ${detail ? 'detail-only' : ''} ${icon ? 'has-icon' : ''}` }, [
+    icon ? el('span', { class: 'stat-icon', 'aria-hidden': 'true', text: icon }) : null,
     el('p', { class: `stat-value ${extraClass}`, text: value }),
     el('p', { class: 'stat-label', text: label }),
     range ? el('p', { class: 'stat-range', text: state.t('rangeLabel', { range }) }) : null
@@ -984,12 +986,12 @@ function slipAnalysisView(a, legs, ranges) {
   cards.push(
     el('div', { class: 'card' }, [
       el('div', { class: 'kpis' }, [
-        statTile(t('slipCost'), money(a.cost)),
-        statTile(t('slipBest'), money(a.top.net), 'back-high'),
-        statTile(t('slipExpected'), money(a.expectedNet), a.backPer100 < 100 ? 'back-low' : 'back-high', ranges.expected),
-        statTile(t('slipAny'), fmtChance(a.paid), '', ranges.any, true),
-        statTile(t('slipProfit'), fmtChance(a.profit), a.profit < 0.5 ? 'back-low' : '', ranges.profit),
-        statTile(t('slipTakeTax'), fmtPct(1 - a.expectedNet / a.cost), 'back-low', ranges.take, true)
+        statTile(t('slipCost'), money(a.cost), '', null, false, '💵'),
+        statTile(t('slipBest'), money(a.top.net), 'back-high', null, false, '🏆'),
+        statTile(t('slipExpected'), money(a.expectedNet), a.backPer100 < 100 ? 'back-low' : 'back-high', ranges.expected, false, '⚖️'),
+        statTile(t('slipAny'), fmtChance(a.paid), '', ranges.any, true, '🎯'),
+        statTile(t('slipProfit'), fmtChance(a.profit), a.profit < 0.5 ? 'back-low' : '', ranges.profit, false, '📈'),
+        statTile(t('slipTakeTax'), fmtPct(1 - a.expectedNet / a.cost), 'back-low', ranges.take, true, '🏦')
       ]),
       el('details', { class: 'info detail-only' }, [el('summary', { text: t('slipRangeTitle') }), el('p', { text: t('slipRangeNote') })])
     ])
@@ -1000,7 +1002,7 @@ function slipAnalysisView(a, legs, ranges) {
   const seg = (cls, v) => el('span', { class: `split-seg ${cls}`, style: `flex:${Math.max(0, v)}` });
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `💰 ${t('anaSplitTitle')}` }),
+      el('h3', { class: 'card-title', text: `${t('anaSplitTitle')}` }),
       el('div', { class: 'split-bar', 'aria-hidden': 'true' }, [seg('split-back', back), seg('split-take', take), seg('split-tax', tax)]),
       el('div', { class: 'split-legend' }, [
         el('span', {}, [el('i', { class: 'split-back' }), document.createTextNode(`${t('anaBack')} ${money(back)}`)]),
@@ -1014,7 +1016,7 @@ function slipAnalysisView(a, legs, ranges) {
   const scale = Math.max(...a.byHits.map(r => r.chance));
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `📊 ${t('anaResultsTitle')}` }),
+      el('h3', { class: 'card-title', text: `${t('anaResultsTitle')}` }),
       el('ol', { class: 'run-bars' },
         [...a.byHits].reverse().map(r =>
           el('li', { class: r.profit ? 'row-profit' : '' }, [
@@ -1031,7 +1033,7 @@ function slipAnalysisView(a, legs, ranges) {
   // Each pick on its own.
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `🔍 ${t('anaLegsTitle')}` }),
+      el('h3', { class: 'card-title', text: `${t('anaLegsTitle')}` }),
       el('ul', { class: 'leg-analysis' },
         legs.map((b, i) => {
           const info = a.legs[i];
@@ -1057,12 +1059,12 @@ function slipAnalysisView(a, legs, ranges) {
   const everyYears = a.top.chance > 0 ? 1 / (a.top.chance * y.weeks) : Infinity;
   cards.push(
     el('div', { class: 'card' }, [
-      el('h3', { class: 'card-title', text: `📅 ${t('anaYearTitle', { n: y.weeks })}` }),
+      el('h3', { class: 'card-title', text: t('anaYearTitle', { n: y.weeks }) }),
       el('div', { class: 'kpis' }, [
-        statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high'),
-        statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) })),
-        statTile(t('anaYearExpected'), fmtMoney(y.expected), y.expected < 0 ? 'back-low' : 'back-high', null, true),
-        statTile(t('anaTopOdds'), t('anaOneIn', { n: fmtCount(1 / Math.max(a.top.chance, 1e-12)) }), '', everyYears > 1 ? t('anaTopWait', { y: everyYears < 10 ? everyYears.toFixed(1) : fmtCount(everyYears) }) : null)
+        statTile(t('anaYearAhead'), fmtChance(y.ahead), y.ahead < 0.5 ? 'back-low' : 'back-high', null, false, '🏁'),
+        statTile(t('anaYearMedian'), fmtMoney(y.q50), y.q50 < 0 ? 'back-low' : 'back-high', t('anaYearRange', { lo: fmtMoney(y.q10), hi: fmtMoney(y.q90) }), false, '🧍'),
+        statTile(t('anaYearExpected'), fmtMoney(y.expected), y.expected < 0 ? 'back-low' : 'back-high', null, true, '📉'),
+        statTile(t('anaTopOdds'), t('anaOneIn', { n: fmtCount(1 / Math.max(a.top.chance, 1e-12)) }), '', everyYears > 1 ? t('anaTopWait', { y: everyYears < 10 ? everyYears.toFixed(1) : fmtCount(everyYears) }) : null, false, '🎰')
       ]),
       y.neverPaid > 0.01 ? el('p', { class: 'note', text: t('anaNeverPaid', { p: fmtChance(y.neverPaid), n: y.weeks }) }) : null
     ])
@@ -1099,7 +1101,7 @@ function renderParlay() {
   // Left: the ticket itself. Right: what it can pay and what it costs on average.
   const ticket = [
     el('div', { class: 'ticket-head' }, [
-      el('strong', { text: `🎫 ${t('slipLegs', { n })}` }),
+      el('strong', { text: t('slipLegs', { n }) }),
       el('button', {
         class: 'ghost-button',
         type: 'button',
@@ -1255,7 +1257,7 @@ const MIN_WAGE_HOURLY = 196;
 const CHARACTERS = [
   { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)', icon: '🍀' },
   { key: 'median', name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)', icon: '🙂' },
-  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)', icon: '💀' }
+  { key: 'worst', name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad-strong)', icon: '🌧️' }
 ];
 
 function fmtShare(p) {
@@ -1381,10 +1383,10 @@ function drawSim(stats, weeks) {
   renderSimHeadline(totals, period);
   const back = totals.staked > 0 ? ((totals.staked + totals.net) / totals.staked) * 100 : 100;
   $('sim-stats').replaceChildren(
-    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : ''),
-    statTile(t('simBackPer100'), fmtMoney(back, { sign: false }), back < 100 ? 'back-low' : ''),
-    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, true),
-    statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '')
+    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : '', null, false, '🧍'),
+    statTile(t('simBackPer100'), fmtMoney(back, { sign: false }), back < 100 ? 'back-low' : '', null, false, '💸'),
+    statTile(t('simEverAhead'), fmtShare(totals.everAheadShare), '', null, true, '📈'),
+    statTile(t('simAhead'), fmtShare(totals.aheadShare), totals.aheadShare < 0.5 ? 'back-low' : '', null, false, '🏁')
   );
   $('sim-legend').replaceChildren(
     el('span', {}, [el('span', { class: 'legend-key band-outer' }), document.createTextNode(t('simBand80'))]),
@@ -1441,7 +1443,10 @@ function renderPlayers(characters) {
       else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
       const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
       return el('article', { class: 'player', style: `--player:${color}` }, [
-        el('div', { class: 'player-head' }, [el('p', { class: 'player-name', text: `${icon} ${t(name)}` }), el('p', { class: 'player-rank', text: t(rank) })]),
+        el('div', { class: 'player-head' }, [
+          el('span', { class: 'avatar', 'aria-hidden': 'true', text: icon }),
+          el('div', {}, [el('p', { class: 'player-name', text: t(name) }), el('p', { class: 'player-rank', text: t(rank) })])
+        ]),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
         el('p', { class: 'player-tale', text: tale }),
         el('div', { class: 'player-lines detail-only' }, [
@@ -1483,7 +1488,7 @@ function renderHabits(summaries) {
   $('sim-habits').replaceChildren(
     ...sorted.map(h =>
       barItem({
-        icon: badge(t(`habit_${h.habit.key}`).slice(0, 1), HABIT_COLOR[h.habit.key]),
+        icon: badge(HABIT_ICON[h.habit.key], HABIT_COLOR[h.habit.key], 'emoji'),
         name: t(`habit_${h.habit.key}`),
         desc: t(`habitDesc_${h.habit.key}`),
         back: h.back,
@@ -1503,7 +1508,7 @@ function renderFans(fans) {
   $('sim-fans').replaceChildren(
     ...sorted.map(f =>
       barItem({
-        icon: f.fan.key === 'all' ? badge('∑', 'var(--accent)') : leagueImg(f.fan.key, 'logo-sm'),
+        icon: f.fan.key === 'all' ? badge('🌐', 'var(--accent)', 'emoji') : leagueImg(f.fan.key, 'logo-sm'),
         name: t(`fan_${f.fan.key}`),
         desc: t(`fanDesc_${f.fan.key}`),
         back: f.back,
@@ -1556,13 +1561,14 @@ function renderStories(stats, period) {
   const bestIsBigWin = notable.best?.serial === notable.biggestWin?.serial && notable.best.final - notable.best.biggestWin < 0;
   add('🏆', 'storyBestTitle', bestIsBigWin ? 'storyBestSame' : 'storyBest', notable.best, notable.best && { final: fmtMoney(notable.best.final), staked: money(notable.best.staked), tickets: fmtCount(notable.best.tickets) });
   add('🎢', 'storyFallTitle', 'storyFall', notable.fall, notable.fall && { week: notable.fall.peakWeek + 1, peak: fmtMoney(notable.fall.peak), final: fmtMoney(notable.fall.final) });
-  add('🥶', 'storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
+  add('🧊', 'storyDroughtTitle', 'storyDrought', notable.drought, notable.drought && { streak: fmtCount(notable.drought.longestLosing), tickets: fmtCount(notable.drought.tickets), won: fmtCount(notable.drought.wonTickets) });
   add('💸', 'storyWorstTitle', 'storyWorst', notable.worst, notable.worst && { final: money(-notable.worst.final), staked: money(notable.worst.staked), max: money(notable.worst.maxStake), hours: hours(-notable.worst.final) });
   $('sim-stories').replaceChildren(
     // Three stories by default; the rest with 詳細 on.
     ...stories.map((s, i) =>
       el('li', { class: `story ${i >= 3 ? 'detail-only' : ''}` }, [
-        el('p', { class: 'story-serial' }, [el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }), document.createTextNode(s.serial)]),
+        el('span', { class: 'story-icon', 'aria-hidden': 'true', text: s.icon }),
+        el('p', { class: 'story-serial', text: s.serial }),
         el('p', { class: 'story-title', text: s.title }),
         el('p', { class: 'story-text', text: s.text })
       ])
