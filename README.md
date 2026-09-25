@@ -79,6 +79,7 @@ The choice is remembered.
 - **How often and how much:** calibrated on the closest published survey, the University of Hong Kong's 2021 government-commissioned gambling study. The median football bettor there bets once every two weeks and spends HK$201–500 a month; Taiwanese studies don't publish these figures.
   - In the simulation, habits range from about one ticket every three weeks (Careful) to one a week (Big fan). The average person buys about 2 tickets a month.
   - Most tickets are NT$100–500, now and then up to NT$3,000. Anything paying over NT$5,000 is taxed.
+  - Upset hunters and parlay dreamers let it ride: after a winning ticket, its whole profit (after tax) goes on top of the next ticket's stake, up to the lottery's NT$100,000 per-ticket limit.
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;

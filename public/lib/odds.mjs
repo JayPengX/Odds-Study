@@ -369,12 +369,14 @@ export function seededRandom(seed) {
 // chosen by `pick`. Most tickets are a few hundred NT$ (`stakes`); a `big`
 // share of them are NT$1,000-3,000. A chaser starts at `stakes[0]`, doubles
 // after a losing week up to `chaseCap`, and drops back after a winning one.
+// A `ride` player lets it ride: a winning ticket's profit (after tax) goes on
+// top of the next ticket's stake, up to the lottery's per-ticket limit.
 export const BIG_STAKES = [1000, 2000, 3000];
 export const HABITS = [
   { key: 'casual', perWeek: 0.5, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any' },
   { key: 'fan', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite' },
-  { key: 'underdog', perWeek: 0.5, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog' },
-  { key: 'dreamer', perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any' },
+  { key: 'underdog', perWeek: 0.5, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog', ride: true },
+  { key: 'dreamer', perWeek: 0.5, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any', ride: true },
   { key: 'chaser', perWeek: 0.75, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000 },
   { key: 'careful', perWeek: 0.35, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best' }
 ];
@@ -520,6 +522,8 @@ function freshState(habit) {
     taxPaid: 0,
     firstWon: null,
     chaseStake: habit.stakes[0],
+    // Winnings waiting to ride on the next ticket.
+    pot: 0,
     maxStake: 0,
     peak: 0,
     peakWeek: -1,
@@ -606,11 +610,15 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         if (result < c.lo[j] || result >= c.hi[j]) won = false;
       }
       if (legs === 0) continue;
-      const stake = habit.chaseCap
+      let stake = habit.chaseCap
         ? st.chaseStake
         : random() < habit.big
           ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
           : habit.stakes[Math.floor(random() * habit.stakes.length)];
+      if (st.pot > 0) {
+        stake = Math.min(SLIP_RULES.maxTicket, stake + Math.floor(st.pot / SLIP_RULES.unit) * SLIP_RULES.unit);
+        st.pot = 0;
+      }
       const gross = stake * odds;
       const result = won ? afterTax(gross) - stake : -stake;
       st.firstWon ??= won;
@@ -619,6 +627,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       week += result;
       if (stake > st.maxStake) st.maxStake = stake;
       if (won) {
+        if (habit.ride) st.pot = result;
         st.wonTickets++;
         st.losing = 0;
         if (++st.winning > st.longestWinning) st.longestWinning = st.winning;
