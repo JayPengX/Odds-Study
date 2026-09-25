@@ -137,14 +137,24 @@ function numberLocale() {
   return state.locale === 'zh' ? 'zh-TW' : 'en-US';
 }
 
+// Formatters are made once per language and kept: making one is slow
+// (Safari especially), and hundreds of bets are formatted on every tap.
+const formatters = new Map();
+function formatter(kind, make) {
+  const key = `${kind}|${numberLocale()}`;
+  if (!formatters.has(key)) formatters.set(key, make(numberLocale()));
+  return formatters.get(key);
+}
+const fmtInt = n => formatter('int', locale => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })).format(n);
+
 function fmtMoney(value, { sign = true } = {}) {
-  const abs = Math.abs(Math.round(value)).toLocaleString(numberLocale());
+  const abs = fmtInt(Math.abs(Math.round(value)));
   if (!sign) return `NT$${abs}`;
   return `${value < -0.5 ? '−' : value > 0.5 ? '+' : ''}NT$${abs}`;
 }
 
 function fmtAxis(value) {
-  const abs = Math.abs(Math.round(value)).toLocaleString(numberLocale());
+  const abs = fmtInt(Math.abs(Math.round(value)));
   return value < -0.5 ? `−${abs}` : abs;
 }
 
@@ -158,15 +168,17 @@ function fmtOdds(o) {
 
 // Taiwan time, like the lottery, wherever the page is opened.
 function fmtTime(iso) {
-  return new Intl.DateTimeFormat(numberLocale(), {
-    month: 'numeric',
-    day: 'numeric',
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone: 'Asia/Taipei'
-  }).format(new Date(iso));
+  return formatter('time', locale =>
+    new Intl.DateTimeFormat(locale, {
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: 'Asia/Taipei'
+    })
+  ).format(new Date(iso));
 }
 
 function teamName(team) {
@@ -470,7 +482,7 @@ function dayLabel(day) {
   if (day === today) return state.t('today');
   if (day === tomorrow) return state.t('tomorrow');
   const [y, m, d] = day.split('-').map(Number);
-  return new Intl.DateTimeFormat(numberLocale(), { weekday: 'short' }).format(new Date(y, m - 1, d));
+  return formatter('weekday', locale => new Intl.DateTimeFormat(locale, { weekday: 'short' })).format(new Date(y, m - 1, d));
 }
 
 // Days as a calendar strip: weekday, date, and what's on.
@@ -629,7 +641,7 @@ function renderRanking() {
   $('ranking').hidden = ranked.length === 0;
   if (ranked.length === 0) return;
   const best = betReturn(ranked[0]);
-  const context = bet => (bet.label.includes(bet.matchup) ? hhmm(bet.start) : `${bet.matchup} · ${hhmm(bet.start)}`);
+  const context = rankingContext;
   const medals = ['🥇', '🥈', '🥉'];
   $('ranking-podium').replaceChildren(
     ...ranked.slice(0, 3).map((bet, i) => {
@@ -656,7 +668,30 @@ function renderRanking() {
       ]);
     })
   );
-  const scaleMax = Math.max(100, best) * 1.04;
+  // The full list (hundreds of rows with MLB) is built only while it's open.
+  const more = document.querySelector('.ranking-more');
+  if (more.open) fillRankingList(ranked);
+  else $('ranking-list').replaceChildren();
+  $('ranking-more-label').textContent = t('rankingMore', { n: ranked.length });
+  // With estimated odds only, nearly every bet ties: say so rather than rank noise.
+  const tied = ranked.filter(b => best - betReturn(b) <= TIE_BAND).length;
+  const notes = [];
+  if (!ranked.some(hasRealOdds)) notes.push(t('rankingEstimateNote'));
+  else if (tied > 1) notes.push(`#1–#${tied}: ${t('tie')}`);
+  $('ranking-notes').replaceChildren(
+    ...notes.map(text => el('details', { class: 'info' }, [el('summary', { text: t(ranked.some(hasRealOdds) ? 'tieTitle' : 'rankingEstimateTitle') }), el('p', { text })]))
+  );
+}
+
+function rankingContext(bet) {
+  return bet.label.includes(bet.matchup) ? hhmm(bet.start) : `${bet.matchup} · ${hhmm(bet.start)}`;
+}
+
+function fillRankingList(ranked) {
+  const t = state.t;
+  if (!ranked.length) return $('ranking-list').replaceChildren();
+  const context = rankingContext;
+  const scaleMax = Math.max(100, betReturn(ranked[0])) * 1.04;
   $('ranking-list').replaceChildren(
     ...ranked.map((bet, i) => {
       const back = betReturn(bet);
@@ -676,16 +711,10 @@ function renderRanking() {
       ]);
     })
   );
-  $('ranking-more-label').textContent = t('rankingMore', { n: ranked.length });
-  // With estimated odds only, nearly every bet ties: say so rather than rank noise.
-  const tied = ranked.filter(b => best - betReturn(b) <= TIE_BAND).length;
-  const notes = [];
-  if (!ranked.some(hasRealOdds)) notes.push(t('rankingEstimateNote'));
-  else if (tied > 1) notes.push(`#1–#${tied}: ${t('tie')}`);
-  $('ranking-notes').replaceChildren(
-    ...notes.map(text => el('details', { class: 'info' }, [el('summary', { text: t(ranked.some(hasRealOdds) ? 'tieTitle' : 'rankingEstimateTitle') }), el('p', { text })]))
-  );
 }
+document.querySelector('.ranking-more').addEventListener('toggle', event => {
+  if (event.target.open && state.data) fillRankingList(rankedBets());
+});
 
 // ---- Games --------------------------------------------------------------------
 
@@ -703,7 +732,7 @@ function renderGames() {
 }
 
 function hhmm(iso) {
-  return new Intl.DateTimeFormat(numberLocale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Taipei' }).format(new Date(iso));
+  return formatter('hhmm', locale => new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Taipei' })).format(new Date(iso));
 }
 
 // A game: its teams with logos and win picks; every other market folds away.
@@ -1535,7 +1564,7 @@ function fmtShare(p) {
 }
 
 function fmtCount(n) {
-  return Math.round(n).toLocaleString(numberLocale());
+  return fmtInt(Math.round(n));
 }
 
 // ---- Crowd simulation: worker, cache and loading screen ----------------------
