@@ -179,15 +179,17 @@ button { font: inherit; cursor: pointer; }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 4px; }
 .legend-key { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 6px; border-radius: 1px; }
 .legend-key.thick { height: 3px; }
-.legend-key.dashed { background: none; border-top: 2px dashed var(--text-secondary); height: 0; }
+.legend-key.band-outer { height: 10px; background: var(--series-1); opacity: 0.18; }
+.legend-key.band-inner { height: 10px; background: var(--series-1); opacity: 0.36; }
 .chart { position: relative; width: 100%; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart .grid-line { stroke: var(--grid); stroke-width: 1; }
 .chart .zero-line { stroke: var(--axis); stroke-width: 1; }
 .chart .tick { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.chart .run { fill: none; stroke: var(--text-muted); stroke-opacity: 0.3; stroke-width: 1; stroke-linejoin: round; }
+.chart .band-outer { fill: var(--series-1); fill-opacity: 0.1; stroke: none; }
+.chart .band-inner { fill: var(--series-1); fill-opacity: 0.2; stroke: none; }
+.chart .median { fill: none; stroke: var(--text-secondary); stroke-width: 1.75; stroke-linejoin: round; }
 .chart .run-hero { fill: none; stroke-width: 2.25; stroke-linejoin: round; }
-.chart .expected { fill: none; stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .chart .end-label { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .chart .crosshair { stroke: var(--text-secondary); stroke-width: 1; }
 .chart .hit { fill: transparent; cursor: crosshair; }
@@ -241,6 +243,7 @@ footer { margin-top: 24px; }
   font-size: 0.85rem;
 }
 .player-name { margin: 0; font-weight: 600; color: var(--player); }
+.player-rank { margin: 0; font-size: 0.75rem; color: var(--text-muted); }
 .player-final { margin: 0; font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .player-tale { margin: 2px 0 8px; color: var(--text-secondary); min-height: 2.8em; }
 .player-line { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--grid); padding: 4px 0; }

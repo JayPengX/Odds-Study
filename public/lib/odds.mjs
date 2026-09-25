@@ -112,16 +112,18 @@ export function seededRandom(seed) {
 
 // Betting habits for the season simulator. Each week a player buys a random
 // number of tickets (Poisson around `perWeek`, so some weeks none), each with
-// `legs` legs from different games (most lottery MLB games need 2+), a stake
-// drawn from `stakes`, and legs chosen by `pick`. A chaser doubles the stake
-// after a losing week, up to `chaseCap`, and drops back after a winning one.
+// `legs` legs from different games (most lottery MLB games need 2+) and legs
+// chosen by `pick`. Most tickets are a few hundred NT$ (`stakes`); a `big`
+// share of them are NT$1,000-3,000. A chaser starts at `stakes[0]`, doubles
+// after a losing week up to `chaseCap`, and drops back after a winning one.
+export const BIG_STAKES = [1000, 2000, 3000];
 export const HABITS = [
-  { key: 'casual', perWeek: 1, legs: [2, 2], stakes: [100, 100, 200], pick: 'any' },
-  { key: 'fan', perWeek: 3, legs: [2, 2], stakes: [200, 300, 500], pick: 'favorite' },
-  { key: 'underdog', perWeek: 2, legs: [2, 3], stakes: [100, 200], pick: 'underdog' },
-  { key: 'dreamer', perWeek: 2, legs: [4, 6], stakes: [100], pick: 'any' },
-  { key: 'chaser', perWeek: 2, legs: [2, 2], stakes: [100], pick: 'any', chaseCap: 3200 },
-  { key: 'careful', perWeek: 1, legs: [2, 2], stakes: [100, 200], pick: 'best' }
+  { key: 'casual', perWeek: 1, legs: [2, 2], stakes: [100, 200, 300], big: 0.05, pick: 'any' },
+  { key: 'fan', perWeek: 3, legs: [2, 2], stakes: [200, 300, 500], big: 0.1, pick: 'favorite' },
+  { key: 'underdog', perWeek: 2, legs: [2, 3], stakes: [100, 200, 300], big: 0.05, pick: 'underdog' },
+  { key: 'dreamer', perWeek: 2, legs: [4, 6], stakes: [100, 200], big: 0.02, pick: 'any' },
+  { key: 'chaser', perWeek: 2, legs: [2, 2], stakes: [200], big: 0, pick: 'any', chaseCap: 3000 },
+  { key: 'careful', perWeek: 1, legs: [2, 2], stakes: [200, 300, 500], big: 0.05, pick: 'best' }
 ];
 
 // Splits a pool of bets ({gameId, fairChance, odds}) into the lists each
@@ -190,7 +192,7 @@ export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
       const [lo, hi] = habit.legs;
       const legs = pickLegs(list, lo + Math.floor(random() * (hi - lo + 1)), random);
       if (legs.length === 0) continue;
-      const stake = habit.chaseCap ? chaseStake : pickOne(habit.stakes, random);
+      const stake = habit.chaseCap ? chaseStake : random() < habit.big ? pickOne(BIG_STAKES, random) : pickOne(habit.stakes, random);
       let won = true;
       let odds = 1;
       for (const leg of legs) {
@@ -220,28 +222,34 @@ export function simulateHabit({ habit, pools, weeks, random = Math.random }) {
   return { path, final: profit, tickets, wonTickets, staked, biggestWin, longestLosing, maxStake, peak, peakWeek, everAhead: peak > 0, maxDrop };
 }
 
-// Many players with one habit: average amount back per NT$100 staked, share
-// still ahead at the end, and the average running profit week by week.
-export function summarizeHabit({ habit, pools, weeks, players = 300, random = Math.random }) {
-  const meanPath = new Array(weeks).fill(0);
-  let staked = 0;
-  let net = 0;
-  let ahead = 0;
-  let tickets = 0;
-  for (let p = 0; p < players; p++) {
-    const run = simulateHabit({ habit, pools, weeks, random });
-    for (let w = 0; w < weeks; w++) meanPath[w] += run.path[w] / players;
-    staked += run.staked;
-    net += run.final;
-    tickets += run.tickets;
-    if (run.final > 0) ahead++;
-  }
-  return {
-    back: staked > 0 ? ((staked + net) / staked) * 100 : 100,
-    aheadShare: ahead / players,
-    avgFinal: net / players,
-    avgStaked: staked / players,
-    avgTickets: tickets / players,
-    meanPath
-  };
+// A crowd of `perHabit` players for every habit, all from one random stream.
+export function simulateCrowd({ pools, weeks, perHabit = 500, random = Math.random }) {
+  const players = [];
+  for (const habit of HABITS) for (let i = 0; i < perHabit; i++) players.push({ habit, ...simulateHabit({ habit, pools, weeks, random }) });
+  return players;
+}
+
+// Per habit: average amount back per NT$100 staked, share still ahead at the
+// end, and the average total staked and result.
+export function summarizeCrowd(players) {
+  return HABITS.map(habit => {
+    const group = players.filter(p => p.habit === habit);
+    const staked = group.reduce((s, p) => s + p.staked, 0);
+    const net = group.reduce((s, p) => s + p.final, 0);
+    return {
+      habit,
+      back: staked > 0 ? ((staked + net) / staked) * 100 : 100,
+      aheadShare: group.filter(p => p.final > 0).length / group.length,
+      avgFinal: net / group.length,
+      avgStaked: staked / group.length,
+      avgTickets: group.reduce((s, p) => s + p.tickets, 0) / group.length
+    };
+  });
+}
+
+// Value at quantile q (0-1) of an ascending sorted array.
+export function quantile(sorted, q) {
+  const i = (sorted.length - 1) * q;
+  const lo = Math.floor(i);
+  return sorted[lo] + (sorted[Math.ceil(i)] - sorted[lo]) * (i - lo);
 }

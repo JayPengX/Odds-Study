@@ -7,18 +7,20 @@ import {
   estimateLotteryOdds,
   expectedReturn,
   habitPools,
+  quantile,
   seededRandom,
-  simulateHabit,
-  summarizeHabit
+  simulateCrowd,
+  summarizeCrowd
 } from './lib/odds.mjs';
 import { loadOdds } from './lib/sources.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 
 const STAKE = 100;
-// Four players per habit.
-const SIM_PLAYERS = HABITS.length * 4;
-// Players per habit for the habit comparison.
-const SUMMARY_PLAYERS = 300;
+// Simulated players per habit. Big enough that the results barely move
+// between runs, so one fixed-seed run is shown.
+const PER_HABIT = 500;
+const SIM_PLAYERS = HABITS.length * PER_HABIT;
+const SIM_SEED = 1;
 const THIN_LIQUIDITY = 10_000;
 const TIE_BAND = 2;
 const RANKING_SIZE = 8;
@@ -32,7 +34,6 @@ const state = {
   bets: [],
   userOdds: loadUserOdds(),
   parlay: [],
-  simSeed: 1,
   day: null,
   sport: 'all'
 };
@@ -275,7 +276,6 @@ function renderStatic() {
   $('notice').textContent = t('notice');
   $('lang-toggle').textContent = t('langToggle');
   $('refresh').textContent = t('refresh');
-  $('sim-rerun').textContent = t('simRerun');
   for (const option of $('sim-weeks').options) option.textContent = t(`period_${option.value}`);
   $('footer').textContent = t('footer');
   for (const [id, key] of [
@@ -543,10 +543,11 @@ function niceStep(range, target) {
 
 // Taiwan's 2026 minimum hourly wage.
 const MIN_WAGE_HOURLY = 196;
+// Each character is the real simulated player at that point of the ranking.
 const CHARACTERS = [
-  { key: 'best', name: 'simLucky', color: 'var(--good)' },
-  { key: 'median', name: 'simTypical', color: 'var(--series-1)' },
-  { key: 'worst', name: 'simUnlucky', color: 'var(--bad)' }
+  { q: 0.9, name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)' },
+  { q: 0.5, name: 'simTypical', rank: 'simTypicalRank', color: 'var(--series-1)' },
+  { q: 0.1, name: 'simUnlucky', rank: 'simUnluckyRank', color: 'var(--bad)' }
 ];
 
 function fmtShare(p) {
@@ -559,20 +560,36 @@ function fmtCount(n) {
   return Math.round(n).toLocaleString(numberLocale());
 }
 
-// The habit comparison is the slow part, so it's kept until the pool, the
-// period or the seed changes (a resize only redraws).
-let summaryCache = { key: null, value: null };
+// The crowd is the slow part, so it's kept until the pool or the period
+// changes (a resize or a language switch only redraws).
+let crowdCache = { key: null, value: null };
 
-function habitSummaries(pools, weeks) {
-  const key = JSON.stringify([weeks, state.simSeed, pools.any.map(b => [b.gameId, b.fairChance, b.odds])]);
-  if (summaryCache.key !== key) {
-    const random = seededRandom(state.simSeed * 7919);
-    summaryCache = {
-      key,
-      value: HABITS.map(habit => ({ habit, ...summarizeHabit({ habit, pools, weeks, players: SUMMARY_PLAYERS, random }) }))
+function simulate(pool, weeks) {
+  const pools = habitPools(pool);
+  const key = JSON.stringify([weeks, pools.any.map(b => [b.gameId, b.fairChance, b.odds])]);
+  if (crowdCache.key === key) return crowdCache.value;
+  const players = simulateCrowd({ pools, weeks, perHabit: PER_HABIT, random: seededRandom(SIM_SEED) });
+  const byFinal = [...players].sort((a, b) => a.final - b.final);
+  // The crowd's spread, week by week: 10th, 25th, 50th, 75th, 90th percentile.
+  const bands = Array.from({ length: weeks }, (_, w) => {
+    const values = players.map(p => p.path[w]).sort((a, b) => a - b);
+    return {
+      q10: quantile(values, 0.1),
+      q25: quantile(values, 0.25),
+      q50: quantile(values, 0.5),
+      q75: quantile(values, 0.75),
+      q90: quantile(values, 0.9),
+      ahead: values.filter(v => v > 0).length
     };
-  }
-  return summaryCache.value;
+  });
+  const value = {
+    players,
+    bands,
+    summaries: summarizeCrowd(players),
+    characters: CHARACTERS.map(c => ({ ...c, player: byFinal[Math.round((byFinal.length - 1) * c.q)] }))
+  };
+  crowdCache = { key, value };
+  return value;
 }
 
 function renderSim() {
@@ -587,49 +604,39 @@ function renderSim() {
   }
   const weeks = Number($('sim-weeks').value);
   const period = t(`period_${weeks}`);
-  const pools = habitPools(pool);
-  const random = seededRandom(state.simSeed);
-  const players = Array.from({ length: SIM_PLAYERS }, (_, i) => {
-    const habit = HABITS[i % HABITS.length];
-    return { habit, ...simulateHabit({ habit, pools, weeks, random }) };
-  });
-  const summaries = habitSummaries(pools, weeks);
-  // The average player: every habit weighted equally, as in the crowd.
-  const expectedAt = w => summaries.reduce((s, h) => s + h.meanPath[w], 0) / summaries.length;
-  const order = players.map((_, i) => i).sort((a, b) => players[a].final - players[b].final);
-  const picked = { worst: order[0], median: order[SIM_PLAYERS >> 1], best: order.at(-1) };
-  const characters = CHARACTERS.map(c => ({ ...c, index: picked[c.key], player: players[picked[c.key]] }));
-  const endedAhead = players.filter(p => p.final > 0).length;
-  const everAhead = players.filter(p => p.everAhead).length;
+  const { players, bands, summaries, characters } = simulate(pool, weeks);
+  const endedAhead = players.filter(p => p.final > 0).length / SIM_PLAYERS;
+  const everAhead = players.filter(p => p.everAhead).length / SIM_PLAYERS;
 
-  renderSimHeadline(summaries, period);
+  renderSimHeadline(players, period);
   $('sim-stats').replaceChildren(
-    statTile(t('simBiggestWin'), fmtMoney(Math.max(0, ...players.map(p => p.biggestWin)), { sign: false }), 'back-high'),
-    statTile(t('simEverAhead'), `${everAhead} / ${SIM_PLAYERS}`),
-    statTile(t('simAhead'), `${endedAhead} / ${SIM_PLAYERS}`, endedAhead === 0 ? 'back-low' : '')
+    statTile(t('simMedian'), fmtMoney(bands.at(-1).q50), bands.at(-1).q50 < 0 ? 'back-low' : ''),
+    statTile(t('simEverAhead'), fmtShare(everAhead)),
+    statTile(t('simAhead'), fmtShare(endedAhead), endedAhead < 0.5 ? 'back-low' : '')
   );
   $('sim-legend').replaceChildren(
-    el('span', {}, [el('span', { class: 'legend-key', style: 'background:var(--text-muted);opacity:.5' }), document.createTextNode(t('simOthers', { n: SIM_PLAYERS - 3 }))]),
-    ...characters.map(c => el('span', {}, [el('span', { class: 'legend-key thick', style: `background:${c.color}` }), document.createTextNode(t(c.name))])),
-    el('span', {}, [el('span', { class: 'legend-key dashed' }), document.createTextNode(t('simExpected'))])
+    el('span', {}, [el('span', { class: 'legend-key band-outer' }), document.createTextNode(t('simBand80'))]),
+    el('span', {}, [el('span', { class: 'legend-key band-inner' }), document.createTextNode(t('simBand50'))]),
+    el('span', {}, [el('span', { class: 'legend-key thick', style: 'background:var(--text-secondary)' }), document.createTextNode(t('simMedianLine'))]),
+    ...characters.map(c => el('span', {}, [el('span', { class: 'legend-key thick', style: `background:${c.color}` }), document.createTextNode(t(c.name))]))
   );
-  drawSimChart(chart, players, characters, expectedAt, weeks);
+  drawSimChart(chart, bands, characters, weeks);
   renderPlayers(characters);
   renderHabits(summaries, period);
-  renderFacts(players, characters, summaries, { weeks, period, endedAhead, everAhead });
-  renderSimTable(players, characters, expectedAt, weeks);
+  renderFacts(players, characters, summaries, { period, endedAhead, everAhead });
+  renderSimTable(bands, characters, weeks);
 }
 
-function renderSimHeadline(summaries, period) {
+function renderSimHeadline(players, period) {
   const t = state.t;
-  const share = summaries.reduce((s, h) => s + h.aheadShare, 0) / summaries.length;
-  const staked = summaries.reduce((s, h) => s + h.avgStaked, 0) / summaries.length;
-  const final = summaries.reduce((s, h) => s + h.avgFinal, 0) / summaries.length;
-  const tickets = summaries.reduce((s, h) => s + h.avgTickets, 0) / summaries.length;
+  const share = players.filter(p => p.final > 0).length / players.length;
+  const staked = players.reduce((s, p) => s + p.staked, 0);
+  const net = players.reduce((s, p) => s + p.final, 0);
+  const tickets = players.reduce((s, p) => s + p.tickets, 0) / players.length;
   const inTen = Math.round(share * 10);
-  const back = staked > 0 ? ((staked + final) / staked) * 100 : 100;
+  const back = staked > 0 ? ((staked + net) / staked) * 100 : 100;
   $('sim-headline').replaceChildren(
-    el('p', { class: 'headline-label', text: t('simHeadlineLabel', { period }) }),
+    el('p', { class: 'headline-label', text: t('simHeadlineLabel', { period, n: fmtCount(SIM_PLAYERS) }) }),
     el('p', { class: 'headline-big' }, [
       document.createTextNode(t('simHeadlinePre')),
       el('strong', { class: share >= 0.5 ? 'good' : '', text: inTen === 0 ? t('simHeadlineNone') : t('simHeadlineShare', { n: inTen }) }),
@@ -637,7 +644,7 @@ function renderSimHeadline(summaries, period) {
     ]),
     el('p', {
       class: 'headline-sub',
-      text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked, { sign: false }), back: fmtMoney(back, { sign: false }) })
+      text: t('simHeadlineSub', { tickets: fmtCount(tickets), staked: fmtMoney(staked / players.length, { sign: false }), back: fmtMoney(back, { sign: false }) })
     })
   );
 }
@@ -645,7 +652,7 @@ function renderSimHeadline(summaries, period) {
 function renderPlayers(characters) {
   const t = state.t;
   $('sim-players').replaceChildren(
-    ...characters.map(({ name, color, player: p }) => {
+    ...characters.map(({ name, rank, color, player: p }) => {
       let tale;
       if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
       else if (!p.everAhead) tale = t('taleNever');
@@ -653,10 +660,12 @@ function renderPlayers(characters) {
       const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
       return el('article', { class: 'player', style: `--player:${color}` }, [
         el('p', { class: 'player-name' }, [document.createTextNode(t(name)), el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })]),
+        el('p', { class: 'player-rank', text: t(rank) }),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
         el('p', { class: 'player-tale', text: tale }),
         line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
         line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
+        line(t('playerMaxStake'), fmtMoney(p.maxStake, { sign: false })),
         line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
         line(t('playerPeak'), p.everAhead ? `${fmtMoney(p.peak)} · ${t('simWeekN', { n: fmtCount(p.peakWeek + 1) })}` : t('playerNeverAhead')),
         line(t('playerStreak'), t('inARow', { n: p.longestLosing })),
@@ -668,7 +677,7 @@ function renderPlayers(characters) {
 
 function renderHabits(summaries, period) {
   const t = state.t;
-  $('habits-intro').textContent = t('habitsIntro', { n: SUMMARY_PLAYERS, period });
+  $('habits-intro').textContent = t('habitsIntro', { n: fmtCount(PER_HABIT), period });
   const sorted = [...summaries].sort((a, b) => b.back - a.back);
   const scaleMax = Math.max(100, sorted[0].back) * 1.04;
   $('sim-habits').replaceChildren(
@@ -697,26 +706,25 @@ function renderFacts(players, characters, summaries, { period, endedAhead, everA
   const facts = [];
   const by = key => summaries.find(h => h.habit.key === key);
   facts.push(t('factParlay', { two: fmtMoney(by('casual').back, { sign: false }), many: fmtMoney(by('dreamer').back, { sign: false }) }));
-  if (everAhead > endedAhead) facts.push(t(endedAhead ? 'factEverAhead' : 'factEverAheadNone', { ever: everAhead, ended: endedAhead, total: SIM_PLAYERS }));
-  const chaser = players.filter(p => p.habit.key === 'chaser').sort((a, b) => b.maxStake - a.maxStake)[0];
-  if (chaser && chaser.maxStake > chaser.habit.stakes[0]) {
-    facts.push(t('factChaser', { max: fmtMoney(chaser.maxStake, { sign: false }), staked: fmtMoney(chaser.staked, { sign: false }), final: fmtMoney(chaser.final) }));
-  }
+  if (everAhead > endedAhead) facts.push(t('factEverAhead', { ever: fmtShare(everAhead), ended: fmtShare(endedAhead) }));
+  const chasers = players.filter(p => p.habit.key === 'chaser');
+  const cap = chasers[0].habit.chaseCap;
+  const hitCap = chasers.filter(p => p.maxStake >= cap).length / chasers.length;
+  if (hitCap > 0) facts.push(t('factChaser', { share: fmtShare(hitCap), cap: fmtMoney(cap, { sign: false }), staked: fmtMoney(by('chaser').avgStaked, { sign: false }), final: fmtMoney(by('chaser').avgFinal) }));
   const lucky = characters[0].player;
   if (lucky.biggestWin > 0) facts.push(t('factLucky', { win: fmtMoney(lucky.biggestWin, { sign: false }), streak: lucky.longestLosing }));
-  const avgLoss = -summaries.reduce((s, h) => s + h.avgFinal, 0) / summaries.length;
+  const avgLoss = -players.reduce((s, p) => s + p.final, 0) / players.length;
   if (avgLoss > 0) {
     facts.push(t('factWage', { period, loss: fmtMoney(avgLoss, { sign: false }), hours: (avgLoss / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: avgLoss < 10 * MIN_WAGE_HOURLY ? 1 : 0 }), wage: MIN_WAGE_HOURLY }));
   }
   const net = players.reduce((s, p) => s + p.final, 0);
   const staked = players.reduce((s, p) => s + p.staked, 0);
-  facts.push(t(net < 0 ? 'factHouse' : 'factHouseWon', { total: SIM_PLAYERS, staked: fmtMoney(staked, { sign: false }), net: fmtMoney(Math.abs(net), { sign: false }) }));
+  facts.push(t(net < 0 ? 'factHouse' : 'factHouseWon', { total: fmtCount(SIM_PLAYERS), staked: fmtMoney(staked, { sign: false }), net: fmtMoney(Math.abs(net), { sign: false }), kept: fmtMoney((-net / staked) * 100, { sign: false }) }));
   $('sim-facts').replaceChildren(...facts.map(f => el('li', { text: f })));
 }
 
-function drawSimChart(container, players, characters, expectedAt, weeks) {
+function drawSimChart(container, bands, characters, weeks) {
   const t = state.t;
-  const runs = players.map(p => p.path);
   const width = Math.max(300, container.clientWidth || 600);
   const wide = width >= 560;
   const height = width < 520 ? 260 : 320;
@@ -725,15 +733,15 @@ function drawSimChart(container, players, characters, expectedAt, weeks) {
   const h = height - m.top - m.bottom;
   let lo = 0;
   let hi = 0;
-  for (const r of runs) for (const v of r) (v < lo && (lo = v), v > hi && (hi = v));
-  for (let i = 0; i < weeks; i++) (lo = Math.min(lo, expectedAt(i)), hi = Math.max(hi, expectedAt(i)));
+  for (const b of bands) (lo = Math.min(lo, b.q10), hi = Math.max(hi, b.q90));
+  for (const c of characters) for (const v of c.player.path) (lo = Math.min(lo, v), hi = Math.max(hi, v));
   const step = niceStep(hi - lo || 1, 5);
   lo = Math.floor(lo / step) * step;
   hi = Math.ceil(hi / step) * step;
   const x = i => m.left + ((i + 1) / weeks) * w;
   const y = v => m.top + ((hi - v) / (hi - lo)) * h;
 
-  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': t('chartLabel', { n: SIM_PLAYERS }) });
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': t('chartLabel', { n: fmtCount(SIM_PLAYERS) }) });
   for (let v = lo; v <= hi + step / 2; v += step) {
     svg.append(svgEl('line', { class: Math.abs(v) < step / 2 ? 'zero-line' : 'grid-line', x1: m.left, x2: m.left + w, y1: y(v), y2: y(v) }));
     const label = svgEl('text', { class: 'tick', x: m.left - 6, y: y(v) + 4, 'text-anchor': 'end' });
@@ -746,22 +754,28 @@ function drawSimChart(container, players, characters, expectedAt, weeks) {
     label.textContent = k === 0 ? t('simStart') : t('simWeekShort', { n: fmtCount(k) });
     svg.append(label);
   }
-  const pathOf = run => {
+  const pathOf = values => {
     let d = `M${m.left},${y(0)}`;
-    for (let i = 0; i < weeks; i++) d += `L${x(i).toFixed(1)},${y(run[i]).toFixed(1)}`;
+    for (let i = 0; i < weeks; i++) d += `L${x(i).toFixed(1)},${y(values[i]).toFixed(1)}`;
     return d;
   };
-  const highlighted = new Set(characters.map(c => c.index));
-  runs.forEach((run, i) => highlighted.has(i) || svg.append(svgEl('path', { class: 'run', d: pathOf(run) })));
-  const expected = Array.from({ length: weeks }, (_, i) => expectedAt(i));
-  svg.append(svgEl('path', { class: 'expected', d: pathOf(expected) }));
-  for (const c of [...characters].reverse()) svg.append(svgEl('path', { class: 'run-hero', style: `stroke:${c.color}`, d: pathOf(runs[c.index]) }));
+  const areaOf = (low, high) => {
+    let d = `M${m.left},${y(0)}`;
+    for (let i = 0; i < weeks; i++) d += `L${x(i).toFixed(1)},${y(bands[i][high]).toFixed(1)}`;
+    for (let i = weeks - 1; i >= 0; i--) d += `L${x(i).toFixed(1)},${y(bands[i][low]).toFixed(1)}`;
+    return `${d}Z`;
+  };
+  svg.append(svgEl('path', { class: 'band-outer', d: areaOf('q10', 'q90') }));
+  svg.append(svgEl('path', { class: 'band-inner', d: areaOf('q25', 'q75') }));
+  const median = bands.map(b => b.q50);
+  svg.append(svgEl('path', { class: 'median', d: pathOf(median) }));
+  for (const c of [...characters].reverse()) svg.append(svgEl('path', { class: 'run-hero', style: `stroke:${c.color}`, d: pathOf(c.player.path) }));
 
   if (wide) {
     // Right-edge labels, nudged apart so they never overlap.
     const labels = [
       ...characters.map(c => ({ text: `${t(c.name)} ${fmtMoney(c.player.final)}`, value: c.player.final, color: c.color })),
-      { text: `${t('simExpected')} ${fmtMoney(expected.at(-1))}`, value: expected.at(-1), color: 'var(--text-secondary)' }
+      { text: `${t('simMedianLine')} ${fmtMoney(median.at(-1))}`, value: median.at(-1), color: 'var(--text-secondary)' }
     ]
       .map(l => ({ ...l, y: y(l.value) }))
       .sort((a, b) => a.y - b.y);
@@ -776,7 +790,7 @@ function drawSimChart(container, players, characters, expectedAt, weeks) {
   }
 
   const crosshair = svgEl('line', { class: 'crosshair', y1: m.top, y2: m.top + h, visibility: 'hidden' });
-  const hit = svgEl('rect', { class: 'hit', x: m.left, y: m.top, width: w, height: h, tabindex: '0', 'aria-label': t('chartLabel', { n: SIM_PLAYERS }) });
+  const hit = svgEl('rect', { class: 'hit', x: m.left, y: m.top, width: w, height: h, tabindex: '0', 'aria-label': t('chartLabel', { n: fmtCount(SIM_PLAYERS) }) });
   svg.append(crosshair, hit);
   const tooltip = el('div', { class: 'tooltip', hidden: '' });
   container.replaceChildren(svg, tooltip);
@@ -793,12 +807,13 @@ function drawSimChart(container, players, characters, expectedAt, weeks) {
         el('span', {}, [color ? el('span', { class: 'legend-key thick', style: `background:${color}` }) : null, document.createTextNode(key)]),
         el('strong', { text: value })
       ]);
-    const ahead = runs.filter(r => r[current] > 0).length;
+    const b = bands[current];
     tooltip.replaceChildren(
       el('p', { class: 'tooltip-title', text: t('simWeekN', { n: fmtCount(current + 1) }) }),
-      ...characters.map(c => row(t(c.name), fmtMoney(runs[c.index][current]), c.color)),
-      row(t('simExpected'), fmtMoney(expected[current]), 'var(--text-secondary)'),
-      row(t('simAheadNow'), `${ahead} / ${SIM_PLAYERS}`)
+      ...characters.map(c => row(t(c.name), fmtMoney(c.player.path[current]), c.color)),
+      row(t('simMedianLine'), fmtMoney(b.q50), 'var(--text-secondary)'),
+      row(t('simBand80'), `${fmtAxis(b.q10)} ~ ${fmtAxis(b.q90)}`),
+      row(t('simAheadNow'), fmtShare(b.ahead / SIM_PLAYERS))
     );
     tooltip.hidden = false;
     const scale = container.clientWidth / width;
@@ -828,7 +843,7 @@ function drawSimChart(container, players, characters, expectedAt, weeks) {
   });
 }
 
-function renderSimTable(players, characters, expectedAt, weeks) {
+function renderSimTable(bands, characters, weeks) {
   const t = state.t;
   const rows = [];
   const points = [...new Set(Array.from({ length: 10 }, (_, k) => Math.max(0, Math.round(((k + 1) / 10) * weeks) - 1)))];
@@ -836,15 +851,15 @@ function renderSimTable(players, characters, expectedAt, weeks) {
     rows.push(
       el('tr', {}, [
         el('td', { text: fmtCount(i + 1) }),
-        el('td', { text: fmtMoney(expectedAt(i)) }),
+        el('td', { text: fmtMoney(bands[i].q50) }),
         ...characters.map(c => el('td', { text: fmtMoney(c.player.path[i]) })),
-        el('td', { text: `${players.filter(p => p.path[i] > 0).length} / ${SIM_PLAYERS}` })
+        el('td', { text: fmtShare(bands[i].ahead / SIM_PLAYERS) })
       ])
     );
   }
   $('sim-table').replaceChildren(
     el('table', {}, [
-      el('thead', {}, el('tr', {}, [t('simTableWeek'), t('simExpected'), ...characters.map(c => t(c.name)), t('simAheadNow')].map(h => el('th', { text: h })))),
+      el('thead', {}, el('tr', {}, [t('simTableWeek'), t('simMedianLine'), ...characters.map(c => t(c.name)), t('simAheadNow')].map(h => el('th', { text: h })))),
       el('tbody', {}, rows)
     ])
   );
@@ -909,10 +924,6 @@ $('lang-toggle').addEventListener('click', () => {
 });
 $('refresh').addEventListener('click', load);
 $('sim-weeks').addEventListener('change', renderSim);
-$('sim-rerun').addEventListener('click', () => {
-  state.simSeed += 1;
-  renderSim();
-});
 // Redraw only when the width changes: phones fire resize when the address bar
 // slides away, and that shouldn't reset the chart.
 let resizeTimer;

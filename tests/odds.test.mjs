@@ -14,7 +14,9 @@ import {
   HABITS,
   habitPools,
   simulateHabit,
-  summarizeHabit,
+  simulateCrowd,
+  summarizeCrowd,
+  quantile,
   seededRandom,
   K_BOTH,
   K_POLYMARKET
@@ -115,22 +117,32 @@ test('a season is reproducible and its path adds up', () => {
   const a = run();
   assert.equal(a.path.length, 52);
   assert.equal(a.final, a.path.at(-1));
-  assert.ok(a.wonTickets <= a.tickets && a.staked >= a.tickets * 100);
+  assert.ok(a.wonTickets <= a.tickets && a.staked >= a.tickets * 100 && a.maxStake <= 3000);
   assert.equal(a.everAhead, a.peak > 0);
 });
 
 test('the chaser doubles after a losing week and stays under the cap', () => {
   const pools = habitPools(examplePool());
   const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2) });
-  assert.ok(run.maxStake > 100 && run.maxStake <= 3200);
-  assert.ok([100, 200, 400, 800, 1600, 3200].includes(run.maxStake));
+  assert.ok(run.maxStake > 200 && run.maxStake <= 3000);
+  assert.ok([400, 800, 1600, 3000].includes(run.maxStake));
 });
 
-test('each extra parlay leg takes the cut again', () => {
+test('each extra parlay leg takes the cut again, and a big crowd is stable', () => {
   const pools = habitPools(examplePool());
-  const back = key => summarizeHabit({ habit: habit(key), pools, weeks: 52, players: 400, random: seededRandom(1) }).back;
+  const crowd = seed => summarizeCrowd(simulateCrowd({ pools, weeks: 52, perHabit: 500, random: seededRandom(seed) }));
+  const a = crowd(1);
+  const back = key => a.find(h => h.habit.key === key).back;
   // 2 legs: (1 / 1.15)^2 = 75.6; 4-6 legs: about 50.
   close(back('casual'), 75.6, 5);
-  const dreamer = back('dreamer');
-  assert.ok(dreamer > 40 && dreamer < 62, `${dreamer}`);
+  assert.ok(back('dreamer') > 40 && back('dreamer') < 62, `${back('dreamer')}`);
+  // Another seed moves each habit's amount back by only a few NT$.
+  const b = crowd(2);
+  for (let i = 0; i < a.length; i++) close(a[i].back, b[i].back, 6);
+});
+
+test('quantile interpolates a sorted list', () => {
+  assert.equal(quantile([1, 2, 3, 4, 5], 0.5), 3);
+  assert.equal(quantile([0, 10], 0.25), 2.5);
+  assert.equal(quantile([7], 0.9), 7);
 });
