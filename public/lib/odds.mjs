@@ -842,6 +842,21 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       return { serial: index + 1, habit: group.habit, fan: group.fan, path: p, ...playSeason(group.habit, group.weekPicker, m, playerRandom(seed, index), p, group.fallback, group.switchRate, group.legs) };
     };
     const replay = q => replayIndex(order[Math.round((total - 1) * q)]);
+    // Every habit x fan group on its own (its players are indexes
+    // g * per ... g * per + per - 1): for "people like you".
+    const groupStats = groups.map((group, g) => {
+      const mine = finals.slice(g * per, (g + 1) * per).sort();
+      return {
+        habit: group.habit.key,
+        fan: group.fan?.key ?? null,
+        ...summarize([sums[g]]),
+        median: mine[Math.floor(per / 2)],
+        best: mine[per - 1],
+        worst: mine[0],
+        q10: mine[Math.floor(per * 0.1)],
+        q90: mine[Math.floor(per * 0.9)]
+      };
+    });
     const finalAt = q => finals[order[Math.round((total - 1) * q)]];
     const sumOf = key => sums.reduce((acc, x) => acc + x[key], 0);
     results[m] = {
@@ -850,6 +865,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       bands: bands.slice(0, m),
       summaries,
       fanSummaries,
+      groupStats,
       characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
       totals: {
         staked: sumOf('staked'),
@@ -875,6 +891,21 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     };
   }
   return { results, resume: { weeks, states, rngs, bands } };
+}
+
+// Any one player of the crowd, replayed exactly: `index` is their serial - 1.
+export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup, perHabit, seed = 1, index }) {
+  const groups = sportPools
+    ? multiSportGroups(sportPools, startWeek, weeks)
+    : HABITS.map(habit => {
+        const pick = picker([pools[habit.pick]]);
+        return { habit, fan: null, weekPicker: () => pick, fallback: null, switchRate: 0, legs: null };
+      });
+  const per = perGroup ?? perHabit ?? 500;
+  const group = groups[Math.floor(index / per)];
+  if (!group) return null;
+  const path = new Float64Array(weeks);
+  return { serial: index + 1, habit: group.habit, fan: group.fan, path, ...playSeason(group.habit, group.weekPicker, weeks, playerRandom(seed, index), path, group.fallback, group.switchRate, group.legs) };
 }
 
 // The crowd after `weeks` weeks (one checkpoint of simulateCrowd).

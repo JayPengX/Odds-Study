@@ -87,11 +87,17 @@ The choice is remembered.
     - the longest winning and losing streaks;
     - the longest shot that came in and the worst single week;
     - the most tickets, the closest to break-even and the most tax paid;
-  - the brutal truths and surprising facts, each a number, a caption and the explanation:
+  - the brutal truths and surprising facts, each one plain sentence with its numbers highlighted, then the explanation:
     - how much others lose for every NT$1 won;
     - the top-1% line and who never won once;
     - how often a first-ticket winner still loses;
     - the hit rate, the tax collected and what the lottery makes per day.
+- **People like you:** pick a habit and a kind of fan to see that group of about 3,334 people. It shows:
+  - how many are still ahead;
+  - the typical result, the average back and the tickets bought;
+  - the group's range from its biggest loser to its biggest winner;
+  - the typical loss in bubble teas.
+- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart and their story. The numbers in the stories are clickable too.
 - **Periods:** 1 month to 3 years. The seed is fixed, so the same period always gives the same result.
   - The default 1-year run records 1, 3 and 6 months along the way, so switching to them is instant.
   - 3 years carries every player on from week 52 and plays only the extra two years. Tests check it matches a straight 3-year run exactly.

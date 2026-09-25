@@ -476,3 +476,19 @@ test('every guide entry is a [title, text] pair in both languages', async () => 
     }
   }
 });
+
+test('any player can be replayed on their own, and groups add up', async () => {
+  const { simulateCrowdStats, replayPlayer, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
+  const opts = { sportPools, startWeek: 20, weeks: 26, perGroup: 30, seed: 5 };
+  const stats = simulateCrowdStats(opts);
+  for (const who of Object.values(stats.notable)) {
+    const again = replayPlayer({ ...opts, index: who.serial - 1 });
+    assert.equal(again.final, who.final);
+    assert.equal(again.tickets, who.tickets);
+    assert.equal(again.habit, who.habit);
+  }
+  assert.equal(stats.groupStats.length, 30);
+  assert.equal(stats.groupStats.reduce((n, g) => n + g.players, 0), stats.players);
+  for (const g of stats.groupStats) assert.ok(g.worst <= g.q10 && g.q10 <= g.median && g.median <= g.q90 && g.q90 <= g.best);
+});

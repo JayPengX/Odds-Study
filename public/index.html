@@ -141,6 +141,27 @@
           <ol id="sim-fans" class="bars-list"></ol>
         </div>
       </div>
+      <div class="two-col">
+        <div class="card">
+          <h3 class="card-title" data-t="youTitle"></h3>
+          <p class="lede" data-t="youIntro"></p>
+          <div class="you-pickers">
+            <select id="you-habit" aria-label="habit"></select>
+            <select id="you-fan" aria-label="fan"></select>
+          </div>
+          <div id="you-result"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title" data-t="lookupTitle"></h3>
+          <p class="lede" data-t="lookupIntro"></p>
+          <form id="lookup-form" class="lookup-form">
+            <input id="lookup-number" type="number" inputmode="numeric" min="1" step="1" aria-label="#" />
+            <button class="primary-button" type="submit" data-t="lookupGo"></button>
+            <button id="lookup-random" class="ghost-button" type="button" data-t="lookupRandom"></button>
+          </form>
+          <div id="lookup-result"></div>
+        </div>
+      </div>
       <h3 class="section-heading small" data-t="storiesTitle"></h3>
       <ul id="sim-stories" class="stories"></ul>
       <div class="two-col">
