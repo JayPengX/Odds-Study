@@ -1,10 +1,14 @@
 import {
   K_DRAFTKINGS,
+  betMoments,
   blendOutcomes,
+  chanceAhead,
   combineParlay,
+  describeRun,
   estimateF1LotteryOdds,
   estimateLotteryOdds,
   expectedReturn,
+  luckCrossover,
   seededRandom,
   simulateRuns
 } from './lib/odds.mjs';
@@ -562,12 +566,6 @@ function simTarget() {
   return bet && { fairChance: bet.fairChance, odds: effectiveOdds(bet) };
 }
 
-function median(values) {
-  const s = [...values].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
 function niceStep(range, target) {
   const raw = range / target;
   const mag = 10 ** Math.floor(Math.log10(raw));
@@ -575,44 +573,158 @@ function niceStep(range, target) {
   return (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
 }
 
+const MILESTONES = [1, 10, 50, 100, 500, 1000, 5000, 10000];
+// Taiwan's 2026 minimum hourly wage.
+const MIN_WAGE_HOURLY = 196;
+const CHARACTERS = [
+  { key: 'best', name: 'simLucky', color: 'var(--good)' },
+  { key: 'median', name: 'simTypical', color: 'var(--series-1)' },
+  { key: 'worst', name: 'simUnlucky', color: 'var(--bad)' }
+];
+
+function fmtChance(p) {
+  if (p >= 0.1) return `${Math.round(p * 100)}%`;
+  if (p >= 0.001) return `${(p * 100).toFixed(1)}%`;
+  if (p >= 0.0001) return `${(p * 100).toFixed(2)}%`;
+  return '<0.01%';
+}
+
+function oneIn(p) {
+  const t = state.t;
+  if (p >= 0.5) return '';
+  if (p < 1e-6) return t('oneInMillion');
+  return t('oneIn', { n: Math.round(1 / p).toLocaleString(numberLocale()) });
+}
+
 function renderSim() {
   const t = state.t;
   const target = simTarget();
   const chart = $('sim-chart');
+  const parts = ['sim-headline', 'sim-stats', 'sim-legend', 'sim-players', 'sim-chances', 'sim-facts', 'sim-table'];
   if (!target) {
-    $('sim-stats').replaceChildren();
-    $('sim-legend').replaceChildren();
+    for (const id of parts) $(id).replaceChildren();
     chart.replaceChildren(el('p', { class: 'muted', text: t('noBets') }));
-    $('sim-table').replaceChildren();
     return;
   }
   const bets = Number($('sim-bets').value);
   const runs = simulateRuns({ ...target, stake: STAKE, bets, runs: SIM_RUNS, random: seededRandom(state.simSeed) });
-  const edge = target.fairChance * target.odds - 1;
-  const expectedAt = i => (i + 1) * STAKE * edge;
-  const finals = runs.map(r => r.at(-1));
+  const { mean, sd } = betMoments(target.fairChance, target.odds);
+  const expectedAt = i => (i + 1) * STAKE * mean;
+  const stories = runs.map(describeRun);
+  const order = stories.map((_, i) => i).sort((a, b) => stories[a].final - stories[b].final);
+  const picked = { worst: order[0], median: order[SIM_RUNS >> 1], best: order.at(-1) };
+  const characters = CHARACTERS.map(c => ({ ...c, index: picked[c.key], story: stories[picked[c.key]] }));
   const expectedFinal = expectedAt(bets - 1);
-  const ahead = finals.filter(v => v > 0).length;
+  const endedAhead = stories.filter(s => s.final > 0).length;
+  const everAhead = stories.filter(s => s.everAhead).length;
+  const n = bets.toLocaleString(numberLocale());
 
+  renderSimHeadline(target, mean);
   $('sim-stats').replaceChildren(
-    statTile(t('simAfter', { n: bets.toLocaleString(numberLocale()) }), fmtMoney(expectedFinal), expectedFinal < 0 ? 'back-low' : ''),
-    statTile(t('simAhead'), `${ahead} / ${SIM_RUNS}`),
-    statTile(t('simBest'), fmtMoney(Math.max(...finals))),
-    statTile(t('simWorst'), fmtMoney(Math.min(...finals)))
+    statTile(t('simAfter', { n }), fmtMoney(expectedFinal), expectedFinal < 0 ? 'back-low' : ''),
+    statTile(t('simEverAhead'), `${everAhead} / ${SIM_RUNS}`),
+    statTile(t('simAhead'), `${endedAhead} / ${SIM_RUNS}`, endedAhead === 0 ? 'back-low' : '')
   );
   $('sim-legend').replaceChildren(
-    el('span', {}, [el('span', { class: 'legend-key', style: 'background:var(--series-1);opacity:.6' }), document.createTextNode(t('simRuns'))]),
-    el('span', {}, [el('span', { class: 'legend-key', style: 'background:var(--series-2)' }), document.createTextNode(t('simExpected'))])
+    el('span', {}, [el('span', { class: 'legend-key', style: 'background:var(--text-muted);opacity:.5' }), document.createTextNode(t('simOthers'))]),
+    ...characters.map(c => el('span', {}, [el('span', { class: 'legend-key thick', style: `background:${c.color}` }), document.createTextNode(t(c.name))])),
+    el('span', {}, [el('span', { class: 'legend-key dashed' }), document.createTextNode(t('simExpected'))])
   );
-  drawSimChart(chart, runs, expectedAt, bets);
-  renderSimTable(runs, expectedAt, bets);
+  drawSimChart(chart, runs, characters, expectedAt, bets);
+  renderPlayers(characters, target, bets);
+  renderChances(target);
+  renderFacts(target, { mean, sd }, stories, characters, bets, expectedFinal, endedAhead, everAhead);
+  renderSimTable(runs, characters, expectedAt, bets);
 }
 
-function drawSimChart(container, runs, expectedAt, bets) {
+function renderSimHeadline(target, mean) {
+  const t = state.t;
+  const cross = luckCrossover(target.fairChance, target.odds);
+  if (cross == null) {
+    $('sim-headline').replaceChildren(
+      el('p', { class: 'headline-big back-high', text: t('simHeadlineWin') }),
+      el('p', { class: 'headline-sub', text: t('simHeadlineWinSub', { back: fmtMoney((1 + mean) * STAKE, { sign: false }) }) })
+    );
+    return;
+  }
+  $('sim-headline').replaceChildren(
+    el('p', { class: 'headline-label', text: t('simHeadlineLabel') }),
+    el('p', { class: 'headline-big' }, [
+      document.createTextNode(t('simHeadlinePre')),
+      el('strong', { text: t('simHeadlineBets', { n: cross.toLocaleString(numberLocale()) }) }),
+      document.createTextNode(t('simHeadlinePost'))
+    ]),
+    el('p', {
+      class: 'headline-sub',
+      text: t('simHeadlineSub', { n: cross.toLocaleString(numberLocale()), pct: fmtChance(chanceAhead(target.fairChance, target.odds, cross)) })
+    })
+  );
+}
+
+function renderPlayers(characters, target, bets) {
+  const t = state.t;
+  const need = 1 / target.odds;
+  $('sim-players').replaceChildren(
+    ...characters.map(({ name, color, story: s }) => {
+      let tale;
+      if (s.final > 0) tale = t('taleAhead');
+      else if (!s.everAhead) tale = t('taleNever');
+      else tale = t('taleGaveBack', { peak: fmtMoney(s.peak, { sign: false }), at: (s.peakAt + 1).toLocaleString(numberLocale()) });
+      const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
+      return el('article', { class: 'player', style: `--player:${color}` }, [
+        el('p', { class: 'player-name', text: t(name) }),
+        el('p', { class: `player-final ${s.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(s.final) }),
+        el('p', { class: 'player-tale', text: tale }),
+        line(t('playerWins'), `${s.wins.toLocaleString(numberLocale())} / ${bets.toLocaleString(numberLocale())} (${fmtPct(s.wins / bets)})`),
+        line(t('playerNeed'), fmtPct(need)),
+        line(t('playerPeak'), s.everAhead ? `${fmtMoney(s.peak)} · ${t('simBetN', { n: (s.peakAt + 1).toLocaleString(numberLocale()) })}` : t('playerNeverAhead')),
+        line(t('playerStreak'), t('inARow', { n: s.longestLosing })),
+        line(t('playerDrop'), fmtMoney(-s.maxDrop))
+      ]);
+    })
+  );
+}
+
+function renderChances(target) {
+  $('sim-chances').replaceChildren(
+    ...MILESTONES.map(m => {
+      const p = chanceAhead(target.fairChance, target.odds, m);
+      return el('li', { class: 'chance-row' }, [
+        el('span', { class: 'chance-n', text: state.t(m === 1 ? 'afterOneBet' : 'afterBets', { n: m.toLocaleString(numberLocale()) }) }),
+        el('span', { class: 'bar-track chance-track' }, el('span', { class: 'bar', style: `width:${Math.max(p * 100, p >= 0.001 ? 0.5 : 0)}%` })),
+        el('span', { class: 'chance-value' }, [el('strong', { text: fmtChance(p) }), el('small', { text: oneIn(p) })])
+      ]);
+    })
+  );
+}
+
+function renderFacts(target, { mean, sd }, stories, characters, bets, expectedFinal, endedAhead, everAhead) {
+  const t = state.t;
+  const n = bets.toLocaleString(numberLocale());
+  const facts = [];
+  const need = 1 / target.odds;
+  facts.push(t(target.fairChance < need ? 'factNeedLose' : 'factNeedWin', { odds: fmtOdds(target.odds), need: fmtPct(need), real: fmtPct(target.fairChance) }));
+  if (everAhead > endedAhead) facts.push(t(endedAhead ? 'factEverAhead' : 'factEverAheadNone', { ever: everAhead, ended: endedAhead, total: SIM_RUNS }));
+  const luck = k => fmtMoney(sd * Math.sqrt(k) * STAKE, { sign: false });
+  const avg = k => fmtMoney(mean * k * STAKE);
+  facts.push(t('factLuck', { luck10: luck(10), avg10: avg(10), luckBig: luck(10000), avgBig: avg(10000) }));
+  const [lucky, typical] = characters;
+  facts.push(t('factStreak', { lucky: lucky.story.longestLosing, typical: typical.story.longestLosing }));
+  if (expectedFinal < 0) {
+    const loss = -expectedFinal;
+    facts.push(t('factWage', { n, loss: fmtMoney(loss, { sign: false }), hours: (loss / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: loss < 10 * MIN_WAGE_HOURLY ? 1 : 0 }), wage: MIN_WAGE_HOURLY }));
+  }
+  const net = stories.reduce((s, r) => s + r.final, 0);
+  facts.push(t(net < 0 ? 'factHouse' : 'factHouseWon', { total: SIM_RUNS, staked: fmtMoney(SIM_RUNS * bets * STAKE, { sign: false }), net: fmtMoney(Math.abs(net), { sign: false }) }));
+  $('sim-facts').replaceChildren(...facts.map(f => el('li', { text: f })));
+}
+
+function drawSimChart(container, runs, characters, expectedAt, bets) {
   const t = state.t;
   const width = Math.max(300, container.clientWidth || 600);
-  const height = width < 520 ? 240 : 300;
-  const m = { top: 12, right: 12, bottom: 26, left: 58 };
+  const wide = width >= 560;
+  const height = width < 520 ? 260 : 320;
+  const m = { top: 12, right: wide ? 164 : 12, bottom: 26, left: 58 };
   const w = width - m.left - m.right;
   const h = height - m.top - m.bottom;
   let lo = 0;
@@ -634,28 +746,40 @@ function drawSimChart(container, runs, expectedAt, bets) {
     svg.append(label);
   }
   for (const frac of [0, 0.25, 0.5, 0.75, 1]) {
-    const n = Math.round(frac * bets);
+    const k = Math.round(frac * bets);
     const label = svgEl('text', { class: 'tick', x: m.left + frac * w, y: height - 6, 'text-anchor': frac === 0 ? 'start' : frac === 1 ? 'end' : 'middle' });
-    label.textContent = n.toLocaleString(numberLocale());
+    label.textContent = k.toLocaleString(numberLocale());
     svg.append(label);
   }
   const every = Math.max(1, Math.floor(bets / w));
-  for (const run of runs) {
+  const pathOf = run => {
     let d = `M${m.left},${y(0)}`;
     for (let i = 0; i < bets; i += every) d += `L${x(i).toFixed(1)},${y(run[i]).toFixed(1)}`;
-    d += `L${x(bets - 1).toFixed(1)},${y(run[bets - 1]).toFixed(1)}`;
-    svg.append(svgEl('path', { class: 'run', d }));
-  }
-  svg.append(svgEl('path', { class: 'expected', d: `M${m.left},${y(0)}L${x(bets - 1)},${y(expectedAt(bets - 1))}` }));
+    return `${d}L${x(bets - 1).toFixed(1)},${y(run[bets - 1]).toFixed(1)}`;
+  };
+  const highlighted = new Set(characters.map(c => c.index));
+  runs.forEach((run, i) => highlighted.has(i) || svg.append(svgEl('path', { class: 'run', d: pathOf(run) })));
   const endValue = expectedAt(bets - 1);
-  const endLabel = svgEl('text', {
-    class: 'end-label',
-    x: m.left + w,
-    y: y(endValue) + (endValue < 0 ? 16 : -8),
-    'text-anchor': 'end'
-  });
-  endLabel.textContent = `${t('simExpected')} ${fmtMoney(endValue)}`;
-  svg.append(endLabel);
+  svg.append(svgEl('path', { class: 'expected', d: `M${m.left},${y(0)}L${x(bets - 1)},${y(endValue)}` }));
+  for (const c of [...characters].reverse()) svg.append(svgEl('path', { class: 'run-hero', style: `stroke:${c.color}`, d: pathOf(runs[c.index]) }));
+
+  if (wide) {
+    // Right-edge labels, nudged apart so they never overlap.
+    const labels = [
+      ...characters.map(c => ({ text: `${t(c.name)} ${fmtMoney(c.story.final)}`, value: c.story.final, color: c.color })),
+      { text: `${t('simExpected')} ${fmtMoney(endValue)}`, value: endValue, color: 'var(--text-secondary)' }
+    ]
+      .map(l => ({ ...l, y: y(l.value) }))
+      .sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) labels[i].y = Math.max(labels[i].y, labels[i - 1].y + 15);
+    const overflow = labels.at(-1).y - (m.top + h);
+    if (overflow > 0) for (const l of labels) l.y -= overflow;
+    for (const l of labels) {
+      const text = svgEl('text', { class: 'end-label', x: m.left + w + 8, y: l.y + 4, style: `fill:${l.color}` });
+      text.textContent = l.text;
+      svg.append(text);
+    }
+  }
 
   const crosshair = svgEl('line', { class: 'crosshair', y1: m.top, y2: m.top + h, visibility: 'hidden' });
   const hit = svgEl('rect', { class: 'hit', x: m.left, y: m.top, width: w, height: h, tabindex: '0', 'aria-label': t('chartLabel') });
@@ -666,28 +790,27 @@ function drawSimChart(container, runs, expectedAt, bets) {
   let current = bets - 1;
   const show = i => {
     current = Math.max(0, Math.min(bets - 1, i));
-    const values = runs.map(r => r[current]);
     const px = x(current);
     crosshair.setAttribute('x1', px);
     crosshair.setAttribute('x2', px);
     crosshair.setAttribute('visibility', 'visible');
     const row = (key, value, color) =>
       el('div', { class: 'tooltip-row' }, [
-        el('span', {}, [color ? el('span', { class: 'legend-key', style: `background:${color}` }) : null, document.createTextNode(key)]),
-        el('strong', { text: fmtMoney(value) })
+        el('span', {}, [color ? el('span', { class: 'legend-key thick', style: `background:${color}` }) : null, document.createTextNode(key)]),
+        el('strong', { text: value })
       ]);
+    const ahead = runs.filter(r => r[current] > 0).length;
     tooltip.replaceChildren(
       el('p', { class: 'tooltip-title', text: t('simBetN', { n: (current + 1).toLocaleString(numberLocale()) }) }),
-      row(t('simExpected'), expectedAt(current), 'var(--series-2)'),
-      row(t('simMedian'), median(values), 'var(--series-1)'),
-      row(t('simBest'), Math.max(...values)),
-      row(t('simWorst'), Math.min(...values))
+      ...characters.map(c => row(t(c.name), fmtMoney(runs[c.index][current]), c.color)),
+      row(t('simExpected'), fmtMoney(expectedAt(current)), 'var(--text-secondary)'),
+      row(t('simAheadNow'), `${ahead} / ${SIM_RUNS}`)
     );
     tooltip.hidden = false;
     const scale = container.clientWidth / width;
     const left = px * scale;
     const tipWidth = tooltip.offsetWidth;
-    tooltip.style.left = `${left + 12 + tipWidth > container.clientWidth ? left - tipWidth - 12 : left + 12}px`;
+    tooltip.style.left = `${Math.max(0, left + 12 + tipWidth > container.clientWidth ? left - tipWidth - 12 : left + 12)}px`;
     tooltip.style.top = `${m.top * scale}px`;
   };
   const hide = () => {
@@ -711,25 +834,23 @@ function drawSimChart(container, runs, expectedAt, bets) {
   });
 }
 
-function renderSimTable(runs, expectedAt, bets) {
+function renderSimTable(runs, characters, expectedAt, bets) {
   const t = state.t;
   const rows = [];
-  for (let k = 1; k <= 10; k++) {
-    const i = Math.round((k / 10) * bets) - 1;
-    const values = runs.map(r => r[i]);
+  const points = [...new Set(Array.from({ length: 10 }, (_, k) => Math.max(0, Math.round(((k + 1) / 10) * bets) - 1)))];
+  for (const i of points) {
     rows.push(
       el('tr', {}, [
         el('td', { text: (i + 1).toLocaleString(numberLocale()) }),
         el('td', { text: fmtMoney(expectedAt(i)) }),
-        el('td', { text: fmtMoney(median(values)) }),
-        el('td', { text: fmtMoney(Math.max(...values)) }),
-        el('td', { text: fmtMoney(Math.min(...values)) })
+        ...characters.map(c => el('td', { text: fmtMoney(runs[c.index][i]) })),
+        el('td', { text: `${runs.filter(r => r[i] > 0).length} / ${SIM_RUNS}` })
       ])
     );
   }
   $('sim-table').replaceChildren(
     el('table', {}, [
-      el('thead', {}, el('tr', {}, [t('simTableBet'), t('simExpected'), t('simMedian'), t('simBest'), t('simWorst')].map(h => el('th', { text: h })))),
+      el('thead', {}, el('tr', {}, [t('simTableBet'), t('simExpected'), ...characters.map(c => t(c.name)), t('simAheadNow')].map(h => el('th', { text: h })))),
       el('tbody', {}, rows)
     ])
   );
@@ -803,10 +924,17 @@ $('sim-rerun').addEventListener('click', () => {
   state.simSeed += 1;
   renderSim();
 });
+// Redraw only when the width changes: phones fire resize when the address bar
+// slides away, and that shouldn't reset the chart.
 let resizeTimer;
+let lastWidth = window.innerWidth;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => state.data && renderSim(), 150);
+  resizeTimer = setTimeout(() => {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    if (state.data) renderSim();
+  }, 150);
 });
 
 renderStatic();

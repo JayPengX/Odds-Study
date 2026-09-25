@@ -114,3 +114,66 @@ export function seededRandom(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// Per-bet profit for 1 unit staked: its average and its standard deviation
+// (how far luck typically moves a single bet away from that average).
+export function betMoments(fairChance, odds) {
+  return { mean: fairChance * odds - 1, sd: odds * Math.sqrt(fairChance * (1 - fairChance)) };
+}
+
+// Exact chance of being strictly ahead after n bets. Ahead means wins x odds > n,
+// and the number of wins follows a binomial distribution.
+export function chanceAhead(fairChance, odds, n) {
+  if (fairChance <= 0) return 0;
+  if (fairChance >= 1) return odds > 1 ? 1 : 0;
+  const minWins = Math.floor(n / odds + 1e-9) + 1;
+  if (minWins > n) return 0;
+  const lp = Math.log(fairChance);
+  const lq = Math.log(1 - fairChance);
+  let logChoose = 0;
+  let total = 0;
+  for (let w = 0; w <= n; w++) {
+    if (w >= minWins) total += Math.exp(logChoose + w * lp + (n - w) * lq);
+    logChoose += Math.log(n - w) - Math.log(w + 1);
+  }
+  return Math.min(1, total);
+}
+
+// Bets until the house's cut outweighs typical luck: the average loss grows
+// like n, luck's swing grows like sqrt(n), and they meet at n = (sd / mean)^2.
+// Null when the bet doesn't lose on average.
+export function luckCrossover(fairChance, odds) {
+  const { mean, sd } = betMoments(fairChance, odds);
+  if (mean >= 0) return null;
+  return Math.max(1, Math.round((sd / mean) ** 2));
+}
+
+// Story of one simulated player, from their running profit path.
+export function describeRun(path) {
+  let wins = 0;
+  let peak = 0;
+  let peakAt = -1;
+  let high = 0;
+  let maxDrop = 0;
+  let losing = 0;
+  let longestLosing = 0;
+  let prev = 0;
+  for (let i = 0; i < path.length; i++) {
+    const v = path[i];
+    if (v > prev) {
+      wins++;
+      losing = 0;
+    } else {
+      losing++;
+      if (losing > longestLosing) longestLosing = losing;
+    }
+    if (v > peak) {
+      peak = v;
+      peakAt = i;
+    }
+    if (v > high) high = v;
+    if (high - v > maxDrop) maxDrop = high - v;
+    prev = v;
+  }
+  return { final: path.at(-1), wins, peak, peakAt, everAhead: peak > 0, longestLosing, maxDrop };
+}

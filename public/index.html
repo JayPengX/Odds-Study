@@ -54,16 +54,26 @@
       <label><span data-t="simPick"></span><select id="sim-pick"></select></label>
       <label><span data-t="simBets"></span>
         <select id="sim-bets">
+          <option value="10">10</option>
+          <option value="50">50</option>
           <option value="100">100</option>
           <option value="500">500</option>
           <option value="1000" selected>1000</option>
+          <option value="5000">5000</option>
         </select>
       </label>
       <button id="sim-rerun" class="ghost-button" type="button"></button>
     </div>
+    <div id="sim-headline" class="sim-headline" aria-live="polite"></div>
     <div id="sim-stats" class="stat-row"></div>
     <div id="sim-legend" class="legend"></div>
     <div id="sim-chart" class="chart"></div>
+    <div id="sim-players" class="players"></div>
+    <h3 class="sub-title" data-t="chancesTitle"></h3>
+    <p class="intro" data-t="chancesIntro"></p>
+    <ol id="sim-chances" class="chance-list"></ol>
+    <h3 class="sub-title" data-t="factsTitle"></h3>
+    <ul id="sim-facts" class="facts"></ul>
     <details class="table-view">
       <summary data-t="simTable"></summary>
       <div id="sim-table"></div>

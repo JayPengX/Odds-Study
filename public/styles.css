@@ -169,22 +169,26 @@ button { font: inherit; cursor: pointer; }
 
 /* Simulator */
 .sim-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 6px; }
-.sim-controls label { display: grid; gap: 2px; font-size: 0.8rem; color: var(--text-muted); max-width: 100%; }
+.sim-controls label { display: grid; gap: 2px; font-size: 0.8rem; color: var(--text-muted); max-width: 100%; min-width: 0; }
+.sim-controls label:first-child { flex: 1 1 240px; max-width: 420px; }
 .sim-controls select {
   font: inherit; font-size: 0.9rem; color: var(--text-primary);
   background: var(--surface-raised); border: 1px solid var(--border); border-radius: 6px;
-  padding: 5px 8px; max-width: min(100%, 420px);
+  padding: 5px 8px; width: 100%; min-width: 0;
 }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 4px; }
 .legend-key { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 6px; border-radius: 1px; }
+.legend-key.thick { height: 3px; }
+.legend-key.dashed { background: none; border-top: 2px dashed var(--text-secondary); height: 0; }
 .chart { position: relative; width: 100%; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart .grid-line { stroke: var(--grid); stroke-width: 1; }
 .chart .zero-line { stroke: var(--axis); stroke-width: 1; }
 .chart .tick { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.chart .run { fill: none; stroke: var(--series-1); stroke-opacity: 0.32; stroke-width: 1.5; stroke-linejoin: round; }
-.chart .expected { fill: none; stroke: var(--series-2); stroke-width: 2; stroke-linecap: round; }
-.chart .end-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+.chart .run { fill: none; stroke: var(--text-muted); stroke-opacity: 0.3; stroke-width: 1; stroke-linejoin: round; }
+.chart .run-hero { fill: none; stroke-width: 2.25; stroke-linejoin: round; }
+.chart .expected { fill: none; stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart .end-label { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .chart .crosshair { stroke: var(--text-secondary); stroke-width: 1; }
 .chart .hit { fill: transparent; cursor: crosshair; }
 .chart .hit:focus { outline: none; }
@@ -213,3 +217,46 @@ footer { margin-top: 24px; }
 
 /* Day filter */
 .day-filter { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 16px; }
+
+/* Simulator: headline, players, chances, facts */
+.sim-headline {
+  margin: 10px 0 14px;
+  padding: 14px 16px;
+  background: var(--accent-wash);
+  border-radius: 10px;
+}
+.sim-headline:empty { display: none; }
+.headline-label { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+.headline-big { margin: 2px 0 4px; font-size: 1.2rem; font-weight: 600; line-height: 1.4; }
+.headline-big strong { color: var(--bad); font-size: 1.45rem; }
+.headline-sub { margin: 0; color: var(--text-secondary); font-size: 0.9rem; }
+.sub-title { font-size: 1rem; margin: 22px 0 4px; }
+.players { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 16px; }
+.player {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--player);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  font-size: 0.85rem;
+}
+.player-name { margin: 0; font-weight: 600; color: var(--player); }
+.player-final { margin: 0; font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.player-tale { margin: 2px 0 8px; color: var(--text-secondary); min-height: 2.8em; }
+.player-line { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--grid); padding: 4px 0; }
+.player-line span { color: var(--text-muted); }
+.player-line strong { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.chance-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.chance-row { display: grid; grid-template-columns: 6.5em 1fr 9.5em; gap: 10px; align-items: center; font-size: 0.88rem; }
+.chance-n { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.chance-track { grid-column: auto; background: var(--grid); border-radius: 4px; overflow: hidden; }
+.chance-track .bar { border-radius: 4px; }
+.chance-value { display: flex; flex-direction: column; text-align: right; line-height: 1.25; }
+.chance-value strong { font-variant-numeric: tabular-nums; }
+.chance-value small { color: var(--text-muted); font-size: 0.72rem; }
+.facts { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: 0.92rem; color: var(--text-secondary); }
+.facts li::marker { color: var(--series-1); }
+@media (max-width: 480px) {
+  .chance-row { grid-template-columns: 6.8em 1fr 7.5em; gap: 8px; font-size: 0.82rem; }
+}
+#sim-table { overflow-x: auto; }

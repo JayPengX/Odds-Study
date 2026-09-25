@@ -87,3 +87,38 @@ test('simulation is reproducible and averages to the expected loss', () => {
   const avgPerBet = runs.reduce((s, r) => s + r.at(-1), 0) / runs.length / 2000;
   close(avgPerBet, -10, 1.5);
 });
+
+test('chanceAhead matches a hand count and shrinks with more bets', async () => {
+  const { chanceAhead } = await import('../public/lib/odds.mjs');
+  // 1 bet: ahead only by winning.
+  assert.ok(Math.abs(chanceAhead(0.5, 1.8, 1) - 0.5) < 1e-12);
+  // 2 bets at 1.8: one win gives +80 - 100 = -20, so both must win.
+  assert.ok(Math.abs(chanceAhead(0.5, 1.8, 2) - 0.25) < 1e-12);
+  // Even odds at 2.0: exactly break-even isn't ahead.
+  assert.ok(Math.abs(chanceAhead(0.5, 2, 2) - 0.25) < 1e-12);
+  assert.ok(chanceAhead(0.5, 1.8, 1000) < chanceAhead(0.5, 1.8, 100));
+  assert.ok(chanceAhead(0.5, 1.8, 10000) < 1e-6);
+});
+
+test('luckCrossover is where average loss equals typical luck', async () => {
+  const { luckCrossover, chanceAhead } = await import('../public/lib/odds.mjs');
+  // mean -0.1, sd 0.9 per unit -> (0.9 / 0.1)^2 = 81.
+  assert.equal(luckCrossover(0.5, 1.8), 81);
+  assert.equal(luckCrossover(0.5, 2.2), null);
+  // Around the crossover roughly 1 in 6 players is still ahead.
+  const p = chanceAhead(0.5, 1.8, 81);
+  assert.ok(p > 0.1 && p < 0.25);
+});
+
+test('describeRun reads wins, peak, streaks and the biggest drop', async () => {
+  const { describeRun } = await import('../public/lib/odds.mjs');
+  // win, win, lose, lose, lose, win at odds 1.8
+  const run = describeRun([80, 160, 60, -40, -140, -60]);
+  assert.equal(run.wins, 3);
+  assert.equal(run.peak, 160);
+  assert.equal(run.peakAt, 1);
+  assert.equal(run.longestLosing, 3);
+  assert.equal(run.maxDrop, 300);
+  assert.equal(run.everAhead, true);
+  assert.equal(describeRun([-100, -200]).everAhead, false);
+});

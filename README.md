@@ -9,7 +9,8 @@ An educational page about the math of the Taiwan Sports Lottery (台灣運彩): 
 - **Fair chance** for each MLB game and Premier League match (home/draw/away): DraftKings (via ESPN) and Polymarket, each with its own margin removed, averaged. Filter by sport (All / MLB / Premier League / F1) and by day.
 - **Estimated lottery odds**: `1 ÷ (fair chance × 1.15)` for MLB, fitted against 14 real lottery games on 2026-09-25 (average error about 0.04). Anyone can type the real lottery odds in, and every number switches to them.
 - **Back per NT$100**: `fair chance × odds × 100`. Below 100 loses on average.
-- **Least costly ranking** per day, a **parlay calculator** (most MLB games on the lottery require 2+ games per ticket), and a **simulator** of 20 players repeating one bet.
+- **Least costly ranking** per day, and a **parlay calculator** (most MLB games on the lottery require 2+ games per ticket).
+- **Simulator**: 20 players repeat one bet. It follows the Lucky, Typical and Unlucky player (wins, highest point, losing streak, biggest drop), says after about how many bets the cut outweighs luck (`(sd ÷ average loss)²`), lists the exact chance of still being ahead after 1 to 10,000 bets, and adds facts that change with each run (break-even win rate, how many were ever ahead vs. still ahead, loss in minimum-wage hours).
 - **Premier League**: uses the same MLB formula, which has **not** been checked against real lottery soccer prices yet. Real prices typed in override it.
 - **F1 race winner**: `1 ÷ fair chance^0.69`, fitted on only 5 prices, so rough.
 
