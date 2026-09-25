@@ -13,6 +13,8 @@ import {
   expectedReturn,
   habitPools,
   lotteryTotalLines,
+  lotteryRunLines,
+  MLB_MARKET_OVERROUND,
   median,
   quantile,
   SLIP_RULES,
@@ -194,6 +196,30 @@ function buildBets(data) {
           fairChance: p,
           estOdds: estimateLotteryOdds(p, K_DRAFTKINGS)
         });
+      }
+    }
+    // MLB run lines (讓分): true chance from DraftKings; the price from the
+    // lottery's own (shrunk) chance, which differs from the true one.
+    if (game.sport === 'mlb' && game.spread) {
+      for (const [i, { awayLine, fair, lottery }] of lotteryRunLines(game.spread.awayLine, game.spread.awayFair).entries()) {
+        for (const side of ['away', 'home']) {
+          const line = side === 'away' ? awayLine : -awayLine;
+          const text = `${teamName(game[side])} ${line > 0 ? '+' : ''}${line}`;
+          const p = side === 'away' ? fair : 1 - fair;
+          const priced = side === 'away' ? lottery : 1 - lottery;
+          bets.push({
+            ...base,
+            id: `${game.id}|rl|${line}|${side}`,
+            kind: 'runline',
+            // DraftKings' own line has one source; the extra run adds model error.
+            fairMargin: i === 0 ? 0.02 : 0.03,
+            errKey: 'mlbRunLine',
+            label: text,
+            shortLabel: `${t('runLine')} ${text}`,
+            fairChance: p,
+            estOdds: Math.round((1 / (priced * MLB_MARKET_OVERROUND)) * 100) / 100
+          });
+        }
       }
     }
   }
@@ -468,7 +494,8 @@ function renderGames() {
           takeNote([
             takeText(bets.filter(b => b.kind === 'ml'), 'takeMoneyline'),
             // Each total line is its own market; they share one take, so show the first.
-            ...(bets.some(b => b.kind === 'total') ? [takeText(bets.filter(b => b.kind === 'total' && b.totalLine === bets.find(x => x.kind === 'total').totalLine), 'takeTotal')] : [])
+            ...(bets.some(b => b.kind === 'total') ? [takeText(bets.filter(b => b.kind === 'total' && b.totalLine === bets.find(x => x.kind === 'total').totalLine), 'takeTotal')] : []),
+            ...(bets.some(b => b.kind === 'runline') ? [takeText(bets.filter(b => b.kind === 'runline').slice(0, 2), 'takeRunLine')] : [])
           ]),
           ...notes
         ]);
@@ -818,7 +845,7 @@ function simPool() {
   const onlyF1 = state.sport === 'f1';
   return state.bets
     // One total line per game (the main one), like the lottery's own balance of bets.
-    .filter(b => inSport(b.sport) && (onlyF1 || b.kind !== 'f1') && (b.kind !== 'total' || b.mainLine))
+    .filter(b => inSport(b.sport) && (onlyF1 || b.kind !== 'f1') && (b.kind !== 'total' || b.mainLine) && b.kind !== 'runline')
     .map(b => ({ gameId: b.gameId, fairChance: b.fairChance, odds: effectiveOdds(b) }));
 }
 

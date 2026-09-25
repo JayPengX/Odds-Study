@@ -9,6 +9,8 @@ const STRINGS = {
     updated: '資料時間',
     sources: '公平機率來源：DraftKings（經 ESPN）、Polymarket',
     refresh: '重新整理',
+    takeRunLine: '讓分',
+    runLine: '讓分',
     storyBestSame: '同一位 {serial} 也是 10 萬人裡最後贏最多的：{final}。拿掉那一張，其實是在虧：總共買了 {tickets} 張、下注 {staked}。',
     truthSameOdds: '贏最多和輸最多的人，用的是同一套賠率、同一種抽成；差別只有運氣。每一種習慣的平均都是輸，人數越多、時間越長，越接近那個平均。',
     truthNeverWon: '{share}（約 {n} 人）{period}下來一張都沒中過。',
@@ -217,6 +219,7 @@ const STRINGS = {
       ['模仿運彩的公式', 'MLB：運彩賠率 ≈ 1 ÷（公平機率 × 1.15）。用 2026/9/25 的 14 場真實價格比對，平均誤差約 0.04。F1：運彩賠率 ≈ 1 ÷ 公平機率^0.69，冷門車手被抽得更多；機率不到 1% 的車手，運彩直接開固定的 65、325 或 500。'],
       ['足球的和局', '英超有三種結果：主勝、和局、客勝。三個公平機率加起來是 100%，所以一樣可以用「公平機率 × 賠率」算平均拿回。足球的抽成還沒有用運彩真實價格驗證。'],
       ['MLB 大小分的三條線', '運彩每場開三條大小分線：最接近五五波的那條，再加上下各一分（例如 5.5、6.5、7.5）。我們只有 DraftKings 的一條線，所以用「總得分」的機率分布（負二項分布）去配合那條線，再算出其他線的機率。用 2026/9/25 兩場共 12 個真實價格比對，平均只差約 1 個百分點。'],
+      ['MLB 讓分：運彩自己的機率', '運彩開 DraftKings 的 1.5 分讓分線，再加同一邊的 2.5 分。但價格不是照 DraftKings 的機率：運彩把機率往五五波拉（大約只保留 73% 的差距），2.5 分再固定移 8.6 個百分點。用 2026/9/25 十場、38 個真實價格比對，平均只差 1.6%。結果是：比較可能過盤的那一邊被開得比實際難過，所以比較划算，平均每 NT$100 拿回約 NT$90 以上；另一邊只拿回約 NT$75–80。通常是受讓的冷門隊（+1.5）比較划算，但遇到大熱門（例如道奇），反而是熱門讓分（-1.5）比較划算。'],
       ['為什麼幾乎都是虧', '如果每個賠率都是公平賠率 ÷ 1.15，那麼 公平機率 × 賠率 ≈ 1 ÷ 1.15 ≈ 0.87。不管選哪一隊，每 NT$100 平均都只拿回約 NT$87。']
     ],
     footer: '賠率每次開啟頁面時即時抓取，數字會隨時間變動。本站與台灣運彩無關。'
@@ -231,6 +234,8 @@ const STRINGS = {
     updated: 'Data as of',
     sources: 'Fair chances from DraftKings (via ESPN) and Polymarket',
     refresh: 'Refresh',
+    takeRunLine: 'run line',
+    runLine: 'Run line',
     storyBestSame: 'The same {serial} also finished furthest ahead of all 100,000: {final}. Without that one ticket they were losing, over {tickets} tickets and {staked} staked.',
     truthSameOdds: 'The biggest winner and the biggest loser bet at the same odds against the same cut; the only difference was luck. Every habit loses on average, and the more people and the longer they play, the closer everyone gets to that average.',
     truthNeverWon: '{share} of people (about {n}) didn\'t win a single ticket in {period}.',
@@ -439,6 +444,7 @@ const STRINGS = {
       ['The copying formula', 'MLB: lottery odds ≈ 1 ÷ (fair chance × 1.15). Checked against 14 real games on 2026-09-25, the average error is about 0.04. F1: lottery odds ≈ 1 ÷ fair chance^0.69, which charges longshots more; drivers under 1% get one of the lottery\'s fixed prices, 65, 325 or 500.'],
       ['Soccer draws', "Premier League matches have three results: home win, draw, away win. Their fair chances add up to 100%, so fair chance × odds works the same way. The lottery's soccer cut hasn't been verified against real prices yet."],
       ['MLB totals: three lines', 'The lottery posts three total-runs lines per game: the one closest to 50/50 plus one run either side (say 5.5, 6.5, 7.5). DraftKings gives only one line, so the page fits a distribution of total runs (negative binomial) to it and reads the other lines off that. Against 12 real lottery prices from two games on 2026-09-25, it was off by about 1 percentage point on average.'],
+      ['MLB run lines: the lottery\'s own chances', 'The lottery posts DraftKings\' 1.5-run line plus the 2.5 line on the same side, but doesn\'t price them at DraftKings\' chances: it pulls them toward 50/50 (keeping about 73% of the gap), then moves a fixed 8.6 points for the extra run. On 38 real prices from 10 games (2026-09-25) that\'s 1.6% off on average. The upshot: whichever side is more likely to cover is priced as less likely than it is, so it\'s the better deal, about NT$90+ back per NT$100 on average against about NT$75–80 for the other side. Usually that\'s the underdog getting 1.5 runs; for a heavy favourite (the Dodgers, say), it\'s the favourite giving them.'],
       ['Why nearly everything loses', 'If every price is the fair odds ÷ 1.15, then fair chance × odds ≈ 1 ÷ 1.15 ≈ 0.87. Whichever team you pick, you get back about NT$87 per NT$100 on average.']
     ],
     footer: 'Odds are fetched live each time the page opens and change over time. Not affiliated with Taiwan Sports Lottery.'

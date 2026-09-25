@@ -9,6 +9,8 @@ import {
   estimateFuturesOdds,
   evaluateSlip,
   lotteryTotalLines,
+  lotteryRunLines,
+  MLB_MARKET_OVERROUND,
   houseTake,
   slipErrors,
   slipSizes,
@@ -279,4 +281,53 @@ test('MLB total lines reproduce the lottery from one DraftKings line', () => {
     assert.deepEqual(est.map(l => l[0]), real.map(l => l[0]));
     for (let i = 0; i < 3; i++) for (const j of [1, 2]) assert.ok(Math.abs(est[i][j] - real[i][j]) / real[i][j] < 0.1, `${est[i]} vs ${real[i]}`);
   }
+});
+
+// Real lottery prices with DraftKings' lines for the same games (2026-09-25).
+const fixture = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./fixtures/lottery-mlb-2026-09-25.json', import.meta.url), 'utf8'));
+const american = a => (a > 0 ? 100 / (a + 100) : -a / (-a + 100));
+const devig2 = (a, b) => american(a) / (american(a) + american(b));
+const lotteryChance = (a, b) => 1 / a / (1 / a + 1 / b);
+
+test('the lottery prices every two-way MLB market at the same cut', () => {
+  for (const g of fixture.games) {
+    const markets = [g.ml, ...(g.totals || []).map(t => t.slice(1)), ...(g.spreads || []).map(t => t.slice(1))].filter(Boolean);
+    for (const [a, b] of markets) close(1 / a + 1 / b, MLB_MARKET_OVERROUND, 0.02);
+  }
+});
+
+test('MLB total lines: same lines as the lottery, prices within a few percent', () => {
+  let err = 0;
+  let n = 0;
+  for (const g of fixture.games) {
+    const [line, over, under] = g.draftKings.total;
+    const est = lotteryTotalLines(line, devig2(over, under));
+    if (g.totals.length === 3) assert.deepEqual(est.map(l => l.line), g.totals.map(t => t[0]), g.home);
+    for (const [l, o, u] of g.totals) {
+      const e = est.find(x => x.line === l);
+      if (!e) continue;
+      err += Math.abs(e.over - lotteryChance(o, u));
+      n++;
+    }
+  }
+  assert.ok(err / n < 0.015, `${err / n}`);
+});
+
+test('MLB run lines: the lottery shrinks DraftKings toward 50/50', () => {
+  let err = 0;
+  let n = 0;
+  for (const g of fixture.games.filter(g => g.spreads)) {
+    const [awayLine, awayOdds, homeOdds] = g.draftKings.runLine;
+    const lines = lotteryRunLines(awayLine, devig2(awayOdds, homeOdds));
+    for (const [line, a, h] of g.spreads) {
+      const e = lines.find(x => x.awayLine === line);
+      assert.ok(e, `${g.home} ${line}`);
+      err += Math.abs(e.lottery - lotteryChance(a, h));
+      n++;
+    }
+  }
+  assert.ok(err / n < 0.012, `${err / n}`);
+  // The underdog getting runs is the better deal: true chance above the priced one.
+  const [dog] = lotteryRunLines(1.5, 0.64);
+  assert.ok(dog.fair > dog.lottery);
 });

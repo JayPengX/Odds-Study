@@ -127,7 +127,16 @@ export function parseEspnScoreboard(data, sport) {
       const fair = devigProportional([americanToProbability(over.odds), americanToProbability(under.odds)]);
       if (Number.isFinite(line) && fair) total = { line, overFair: fair[0] };
     }
-    games.push({ sport, startUtc: new Date(event.date).toISOString(), away: teams.away, home: teams.home, outcomes, total });
+    // Run line / handicap from the away team's side: { awayLine: -1.5, awayFair }.
+    let spread = null;
+    const awaySpread = odds?.pointSpread?.away?.close;
+    const homeSpread = odds?.pointSpread?.home?.close;
+    if (awaySpread?.line && homeSpread) {
+      const awayLine = Number(awaySpread.line);
+      const fair = devigProportional([americanToProbability(awaySpread.odds), americanToProbability(homeSpread.odds)]);
+      if (Number.isFinite(awayLine) && awayLine % 1 !== 0 && fair) spread = { awayLine, awayFair: fair[0] };
+    }
+    games.push({ sport, startUtc: new Date(event.date).toISOString(), away: teams.away, home: teams.home, outcomes, total, spread });
   }
   return games;
 }
@@ -347,7 +356,8 @@ export function mergeGames(dkGames, pmGames) {
       draftKings: dk?.outcomes ?? null,
       polymarket: pm?.outcomes ?? null,
       polymarketLiquidity: pm?.liquidity ?? null,
-      total: dk?.total ?? null
+      total: dk?.total ?? null,
+      spread: dk?.spread ?? null
     }))
     .filter(g => g.draftKings || g.polymarket)
     .sort((a, b) => a.startUtc.localeCompare(b.startUtc));

@@ -103,7 +103,8 @@ export function expectedReturn(fairChance, odds, stake = 100) {
 // error against real lottery prices). `checked: false` marks a guess.
 export const ODDS_ERROR = {
   mlb: { rel: 0.022, checked: true }, // 28 prices, 14 games: ~0.04 on ~1.8
-  mlbTotal: { rel: 0.02, checked: true }, // 12 total-line prices, 2 games (model)
+  mlbTotal: { rel: 0.02, checked: true }, // 68 total-line prices, 12 games (model)
+  mlbRunLine: { rel: 0.016, checked: true }, // 38 run-line prices, 10 games
   epl: { rel: 0.1, checked: false }, // soccer never checked
   f1: { rel: 0.08, checked: true }, // 9 prices
   f1Longshot: { rel: 0.35, checked: true }, // 325 vs 500 can't be told apart
@@ -132,8 +133,9 @@ export function median(values) {
 // MLB total runs (大小分). The lottery centres its total lines on the half-run
 // line closest to 50/50 and adds one run either side, at its usual ~13% take.
 // Total runs are modelled as negative binomial (mean mu, dispersion r): fitted
-// to DraftKings' one line, it reproduced the lottery's other lines within ~1
-// point of chance on average (12 prices, 2 games, 2026-09-25; r = 5 fit best).
+// to DraftKings' one line, it picked the lottery's three lines in 12 of 12
+// games and landed 0.9 points of chance (2% of price) off on 34 lines
+// (2026-09-25).
 export const MLB_TOTAL_DISPERSION = 5;
 
 // P(total runs <= k) for each k up to kMax.
@@ -181,6 +183,37 @@ export function lotteryTotalLines(line, overFair, r = MLB_TOTAL_DISPERSION) {
   const candidates = [Math.floor(line) - 0.5, Math.floor(line) + 0.5, Math.ceil(line) + 0.5].filter((l, i, all) => all.indexOf(l) === i && l > 0);
   const main = candidates.reduce((best, l) => (Math.abs(totalOverChance(l, mu, r) - 0.5) < Math.abs(totalOverChance(best, mu, r) - 0.5) ? l : best));
   return [main - 1, main, main + 1].filter(l => l > 0).map(l => ({ line: l, over: totalOverChance(l, mu, r), main: l === main }));
+}
+
+// Every two-way MLB market the lottery posts (win, totals, run lines, team
+// totals) adds up to about this in implied chance: 81 markets, 10 games on
+// 2026-09-25 ranged 1.143-1.173.
+export const MLB_MARKET_OVERROUND = 1.158;
+
+// MLB run lines (讓分). The lottery posts DraftKings' 1.5-run line and the
+// 2.5 line on the same side, but doesn't use DraftKings' chances: it pulls
+// them toward 50/50 (so the side likelier to cover is underpriced: usually the
+// underdog getting runs, for a heavy favourite the favourite giving them),
+// then moves a fixed step for the extra run. Fitted on 19 real prices
+// from 10 games (2026-09-25): 0.7 points of chance off, 1.6% of price.
+export const RUN_LINE_SHRINK = 0.732;
+export const RUN_LINE_STEP = 0.086;
+// The true chance's step for that extra run (the chance the favourite wins
+// by exactly 2), from a per-team run model; not checked against a market.
+export const RUN_LINE_TRUE_STEP = 0.09;
+
+// The two run lines for a game from DraftKings' line for the away team (e.g.
+// -1.5) and its fair chance of covering: [{ awayLine, fair, lottery }], where
+// `fair` is the away team's true chance of covering and `lottery` the chance
+// the lottery prices it at.
+export function lotteryRunLines(awayLine, awayFair) {
+  const lottery = 0.5 + RUN_LINE_SHRINK * (awayFair - 0.5);
+  const toward = Math.sign(awayLine); // +: the away team gets runs, so 2.5 covers more often
+  const clamp = p => Math.min(0.98, Math.max(0.02, p));
+  return [
+    { awayLine, fair: clamp(awayFair), lottery: clamp(lottery) },
+    { awayLine: awayLine + toward, fair: clamp(awayFair + toward * RUN_LINE_TRUE_STEP), lottery: clamp(lottery + toward * RUN_LINE_STEP) }
+  ];
 }
 
 // Implied chances of every outcome in a market, summed. 1.15 means a 15% overround.
