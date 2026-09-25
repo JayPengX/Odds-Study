@@ -565,8 +565,12 @@ body:not(.detail) .detail-only, body:not(.detail) .margin, body:not(.detail) .st
   width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.8rem; font-weight: 800;
   color: var(--badge); background: color-mix(in srgb, var(--badge) 14%, var(--surface)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--badge) 35%, transparent);
 }
-.bar-item > .badge, .bar-item > .logo-wrap, .bar-item > .logo { grid-row: 1 / 3; justify-self: center; }
+/* The first child is the row's icon, whatever it is (badge, logo, the
+   Premier League disc): it spans both lines, so the bar stays in column 2. */
+.bar-item > :first-child { grid-row: 1 / 3; grid-column: 1; justify-self: center; }
+.bar-item > .bar-name, .bar-item > .bar-track { grid-column: 2; }
 .bar-item > .logo-wrap .logo, .bar-item > .logo { width: 28px; height: 28px; }
+.bar-item > .league-epl.league-epl { width: 28px; height: 28px; }
 .board-emblem { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
 .board-emblem .logo { width: 28px; height: 28px; }
 .empty-icon { width: 56px; height: 56px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -651,13 +655,17 @@ details.market[open] > summary { margin-bottom: 6px; }
 .day-tile[aria-pressed='true'] .day-week { color: rgba(255, 255, 255, 0.85); }
 .day-tile[aria-pressed='true'] .day-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
 
-/* Premier League: the lion in its own purple on a small white disc. */
-.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 1px rgba(55, 0, 60, 0.18); }
+/* Premier League: the lion alone, in its own purple, in the same square box
+   as every other logo. In dark mode the colours invert and turn back round,
+   so the purple becomes a light lavender and the face lines stay visible. */
+.league-epl { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; }
 .league-epl.logo-xs { width: 18px; height: 18px; }
-.league-epl.logo-sm { width: 22px; height: 22px; }
-.league-epl.logo-tile { width: 26px; height: 26px; }
-.league-epl .logo { width: 78%; height: 78%; }
-.board-emblem .league-epl { width: 30px; height: 30px; }
+.league-epl.logo-sm { width: 20px; height: 20px; }
+.league-epl.logo-tile { width: 24px; height: 24px; }
+.league-epl .logo-wrap, .league-epl .logo { width: 100%; height: 100%; object-fit: contain; }
+.board-emblem .league-epl { width: 28px; height: 28px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .league-epl .logo { filter: invert(1) hue-rotate(180deg) saturate(1.4) brightness(1.15); } }
+:root[data-theme='dark'] .league-epl .logo { filter: invert(1) hue-rotate(180deg) saturate(1.4) brightness(1.15); }
 
 /* ---- Best value of the day: podium, then the full list ---------------------------- */
 .ranking-card { padding: 16px; }
@@ -721,3 +729,4 @@ details.market[open] > summary { margin-bottom: 6px; }
 }
 .logo-fallback { white-space: nowrap; overflow: hidden; line-height: 1; }
 .logo-fallback.logo-sm, .logo-fallback.logo-xs { font-size: 0.6rem; }
+.bar-item > .badge { width: 28px; height: 28px; }
