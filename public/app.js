@@ -1,6 +1,6 @@
 import {
   K_DRAFTKINGS,
-  blendFairChance,
+  blendOutcomes,
   combineParlay,
   estimateF1LotteryOdds,
   estimateLotteryOdds,
@@ -28,7 +28,8 @@ const state = {
   parlay: [],
   simPick: null,
   simSeed: 1,
-  day: null
+  day: null,
+  sport: 'all'
 };
 state.t = makeT(state.locale);
 
@@ -109,22 +110,29 @@ function teamName(team) {
 
 // ---- Bets -------------------------------------------------------------------
 
+function matchupText(game) {
+  return game.sport === 'epl'
+    ? `${teamName(game.home)} vs ${teamName(game.away)}`
+    : `${teamName(game.away)} @ ${teamName(game.home)}`;
+}
+
 function buildBets(data) {
   const t = state.t;
   const bets = [];
-  for (const game of data.mlb) {
-    const blend = blendFairChance(game.draftKingsAway, game.polymarketAway);
+  for (const game of data.games) {
+    const blend = blendOutcomes(game.draftKings, game.polymarket);
     if (!blend) continue;
-    const matchup = `${teamName(game.away)} @ ${teamName(game.home)}`;
-    const base = { gameId: game.id, game, matchup, start: game.startUtc };
-    for (const side of ['away', 'home']) {
-      const p = side === 'away' ? blend.fairChance : 1 - blend.fairChance;
-      const name = teamName(game[side]);
+    const matchup = matchupText(game);
+    const base = { gameId: game.id, game, sport: game.sport, matchup, start: game.startUtc };
+    const sides = game.sport === 'epl' ? ['home', 'draw', 'away'] : ['away', 'home'];
+    for (const side of sides) {
+      const p = blend.probs[side];
+      const name = side === 'draw' ? t('draw') : teamName(game[side]);
       bets.push({
         ...base,
         id: `${game.id}|ml|${side}`,
         kind: 'ml',
-        label: `${name} ${t('win')}`,
+        label: side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`,
         shortLabel: name,
         fairChance: p,
         estOdds: estimateLotteryOdds(p, blend.k)
@@ -152,6 +160,7 @@ function buildBets(data) {
         id: `f1|${d.name}`,
         gameId: 'f1',
         kind: 'f1',
+        sport: 'f1',
         matchup: data.f1.title,
         start: data.f1.startUtc,
         label: `F1 ${d.name}`,
@@ -178,36 +187,67 @@ function dayKey(iso) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function inSport(sport) {
+  return state.sport === 'all' || state.sport === sport;
+}
+
 function visibleBets() {
-  return state.bets.filter(b => dayKey(b.start) === state.day);
+  return state.bets.filter(b => inSport(b.sport) && dayKey(b.start) === state.day);
 }
 
 function rankedBets() {
   return visibleBets().sort((a, b) => betReturn(b) - betReturn(a));
 }
 
+function rerenderFiltered() {
+  renderSportFilter();
+  renderDayFilter();
+  renderRanking();
+  renderGames();
+  renderSimPicker();
+  renderSim();
+  renderF1();
+}
+
+function renderSportFilter() {
+  const t = state.t;
+  const present = new Set(state.bets.map(b => b.sport));
+  const sports = ['all', 'mlb', 'epl', 'f1'].filter(s => s === 'all' || present.has(s));
+  if (!sports.includes(state.sport)) state.sport = 'all';
+  $('sport-filter').replaceChildren(
+    ...sports.map(sport =>
+      el('button', {
+        class: 'ghost-button',
+        type: 'button',
+        'aria-pressed': String(sport === state.sport),
+        text: t(`sport_${sport}`),
+        onclick: () => {
+          state.sport = sport;
+          rerenderFiltered();
+        }
+      })
+    )
+  );
+}
+
 function renderDayFilter() {
-  const days = [...new Set(state.bets.map(b => dayKey(b.start)))].sort();
+  const days = [...new Set(state.bets.filter(b => inSport(b.sport)).map(b => dayKey(b.start)))].sort();
   if (!days.includes(state.day)) state.day = days[0] ?? null;
   const fmt = new Intl.DateTimeFormat(numberLocale(), { month: 'numeric', day: 'numeric', weekday: 'short' });
   $('day-filter').replaceChildren(
     ...days.map(day => {
-      const games = state.data.mlb.filter(g => dayKey(g.startUtc) === day).length;
-      const hasF1 = state.data.f1 && dayKey(state.data.f1.startUtc) === day;
+      const games = state.data.games.filter(g => inSport(g.sport) && dayKey(g.startUtc) === day).length;
+      const hasF1 = inSport('f1') && state.data.f1 && dayKey(state.data.f1.startUtc) === day;
       const [y, m, d] = day.split('-').map(Number);
-      const label = `${fmt.format(new Date(y, m - 1, d))} · ${games}${hasF1 ? ' + F1' : ''}`;
+      const count = [games ? String(games) : null, hasF1 ? 'F1' : null].filter(Boolean).join(' + ');
       return el('button', {
         class: 'ghost-button',
         type: 'button',
         'aria-pressed': String(day === state.day),
-        text: label,
+        text: `${fmt.format(new Date(y, m - 1, d))} · ${count}`,
         onclick: () => {
           state.day = day;
-          renderDayFilter();
-          renderRanking();
-          renderGames();
-          renderSimPicker();
-          renderSim();
+          rerenderFiltered();
         }
       });
     })
@@ -278,7 +318,7 @@ function renderRanking() {
       el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
       el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
     ]);
-    const context = bet.kind === 'total' ? fmtTime(bet.start) : `${bet.matchup} · ${fmtTime(bet.start)}`;
+    const context = bet.label.includes(bet.matchup) ? fmtTime(bet.start) : `${bet.matchup} · ${fmtTime(bet.start)}`;
     const tag = hasReal(bet.id) ? t('tagReal') : t('tagEstimated');
     return el('li', { class: 'ranking-item' }, [
       el('span', { class: 'rank', text: isWorst ? t('worst') : String(i + 1) }),
@@ -306,7 +346,7 @@ function renderRanking() {
 function renderGames() {
   const t = state.t;
   const container = $('games-list');
-  const games = state.data.mlb.filter(g => dayKey(g.startUtc) === state.day);
+  const games = state.data.games.filter(g => inSport(g.sport) && dayKey(g.startUtc) === state.day);
   if (games.length === 0) {
     container.replaceChildren(el('p', { class: 'muted', text: t('noBets') }));
     return;
@@ -317,16 +357,17 @@ function renderGames() {
       .filter(g => byGame.get(g.id))
       .map(game => {
         const bets = byGame.get(game.id);
-        const sourceKey = game.draftKingsAway != null && game.polymarketAway != null ? 'sourceBoth' : game.draftKingsAway != null ? 'sourceDk' : 'sourcePm';
+        const sourceKey = game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
         const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
-        const meta = `${fmtTime(game.startUtc)} · ${t(sourceKey)}${thin ? ` · ${t('thin')}` : ''}`;
+        const meta = `${t(`sport_${game.sport}`)} · ${fmtTime(game.startUtc)} · ${t(sourceKey)}${thin ? ` · ${t('thin')}` : ''}`;
         const notes = [];
+        if (game.sport === 'epl') notes.push(el('p', { class: 'note', text: t('soccerUnverified') }));
         if (game.total && game.total.line % 1 === 0) {
           notes.push(el('p', { class: 'note', text: t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }) }));
         }
         return el('article', { class: 'game' }, [
           el('div', { class: 'game-head' }, [
-            el('span', { class: 'game-title', text: `${teamName(game.away)} @ ${teamName(game.home)}` }),
+            el('span', { class: 'game-title', text: matchupText(game) }),
             el('span', { class: 'game-meta', text: meta })
           ]),
           betTable(bets),
@@ -452,7 +493,7 @@ function renderParlay() {
     el('ul', { class: 'parlay-legs' },
       result.legs.map(b =>
         el('li', {}, [
-          el('span', { text: b.kind === 'ml' ? `${b.label} · ${b.matchup}` : b.label }),
+          el('span', { text: b.label.includes(b.matchup) ? b.label : `${b.label} · ${b.matchup}` }),
           el('span', { class: 'num', text: fmtOdds(effectiveOdds(b)) })
         ])
       )
@@ -700,6 +741,7 @@ function renderF1() {
   const t = state.t;
   const body = $('f1-body');
   const f1 = state.data.f1;
+  $('f1').hidden = !inSport('f1');
   if (!f1) {
     body.replaceChildren(el('p', { class: 'muted', text: t('f1None') }));
     return;
@@ -718,6 +760,7 @@ function renderAll() {
   state.bets = buildBets(state.data);
   state.parlay = state.parlay.filter(id => state.bets.some(b => b.id === id));
   renderStatus('ok');
+  renderSportFilter();
   renderDayFilter();
   renderRanking();
   renderGames();

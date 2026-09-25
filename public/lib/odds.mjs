@@ -22,6 +22,13 @@ export function devigTwoWay(pA, pB) {
   return pA / (pA + pB);
 }
 
+// Same, for any number of outcomes (soccer's home/draw/away).
+export function devigProportional(probabilities) {
+  if (!probabilities.every(p => p > 0)) return null;
+  const total = probabilities.reduce((s, p) => s + p, 0);
+  return probabilities.map(p => p / total);
+}
+
 // Removes an N-way book's margin with the power method: finds k so that
 // sum(p_i^k) = 1. Undoes a longshot's larger overround more than a favorite's.
 export function devigPower(probabilities) {
@@ -68,11 +75,15 @@ export function combineParlay(legs) {
   );
 }
 
-// Fair chance for one game from whichever sources exist, plus the K to use.
-export function blendFairChance(draftKings, polymarket) {
-  if (draftKings != null && polymarket != null) return { fairChance: (draftKings + polymarket) / 2, k: K_BOTH, source: 'both' };
-  if (draftKings != null) return { fairChance: draftKings, k: K_DRAFTKINGS, source: 'draftkings' };
-  if (polymarket != null) return { fairChance: polymarket, k: K_POLYMARKET, source: 'polymarket' };
+// Fair chance of every outcome for one game ({away, home} or {away, draw, home})
+// from whichever sources exist, plus the K to use.
+export function blendOutcomes(draftKings, polymarket) {
+  if (draftKings && polymarket) {
+    const blended = Object.fromEntries(Object.keys(draftKings).map(k => [k, (draftKings[k] + polymarket[k]) / 2]));
+    return { probs: blended, k: K_BOTH, source: 'both' };
+  }
+  if (draftKings) return { probs: draftKings, k: K_DRAFTKINGS, source: 'draftkings' };
+  if (polymarket) return { probs: polymarket, k: K_POLYMARKET, source: 'polymarket' };
   return null;
 }
 

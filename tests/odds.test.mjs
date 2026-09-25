@@ -9,7 +9,8 @@ import {
   expectedReturn,
   overround,
   combineParlay,
-  blendFairChance,
+  blendOutcomes,
+  devigProportional,
   simulateRuns,
   seededRandom,
   K_BOTH,
@@ -63,12 +64,19 @@ test('parlay multiplies odds and chances', () => {
   close(p.fairChance, 0.2585);
 });
 
-test('blendFairChance picks the right multiplier', () => {
-  assert.deepEqual(blendFairChance(null, null), null);
-  const both = blendFairChance(0.5, 0.52);
-  close(both.fairChance, 0.51);
+test('blendOutcomes averages sources and picks the right multiplier', () => {
+  assert.equal(blendOutcomes(null, null), null);
+  const both = blendOutcomes({ away: 0.5, home: 0.5 }, { away: 0.52, home: 0.48 });
+  close(both.probs.away, 0.51);
   assert.equal(both.k, K_BOTH);
-  assert.equal(blendFairChance(null, 0.4).k, K_POLYMARKET);
+  assert.equal(blendOutcomes(null, { away: 0.4, draw: 0.3, home: 0.3 }).k, K_POLYMARKET);
+});
+
+test('proportional devig handles three outcomes', () => {
+  const [a, d, h] = devigProportional([0.14, 0.2, 0.75]);
+  close(a + d + h, 1);
+  assert.ok(h > 0.68 && h < 0.7);
+  assert.equal(devigProportional([0.5, null, 0.5]), null);
 });
 
 test('simulation is reproducible and averages to the expected loss', () => {
