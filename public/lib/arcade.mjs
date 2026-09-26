@@ -1,15 +1,16 @@
 // 小遊戲: small games that earn play money for the practice account, by
 // effort, not luck, and no math: typing ticket numbers and sorting tickets
 // (plain work), a home run derby and free throws (practice until your timing
-// is right). The pay is small on purpose: every round shows what it worked
-// out to an hour against Taiwan's minimum wage, and how little betting it
-// takes to lose it again, so the games are a reminder of how slowly money is
+// is right). The pay is small on purpose: every round shows how many minutes
+// of a minimum-wage job it equals, and how little betting it takes to lose
+// it again, so the games are a reminder of how slowly money is
 // earned. All together they pay at most ARCADE.dailyCap a Taiwan day.
 //
 // Winnings go in the ledger like every other entry ('game-<id>', kind
 // 'game'), so they sync and merge across devices the same way. The account's
 // betting result leaves them out, like the weekly grants.
 import { taipeiDayKey } from './sources.mjs';
+import { leagueTeams } from './teams.mjs';
 
 export const ARCADE = {
   dailyCap: 1500,
@@ -23,20 +24,95 @@ export const ARCADE = {
 };
 
 // Balanced pay: every game pays about ARCADE.perMinute for a minute of
-// typical play, so none is the one to farm. PACE is each game's typical
-// round: how long it takes (typing about 7 s a number on a phone, sorting
-// 1.5 s a ticket, a pitch or a shot about 3.5 s with the wait and the
-// replay) and how a practised but ordinary player does at the skill games.
-// Better players earn more at those, up to about 4 times as much.
-export const PACE = {
-  typing: { seconds: 140 },
-  sort: { seconds: 45 },
-  derby: { seconds: 35, results: ['hr', 'hr', 'hit', 'hit', 'hit', 'hit', 'miss', 'miss', 'miss', 'miss'] },
-  freethrow: { seconds: 32, results: ['swish', 'swish', 'make', 'make', 'make', 'make', 'miss', 'miss', 'miss', 'miss'] }
+// typical play, streaks and penalties included, so none is the one to farm.
+// PACE is each game's typical round: how long it takes (typing about 7 s a
+// number on a phone, sorting 1.5 s a ticket, a pitch or a shot about 3.5 s
+// with the wait and the replay) and how an ordinary player does ('ok' and
+// 'bad' for the work games). Better players earn more, up to about 4 times.
+
+// Streaks and penalties by how hard each game really is. Typing is easy
+// work: it punishes carelessness and pays little for keeping it up. Sorting
+// teams takes knowing them and free throws a steady hand: in between. The
+// derby's 40 ms window is hard enough that a miss costs nothing and a run of
+// hits pays the most.
+// `every`: right in a row for a bonus of `bonus`; `penalty`: what a mistake costs.
+export const STREAK = {
+  typing: { every: 5, bonus: 2, penalty: 2 },
+  sort: { every: 5, bonus: 2, penalty: 1 },
+  freethrow: { every: 3, bonus: 2, penalty: 1 },
+  derby: { every: 3, bonus: 3, penalty: 0 }
 };
 
-// What a round worked out to an hour, and how much betting loses as much on average.
-export const hourlyRate = (paid, ms) => (ms > 0 ? (paid / ms) * 3_600_000 : 0);
+// A round's running score: good(pay) for a success (returns the streak
+// bonus it earned, if any), bad() for a mistake (returns what it cost). The
+// round's pay never goes under 0.
+export function scorer(game) {
+  const rule = STREAK[game];
+  let sum = 0;
+  let run = 0;
+  let bonus = 0;
+  let penalty = 0;
+  return {
+    good(pay) {
+      sum += pay;
+      run++;
+      if (run % rule.every !== 0) return 0;
+      sum += rule.bonus;
+      bonus += rule.bonus;
+      return rule.bonus;
+    },
+    bad() {
+      run = 0;
+      sum -= rule.penalty;
+      penalty += rule.penalty;
+      return rule.penalty;
+    },
+    get total() {
+      return Math.max(0, Math.round(sum));
+    },
+    get run() {
+      return run;
+    },
+    get bonus() {
+      return bonus;
+    },
+    get penalty() {
+      return penalty;
+    }
+  };
+}
+
+// What each event pays before streaks ('bad' and 'miss' are mistakes).
+const EVENT_PAY = {
+  typing: { ok: () => TYPING.pay },
+  sort: { ok: () => SORT.pay },
+  derby: { hr: () => DERBY.pay.hr, hit: () => DERBY.pay.hit },
+  freethrow: { swish: () => FREE_THROW.pay.swish, make: () => FREE_THROW.pay.make }
+};
+
+// A whole round's pay from its events, in order.
+export function scoreRound(game, events) {
+  const score = scorer(game);
+  for (const e of events) {
+    const pay = EVENT_PAY[game][e];
+    if (pay) score.good(pay());
+    else score.bad();
+  }
+  return score;
+}
+export const PACE = {
+  typing: { seconds: 140, events: [...run(8, 'ok'), 'bad', ...run(7, 'ok'), 'bad', ...run(5, 'ok')] },
+  sort: { seconds: 75, events: [...run(8, 'ok'), 'bad', ...run(6, 'ok'), 'bad', ...run(7, 'ok'), 'bad', ...run(4, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok')] },
+  derby: { seconds: 35, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'hr', 'miss', 'miss', 'hit', 'miss'] },
+  freethrow: { seconds: 32, events: ['swish', 'make', 'make', 'miss', 'make', 'swish', 'miss', 'make', 'miss', 'miss'] }
+};
+function run(n, x) {
+  return Array(n).fill(x);
+}
+
+// How long a minimum-wage job takes to earn a round's pay (minutes), and how
+// much betting loses as much on average.
+export const wageMinutes = paid => (paid / ARCADE.minWage) * 60;
 export const stakeToLose = paid => paid / ARCADE.take;
 
 // ---- Money ------------------------------------------------------------------------
@@ -68,7 +144,7 @@ export function payGame(account, game, amount, now = new Date()) {
 // Ten pitches a round, each faster than the last, some of them change-ups
 // that slow down halfway. Swing as the ball crosses the plate: within
 // DERBY.hr of its middle a home run, within DERBY.hit a base hit, else a miss.
-export const DERBY = { pitches: 10, plate: 0.83, hr: 0.025, hit: 0.07, pay: { hr: 4, hit: 2, miss: 0 }, allHrBonus: 20 };
+export const DERBY = { pitches: 10, plate: 0.83, hr: 0.025, hit: 0.07, pay: { hr: 4, hit: 1 } };
 
 // How long pitch i (0-based) takes to reach the end of the track, in ms, and
 // whether it's a change-up.
@@ -90,10 +166,7 @@ export function swingResult(position) {
   return off <= DERBY.hr ? 'hr' : off <= DERBY.hit ? 'hit' : 'miss';
 }
 
-export function derbyPayout(results) {
-  const sum = results.reduce((s, r) => s + DERBY.pay[r], 0);
-  return sum + (results.length === DERBY.pitches && results.every(r => r === 'hr') ? DERBY.allHrBonus : 0);
-}
+export const derbyPayout = results => scoreRound('derby', results).total;
 
 // ---- 打工：輸入彩券號碼 (data entry) ---------------------------------------------------
 //
@@ -112,25 +185,27 @@ export const typedRight = (typed, code) => typed.replace(/\D/g, '') === code;
 
 export const typingPayout = right => right * TYPING.pay;
 
-// ---- 整理彩券 (sorting tickets) ----------------------------------------------------------
+// ---- 整理彩券 (sorting tickets by team) -------------------------------------------------
 //
-// Plain work: each ticket names a league; tap the box of its sport. Every one
-// sorted right pays the same; a wrong box pays nothing and the ticket stays.
-// NT$0.6 a ticket, paid rounded at the end of the round (NT$18 for all 30).
-export const SORT = { tickets: 30, pay: 0.6 };
-// The four boxes and the leagues whose tickets go in each.
-export const SORT_BINS = {
+// Work that takes knowing your teams: each ticket shows a team (its logo and
+// name); put it in its league's box. A round uses one set of four boxes,
+// either every baseball league (is it NPB or KBO?) or a basketball and
+// soccer mix. Each one right pays the same; a wrong box costs a little and
+// the ticket stays.
+export const SORT = { tickets: 30, pay: 1 };
+export const SORT_SETS = {
   baseball: ['mlb', 'npb', 'kbo', 'cpbl'],
-  basketball: ['nba', 'wnba', 'euroleague', 'bleague'],
-  soccer: ['epl', 'laliga', 'seriea', 'bundesliga', 'ucl', 'jleague'],
-  tennis: ['tennis', 'wta']
+  mixed: ['nba', 'bleague', 'euroleague', 'epl']
 };
 
-export function sortTicket(random = Math.random) {
-  const bins = Object.keys(SORT_BINS);
-  const bin = bins[Math.floor(random() * bins.length)];
-  const leagues = SORT_BINS[bin];
-  return { league: leagues[Math.floor(random() * leagues.length)], bin };
+export const sortSet = (random = Math.random) => Object.keys(SORT_SETS)[Math.floor(random() * Object.keys(SORT_SETS).length)];
+
+// A ticket: a league of the set, then one of its teams.
+export function sortTicket(set, random = Math.random) {
+  const leagues = SORT_SETS[set];
+  const league = leagues[Math.floor(random() * leagues.length)];
+  const teams = leagueTeams(league);
+  return { league, team: teams[Math.floor(random() * teams.length)] };
 }
 
 export const sortPayout = right => Math.round(right * SORT.pay);
@@ -140,7 +215,7 @@ export const sortPayout = right => Math.round(right * SORT.pay);
 // Ten shots. A marker sweeps back and forth across the aim bar, faster each
 // shot, while the green zone in the middle narrows: stop it in the zone's
 // middle half for a swish, anywhere in the zone for a make.
-export const FREE_THROW = { shots: 10, pay: { swish: 3, make: 2, miss: 0 } };
+export const FREE_THROW = { shots: 10, pay: { swish: 3, make: 2 } };
 
 export function shotPlan(i) {
   return { period: 1500 - i * 80, zone: 0.16 - i * 0.009 };
@@ -157,11 +232,14 @@ export function shotResult(position, plan) {
   return off <= plan.zone / 4 ? 'swish' : off <= plan.zone / 2 ? 'make' : 'miss';
 }
 
-export const freeThrowPayout = results => results.reduce((s, r) => s + FREE_THROW.pay[r], 0);
+export const freeThrowPayout = results => scoreRound('freethrow', results).total;
 
-// A game's typical pay per minute (PACE), to keep them level.
+// A game's typical pay per minute (PACE), to keep them level, and the most a
+// perfect round pays.
 export function typicalPerMinute(game) {
-  const pace = PACE[game];
-  const pay = { typing: typingPayout(TYPING.codes), sort: sortPayout(SORT.tickets), derby: derbyPayout(PACE.derby.results), freethrow: freeThrowPayout(PACE.freethrow.results) }[game];
-  return (pay / pace.seconds) * 60;
+  return (scoreRound(game, PACE[game].events).total / PACE[game].seconds) * 60;
+}
+export function bestRound(game) {
+  const best = { typing: ['ok', TYPING.codes], sort: ['ok', SORT.tickets], derby: ['hr', DERBY.pitches], freethrow: ['swish', FREE_THROW.shots] }[game];
+  return scoreRound(game, Array(best[1]).fill(best[0])).total;
 }

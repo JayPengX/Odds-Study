@@ -335,3 +335,21 @@ export function f1Driver(name) {
   }
   return { team: '', color: '#8a8f98', zh };
 }
+
+// Every club of a league we have a logo for, one name each (aliases dropped):
+// English names as the feeds write them. For games that show a team.
+const titleCase = key => key.replace(/\b[a-z]/g, c => c.toUpperCase());
+export function leagueTeams(sport) {
+  let names = [];
+  if (sport === 'mlb') names = Object.keys(MLB_ABBR);
+  else if (sport === 'nba') names = Object.keys(NBA_ABBR);
+  else if (sport === 'epl') names = Object.keys(EPL_ESPN_ID).map(titleCase);
+  else names = Object.keys(TEAM_BADGES[sport] ?? {});
+  const seen = new Set();
+  return names.filter(name => {
+    const logo = teamLogo(sport, name);
+    if (!logo || seen.has(logo)) return false;
+    seen.add(logo);
+    return true;
+  });
+}

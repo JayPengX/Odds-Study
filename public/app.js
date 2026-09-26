@@ -67,7 +67,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
-import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_BINS, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from './lib/arcade.mjs';
+import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_SETS, sortSet, sortTicket, FREE_THROW, shotPlan, markerAt, shotResult } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -1539,8 +1539,7 @@ function renderParlay() {
   }
   // Typed in NT$10 units, like the lottery's own slip: 10 units = NT$100.
   const stakeInput = el('input', {
-    type: 'number',
-    inputmode: 'numeric',
+    type: 'text',
     min: '1',
     step: '1',
     value: String(Math.round(stake / SLIP_RULES.unit)),
@@ -1555,6 +1554,7 @@ function renderParlay() {
       setTimeout(rerender);
     }
   });
+  attachPad(stakeInput, { digits: 5, label: t('slipStake') });
   ticket.push(
     el('label', { class: 'slip-field' }, [
       el('span', { text: t('slipStake') }),
@@ -2528,8 +2528,6 @@ function niceStep(range, target) {
   return (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
 }
 
-// Taiwan's 2026 minimum hourly wage.
-const MIN_WAGE_HOURLY = 196;
 // Each character is the real simulated player at that point of the ranking.
 const CHARACTERS = [
   { key: 'best', name: 'simLucky', rank: 'simLuckyRank', color: 'var(--good)', icon: '🍀' },
@@ -2919,8 +2917,8 @@ function renderFacts(stats, totals, characters, period) {
   if (lucky.biggestWin > 0) facts.push(factItem(t('factLucky'), { v: fmtCount(lucky.longestLosing) }, t('factLuckyWhy', { win: money(lucky.biggestWin) })));
   const avgLoss = -totals.net / SIM_PLAYERS;
   if (avgLoss > 0) {
-    const hours = (avgLoss / MIN_WAGE_HOURLY).toLocaleString(numberLocale(), { maximumFractionDigits: avgLoss < 10 * MIN_WAGE_HOURLY ? 1 : 0 });
-    facts.push(factItem(t('factWage', { period }), { loss: money(avgLoss), v: hours }, t('factWageWhy', { wage: MIN_WAGE_HOURLY })));
+    const hours = (avgLoss / ARCADE.minWage).toLocaleString(numberLocale(), { maximumFractionDigits: avgLoss < 10 * ARCADE.minWage ? 1 : 0 });
+    facts.push(factItem(t('factWage', { period }), { loss: money(avgLoss), v: hours }, t('factWageWhy', { wage: ARCADE.minWage })));
   }
   if (avgLoss > 0) facts.push(factItem(t('factBoba', { period }), { loss: money(avgLoss), v: fmtCount(avgLoss / BOBA_PRICE) }, t('factBobaWhy', { price: BOBA_PRICE })));
   const hitRate = totals.tickets > 0 ? stats.crowd.wonTickets / totals.tickets : 0;
@@ -3274,6 +3272,7 @@ function sparkline(path) {
   return svg;
 }
 
+attachPad($('lookup-number'), { digits: 6, onEnter: () => $('lookup-form').requestSubmit() });
 $('lookup-form').addEventListener('submit', event => {
   event.preventDefault();
   const n = Number($('lookup-number').value);
@@ -3408,7 +3407,7 @@ function renderStories(stats, period) {
   const dry = notable.drought;
   if (dry) add('🧊', 'storyDroughtTitle', dry, t('inARow', { n: fmtCount(dry.longestLosing) }), dry.wonTickets ? 'storyDrought' : 'storyDroughtNone', { streak: fmtCount(dry.longestLosing), tickets: fmtCount(dry.tickets), won: fmtCount(dry.wonTickets) }, 'back-low');
   const worst = notable.worst;
-  if (worst) add('💸', 'storyWorstTitle', worst, fmtMoney(worst.final), 'storyWorst', { staked: money(worst.staked), max: money(worst.maxStake), hours: fmtCount(-worst.final / MIN_WAGE_HOURLY) });
+  if (worst) add('💸', 'storyWorstTitle', worst, fmtMoney(worst.final), 'storyWorst', { staked: money(worst.staked), max: money(worst.maxStake), hours: fmtCount(-worst.final / ARCADE.minWage) });
   const hot = notable.hotStreak;
   if (hot?.longestWinning > 1) add('🔥', 'storyHotTitle', hot, t('inARowWon', { n: fmtCount(hot.longestWinning) }), 'storyHot', { tickets: fmtCount(hot.tickets), won: fmtCount(hot.wonTickets), final: fmtMoney(hot.final) });
   const long = notable.longshot;
@@ -3602,18 +3601,93 @@ function renderSimTable(bands, characters, weeks) {
   );
 }
 
+// ---- Number pad ----------------------------------------------------------------------
+
+// Every number on the page is keyed on the page's own pad, like a game's
+// controls, not the phone's keyboard: tapping the field opens a pad that
+// slides up from the bottom (1-9, 0, delete, OK). A real keyboard still works
+// in the field. On OK the field changes and `onEnter` runs.
+function attachPad(input, { digits = 7, onEnter = null, label = '' } = {}) {
+  input.readOnly = true;
+  input.setAttribute('inputmode', 'none');
+  input.classList.add('pad-field');
+  const commit = value => {
+    input.value = value;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    onEnter?.(value);
+  };
+  const open = () => {
+    if (document.querySelector('.pad-sheet')) return;
+    const t = state.t;
+    let value = input.value.replace(/\D/g, '');
+    let fresh = true;
+    const shown = el('p', { class: 'pad-value', 'aria-live': 'polite' });
+    const draw = () => (shown.textContent = value || '0');
+    const close = () => {
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey, true);
+      input.focus({ preventScroll: true });
+    };
+    const press = key => {
+      if (key === 'enter') {
+        close();
+        return commit(value || '0');
+      }
+      if (key === 'back') value = fresh ? '' : value.slice(0, -1);
+      // The first digit replaces the old number; the rest add to it.
+      else if (fresh) value = key === '0' ? '' : key;
+      else if (value.length < digits) value = (value + key).replace(/^0+/, '');
+      fresh = false;
+      draw();
+    };
+    const onKey = e => {
+      if (/^\d$/.test(e.key)) press(e.key);
+      else if (e.key === 'Backspace') press('back');
+      else if (e.key === 'Enter') press('enter');
+      else if (e.key === 'Escape') close();
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'back', '0', 'enter'];
+    const sheet = el('div', { class: 'pad-sheet', role: 'dialog', 'aria-label': label || input.getAttribute('aria-label') || '' }, [
+      el('div', { class: 'pad-top' }, [el('span', { class: 'muted', text: label || input.getAttribute('aria-label') || '' }), shown]),
+      el('div', { class: 'num-pad' },
+        keys.map(key =>
+          el('button', {
+            class: `num-key ${key.length > 1 ? `num-${key}` : ''}`,
+            type: 'button',
+            'aria-label': key === 'back' ? t('keyBack') : key === 'enter' ? t('keyOk') : key,
+            text: key === 'back' ? '⌫' : key === 'enter' ? t('keyOk') : key,
+            onpointerdown: event => (event.preventDefault(), press(key))
+          })
+        )
+      )
+    ]);
+    const backdrop = el('div', { class: 'pad-backdrop', onpointerdown: event => event.target === backdrop && close() }, sheet);
+    document.body.append(backdrop);
+    document.addEventListener('keydown', onKey, true);
+    draw();
+  };
+  input.addEventListener('click', open);
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      open();
+    } else if (/^\d$/.test(event.key)) {
+      open();
+    }
+  });
+  return input;
+}
+
 // ---- 小遊戲 (mini games) ------------------------------------------------------------
 
 // The games' tiles, today's winnings against the daily cap, and the game
 // being played. The game's own view is built once per round and kept, so the
 // page re-rendering (new odds, a sync) never interrupts a pitch.
 const ARCADE_ICON = { typing: '⌨️', sort: '🗂️', derby: '⚾', freethrow: '🏀' };
-const ARCADE_MAX = {
-  typing: typingPayout(TYPING.codes),
-  sort: sortPayout(SORT.tickets),
-  derby: DERBY.pitches * DERBY.pay.hr + DERBY.allHrBonus,
-  freethrow: FREE_THROW.shots * FREE_THROW.pay.swish
-};
+const ARCADE_MAX = Object.fromEntries(ARCADE.games.map(game => [game, bestRound(game)]));
 
 function renderArcade() {
   if (!state.accountReady) return;
@@ -3669,28 +3743,45 @@ function animate(draw) {
   state.arcadeFrame = requestAnimationFrame(frame);
 }
 
-// The strip above a game: progress, the round's money so far, the streak.
+// The strip above a game: progress, the round's money so far, the streak,
+// and a moment's note of a streak bonus or a penalty.
 function gameHud() {
   const t = state.t;
   const progress = el('div', { class: 'hud-bar', 'aria-hidden': 'true' }, el('div'));
   const count = el('span', { class: 'hud-count' });
   const money = el('strong', { class: 'hud-money' });
   const streak = el('span', { class: 'hud-streak' });
-  const node = el('div', { class: 'game-hud' }, [el('div', { class: 'hud-row' }, [count, streak, money]), progress]);
+  const note = el('span', { class: 'hud-note', 'aria-live': 'polite' });
+  const node = el('div', { class: 'game-hud' }, [el('div', { class: 'hud-row' }, [count, streak, note, money]), progress]);
   const set = ({ done, of, earned, run }) => {
     count.textContent = t('hudCount', { n: done, of });
     money.textContent = fmtMoney(earned, { sign: false });
-    streak.textContent = run >= 3 ? t('hudStreak', { n: run }) : '';
+    streak.textContent = run >= 2 ? t('hudStreak', { n: run }) : '';
     streak.classList.toggle('hot', run >= 5);
     progress.firstChild.style.width = `${(done / of) * 100}%`;
   };
-  return { node, set };
+  // After good() or bad(): +bonus in gold, -penalty in red.
+  const flash = (amount, good) => {
+    if (!amount) return;
+    note.textContent = good ? t('hudBonus', { v: fmtMoney(amount, { sign: false }) }) : t('hudPenalty', { v: fmtMoney(amount, { sign: false }) });
+    note.className = `hud-note ${good ? 'bonus' : 'penalty'}`;
+    void note.offsetWidth;
+    note.classList.add('show');
+  };
+  return { node, set, flash };
+}
+
+// Each game's streak and penalty, as one line under its rules.
+function streakRule(game) {
+  const r = STREAK[game];
+  const v = x => fmtMoney(x, { sign: false });
+  return r.penalty ? state.t('streakRule', { every: r.every, bonus: v(r.bonus), penalty: v(r.penalty) }) : state.t('streakRuleFree', { every: r.every, bonus: v(r.bonus) });
 }
 
 // A finished round: its winnings into the account (up to today's room), then
 // what the work came to an hour against the minimum wage, and how much
 // betting loses as much on average.
-function finishRound(game, amount, box, summary, ms) {
+function finishRound(game, amount, box, summary, ms, score = null) {
   const t = state.t;
   stopGame();
   const { account, paid } = payGame(state.account, game, amount);
@@ -3703,15 +3794,21 @@ function finishRound(game, amount, box, summary, ms) {
         document.createTextNode(summary),
         el('strong', { class: paid > 0 ? 'back-high' : '', text: ` ${t('arcadePaid', { v: fmtMoney(paid) })}` })
       ]),
+      score && (score.bonus || score.penalty) ? el('p', { class: 'arcade-score', text: t('scoreLine', { bonus: fmtMoney(score.bonus, { sign: false }), penalty: fmtMoney(score.penalty, { sign: false }) }) }) : null,
       amount > paid ? el('p', { class: 'note', text: t('arcadeCapNote') }) : null,
       el('p', { class: 'arcade-wage' }, [
-        document.createTextNode(t('arcadeWage', { m: minutes, s: seconds, rate: fmtMoney(hourlyRate(paid, ms), { sign: false }), wage: fmtMoney(ARCADE.minWage, { sign: false }) })),
+        document.createTextNode(t('arcadeWage', { m: minutes, s: seconds, work: fmtWorkMinutes(wageMinutes(paid)), wage: fmtMoney(ARCADE.minWage, { sign: false }) })),
         paid > 0 ? el('strong', { text: ` ${t('arcadeLoss', { v: fmtMoney(paid, { sign: false }), stake: fmtMoney(stakeToLose(paid), { sign: false }) })}` }) : null
       ]),
       el('button', { class: 'primary-button', type: 'button', text: t('arcadeAgain'), onclick: () => ((state.arcadeGame = null), openGame(game)) })
     ].filter(Boolean)
   );
   renderArcade();
+}
+
+// Minutes of work: one decimal under 10 ("3.7"), whole above.
+function fmtWorkMinutes(m) {
+  return m < 10 ? (Math.round(m * 10) / 10).toString() : fmtInt(m);
 }
 
 // A canvas drawn at the screen's pixel density, W x H in CSS pixels.
@@ -3788,10 +3885,9 @@ function derbyView() {
   let callout = null;
   let particles = [];
   let began = 0;
-  let run = 0;
+  const score = scorer('derby');
   let last = performance.now();
-  const earned = () => derbyPayout(results) - (results.length === DERBY.pitches && results.every(r => r === 'hr') ? DERBY.allHrBonus : 0);
-  const update = () => hud.set({ done: results.length, of: DERBY.pitches, earned: earned(), run });
+  const update = () => hud.set({ done: results.length, of: DERBY.pitches, earned: score.total, run: score.run });
   // The ball along its path: p is ballAt's 0-1, the plate at DERBY.plate.
   const ballPos = p => {
     const k = p / DERBY.plate;
@@ -3923,7 +4019,7 @@ function derbyView() {
       phase = 'done';
       const hr = results.filter(r => r === 'hr').length;
       const hits = results.filter(r => r === 'hit').length;
-      later(() => finishRound('derby', derbyPayout(results), box, t('derbyDone', { hr, hits }), performance.now() - began), 900);
+      later(() => finishRound('derby', score.total, box, t('derbyDone', { hr, hits }), performance.now() - began, score), 900);
       return;
     }
     phase = 'wait';
@@ -3942,7 +4038,8 @@ function derbyView() {
     const p = ballAt(plan, now - pitchStart);
     const result = late ? 'miss' : swingResult(p);
     results.push(result);
-    run = result === 'miss' ? 0 : run + 1;
+    if (result === 'miss') hud.flash(score.bad(), false);
+    else hud.flash(score.good(DERBY.pay[result]), true);
     phase = 'flight';
     const b = ballPos(Math.min(p, 1.1));
     const off = Math.abs(p - DERBY.plate);
@@ -3973,7 +4070,7 @@ function derbyView() {
   update();
   animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), swing()) }, [
-    el('p', { class: 'note', text: t('derbyRules', { hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }), bonus: fmtMoney(DERBY.allHrBonus, { sign: false }) }) }),
+    el('p', { class: 'note', text: `${t('derbyRules', { hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }) })} ${streakRule('derby')}` }),
     hud.node,
     canvas,
     box
@@ -4000,9 +4097,9 @@ function freeThrowView() {
   let particles = [];
   let ripple = -1e9;
   let began = 0;
-  let run = 0;
+  const score = scorer('freethrow');
   let last = performance.now();
-  const update = () => hud.set({ done: results.length, of: FREE_THROW.shots, earned: freeThrowPayout(results), run });
+  const update = () => hud.set({ done: results.length, of: FREE_THROW.shots, earned: score.total, run: score.run });
   const drawCourt = now => {
     const wall = ctx.createLinearGradient(0, 0, 0, 150);
     wall.addColorStop(0, '#1b2331');
@@ -4135,7 +4232,7 @@ function freeThrowView() {
       phase = 'done';
       const made = results.filter(r => r !== 'miss').length;
       const swish = results.filter(r => r === 'swish').length;
-      later(() => finishRound('freethrow', freeThrowPayout(results), box, t('ftDone', { made, swish }), performance.now() - began), 900);
+      later(() => finishRound('freethrow', score.total, box, t('ftDone', { made, swish }), performance.now() - began, score), 900);
       return;
     }
     shot = null;
@@ -4150,7 +4247,8 @@ function freeThrowView() {
     const marker = markerAt(plan, now - aimStart);
     const result = shotResult(marker, plan);
     results.push(result);
-    run = result === 'miss' ? 0 : run + 1;
+    // The money shows once the ball lands.
+    later(() => (result === 'miss' ? hud.flash(score.bad(), false) : hud.flash(score.good(FREE_THROW.pay[result]), true), update()), 900);
     phase = 'flight';
     const err = marker - 0.5;
     // Too high a mark: long (off the back of the rim); too low: short.
@@ -4171,68 +4269,71 @@ function freeThrowView() {
   update();
   animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), shoot()) }, [
-    el('p', { class: 'note', text: t('ftRules', { swish: fmtMoney(FREE_THROW.pay.swish, { sign: false }), make: fmtMoney(FREE_THROW.pay.make, { sign: false }) }) }),
+    el('p', { class: 'note', text: `${t('ftRules', { swish: fmtMoney(FREE_THROW.pay.swish, { sign: false }), make: fmtMoney(FREE_THROW.pay.make, { sign: false }) })} ${streakRule('freethrow')}` }),
     hud.node,
     canvas,
     box
   ]);
 }
 
-// 整理彩券: each ticket to its sport's box; keys 1-4 work too.
-const SORT_ICON = { baseball: '⚾', basketball: '🏀', soccer: '⚽', tennis: '🎾' };
+// 整理彩券: each ticket shows a team; put it in its league's box (keys 1-4 too).
 function sortView() {
   const t = state.t;
   const hud = gameHud();
   const box = el('div', { class: 'arcade-actions' });
   const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' });
-  let ticket = sortTicket();
+  const set = sortSet();
+  const bins = SORT_SETS[set];
+  const score = scorer('sort');
+  let ticket = sortTicket(set);
   let right = 0;
   let wrong = 0;
-  let run = 0;
   let began = 0;
-  const bins = Object.keys(SORT_BINS);
-  const card = tk =>
-    el('div', { class: 'lotto-ticket sort-ticket' }, [
+  const update = () => hud.set({ done: right, of: SORT.tickets, earned: score.total, run: score.run });
+  const card = tk => {
+    const team = { en: tk.team, zh: teamZh(tk.league, tk.team) };
+    return el('div', { class: 'lotto-ticket sort-ticket' }, [
       el('span', { class: 'lotto-head', text: t('lottoHead') }),
-      el('span', { class: 'sort-league' }, [leagueImg(tk.league, 'logo-sm'), el('strong', { text: t(`sport_${tk.league}`) })]),
+      el('span', { class: 'sort-team' }, [logoImg(tk.league, tk.team, teamName(team), 'logo-lg'), el('strong', { text: teamName(team) })]),
       el('small', { class: 'lotto-serial', text: groupCode(ticketCode()) })
     ]);
+  };
   const show = () => {
     slot.replaceChildren(card(ticket));
-    hud.set({ done: right, of: SORT.tickets, earned: sortPayout(right), run });
+    update();
   };
-  const place = (bin, button) => {
+  const place = (league, button) => {
     if (right >= SORT.tickets) return;
     if (!began) began = performance.now();
     const current = slot.firstChild;
-    if (bin === ticket.bin) {
+    if (league === ticket.league) {
       right++;
-      run++;
+      hud.flash(score.good(SORT.pay), true);
       button.classList.remove('flash');
       void button.offsetWidth;
       button.classList.add('flash');
-      current?.classList.add('fly', `fly-${bins.indexOf(bin)}`);
-      ticket = sortTicket();
+      current?.classList.add('fly', `fly-${bins.indexOf(league)}`);
+      ticket = sortTicket(set);
       if (right === SORT.tickets) {
-        hud.set({ done: right, of: SORT.tickets, earned: sortPayout(right), run });
+        update();
         binRow.remove();
-        later(() => finishRound('sort', sortPayout(right), box, t('sortDone', { n: right, wrong }), performance.now() - began), 250);
+        later(() => finishRound('sort', score.total, box, t('sortDone', { n: right, wrong }), performance.now() - began, score), 250);
         return;
       }
       later(show, 140);
     } else {
       wrong++;
-      run = 0;
+      hud.flash(score.bad(), false);
       current?.classList.remove('shake');
       void current?.offsetWidth;
       current?.classList.add('shake');
-      hud.set({ done: right, of: SORT.tickets, earned: sortPayout(right), run });
+      update();
     }
   };
-  const buttons = bins.map((bin, i) =>
-    el('button', { class: 'sort-bin', type: 'button', onclick: event => place(bin, event.currentTarget) }, [
-      el('span', { class: 'sort-bin-icon', 'aria-hidden': 'true', text: SORT_ICON[bin] }),
-      el('span', { text: t(`group_${bin}`) }),
+  const buttons = bins.map((league, i) =>
+    el('button', { class: 'sort-bin', type: 'button', onclick: event => place(league, event.currentTarget) }, [
+      leagueImg(league, 'logo-tile'),
+      el('span', { text: t(`sport_${league}`) }),
       el('small', { class: 'muted', text: String(i + 1) })
     ])
   );
@@ -4245,54 +4346,103 @@ function sortView() {
       const i = Number(e.key) - 1;
       if (i >= 0 && i < bins.length) place(bins[i], buttons[i]);
     }
-  }, [el('p', { class: 'note', text: t('sortRules', { n: SORT.tickets, total: fmtMoney(sortPayout(SORT.tickets), { sign: false }) }) }), hud.node, slot, binRow, box]);
+  }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.tickets, pay: fmtMoney(SORT.pay, { sign: false }) })} ${streakRule('sort')}` }), hud.node, slot, binRow, box]);
 }
 
-// 打工：輸入彩券號碼: type each ticket number exactly; each one right pays the
-// same. The clock starts at the first keystroke.
+// 打工：輸入彩券號碼: key in each ticket number on the page's own number pad
+// (no phone keyboard popping up; a real keyboard works too). Each one right
+// pays the same. The clock starts at the first key.
 function typingView() {
   const t = state.t;
   const hud = gameHud();
   const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' });
-  const input = el('input', { class: 'typing-input', type: 'text', inputmode: 'numeric', autocomplete: 'off', spellcheck: 'false', 'aria-label': t('typingLabel'), placeholder: t('typingLabel'), oninput: () => (began ||= performance.now()) });
+  const entry = el('p', { class: 'typing-entry', 'aria-live': 'polite' });
   const box = el('div', { class: 'arcade-actions' });
+  const score = scorer('typing');
   let code = ticketCode();
+  let typed = '';
   let right = 0;
   let typos = 0;
-  let run = 0;
   let began = 0;
+  let done = false;
+  const update = () => hud.set({ done: right, of: TYPING.codes, earned: score.total, run: score.run });
+  const showEntry = () => {
+    // What's keyed so far, grouped like the ticket, with the rest as dashes.
+    entry.textContent = typed.padEnd(TYPING.digits, '·').replace(/(.{4})(?=.)/g, '$1 ');
+    entry.classList.toggle('full', typed.length === TYPING.digits);
+  };
   const show = () => {
     slot.replaceChildren(el('div', { class: 'lotto-ticket' }, [el('span', { class: 'lotto-head', text: t('lottoHead') }), el('p', { class: 'typing-code', text: groupCode(code) })]));
-    hud.set({ done: right, of: TYPING.codes, earned: typingPayout(right), run });
+    showEntry();
+    update();
   };
-  const submit = event => {
-    event.preventDefault();
-    if (!input.value.trim()) return;
-    if (typedRight(input.value, code)) {
+  const submit = () => {
+    if (done || typed.length < TYPING.digits) return;
+    if (typedRight(typed, code)) {
       right++;
-      run++;
+      hud.flash(score.good(TYPING.pay), true);
       code = ticketCode();
-      input.classList.remove('typo');
+      entry.classList.remove('typo');
       slot.firstChild?.classList.add('fly', 'fly-2');
+      typed = '';
+      if (right === TYPING.codes) {
+        done = true;
+        update();
+        pad.remove();
+        entry.remove();
+        finishRound('typing', score.total, box, t('typingDone', { n: right, typos }), performance.now() - began, score);
+        return;
+      }
       later(show, 140);
     } else {
       typos++;
-      run = 0;
-      input.classList.add('typo');
+      hud.flash(score.bad(), false);
+      entry.classList.remove('typo');
+      void entry.offsetWidth;
+      entry.classList.add('typo');
+      typed = '';
       slot.firstChild?.classList.remove('shake');
       void slot.firstChild?.offsetWidth;
       slot.firstChild?.classList.add('shake');
-      hud.set({ done: right, of: TYPING.codes, earned: typingPayout(right), run });
-    }
-    input.value = '';
-    if (right === TYPING.codes) {
-      form.remove();
-      finishRound('typing', typingPayout(right), box, t('typingDone', { n: right, typos }), performance.now() - began);
+      showEntry();
+      update();
     }
   };
-  const form = el('form', { class: 'typing-form', onsubmit: submit }, [input, el('button', { class: 'primary-button', type: 'submit', text: t('typingEnter') })]);
+  const press = key => {
+    if (done) return;
+    began ||= performance.now();
+    if (key === 'back') typed = typed.slice(0, -1);
+    else if (key === 'enter') return submit();
+    else if (typed.length < TYPING.digits) typed += key;
+    showEntry();
+    // The tenth digit sends it: one less tap per ticket.
+    if (typed.length === TYPING.digits) submit();
+  };
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'back', '0', 'enter'];
+  const pad = el('div', { class: 'num-pad' },
+    keys.map(key =>
+      el('button', {
+        class: `num-key ${key.length > 1 ? `num-${key}` : ''}`,
+        type: 'button',
+        'aria-label': key === 'back' ? t('keyBack') : key === 'enter' ? t('typingEnter') : key,
+        text: key === 'back' ? '⌫' : key === 'enter' ? '✓' : key,
+        // pointerdown answers at once on phones (no 300 ms click wait).
+        onpointerdown: event => (event.preventDefault(), press(key))
+      })
+    )
+  );
   show();
-  return el('div', { class: 'arcade-game' }, [el('p', { class: 'note', text: t('typingRules', { n: TYPING.codes, pay: fmtMoney(TYPING.pay, { sign: false }) }) }), hud.node, slot, form, box]);
+  return el('div', {
+    class: 'arcade-game',
+    tabindex: '0',
+    onkeydown: e => {
+      if (/^\d$/.test(e.key)) press(e.key);
+      else if (e.key === 'Backspace') press('back');
+      else if (e.key === 'Enter') press('enter');
+      else return;
+      e.preventDefault();
+    }
+  }, [el('p', { class: 'note', text: `${t('typingRules', { n: TYPING.codes, pay: fmtMoney(TYPING.pay, { sign: false }) })} ${streakRule('typing')}` }), hud.node, slot, entry, pad, box]);
 }
 
 // ---- F1 -----------------------------------------------------------------------

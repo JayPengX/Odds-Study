@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCADE, PACE, typicalPerMinute, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_BINS, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
+import { ARCADE, PACE, STREAK, scorer, scoreRound, bestRound, typicalPerMinute, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_SETS, sortSet, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
+import { leagueTeams } from '../public/lib/teams.mjs';
 import { newAccount, balance, mergeAccounts } from '../public/lib/account.mjs';
 
 test('mini games pay into the ledger, at most the daily cap, and merge like any entry', () => {
@@ -35,7 +36,8 @@ test('home run derby: timing decides, faster pitches, change-ups slow down', () 
   assert.ok(ballAt(change, 900) < 0.9);
   // The home run window is a few tens of milliseconds even on the slowest pitch.
   assert.ok(2 * DERBY.hr * pitchPlan(0, () => 1).ms < 70);
-  assert.equal(derbyPayout(Array(10).fill('hr')), 10 * DERBY.pay.hr + DERBY.allHrBonus);
+  // Ten home runs: their pay and a streak bonus every 3.
+  assert.equal(derbyPayout(Array(10).fill('hr')), 10 * DERBY.pay.hr + 3 * STREAK.derby.bonus);
   assert.equal(derbyPayout(['hit', 'miss']), DERBY.pay.hit);
 });
 
@@ -50,22 +52,42 @@ test('data entry: pure effort, the same pay for every number typed right', () =>
 });
 
 test('every round is measured against the minimum wage and the lottery\'s take', () => {
-  // NT$60 in 10 minutes is NT$360 an hour; betting NT$273 loses it on average.
-  assert.equal(hourlyRate(60, 600_000), 360);
+  // NT$49 is 15 minutes of a minimum-wage job; betting NT$273 loses NT$60 on average.
+  assert.equal(wageMinutes(49), 15);
   assert.equal(Math.round(stakeToLose(60)), 273);
   // Effort pays modestly: a whole round of any game stays small.
-  assert.ok(typingPayout(TYPING.codes) <= 100 && sortPayout(SORT.tickets) <= 100 && derbyPayout(Array(10).fill('hr')) <= 250 && freeThrowPayout(Array(10).fill('swish')) <= 100);
+  for (const game of ARCADE.games) assert.ok(bestRound(game) <= 100, game);
 });
 
 
-test('ticket sorting: every ticket has one right box', () => {
-  const owner = new Map(Object.entries(SORT_BINS).flatMap(([bin, leagues]) => leagues.map(l => [l, bin])));
-  assert.equal(owner.size, Object.values(SORT_BINS).flat().length);
-  for (let i = 0; i < 50; i++) {
-    const ticket = sortTicket();
-    assert.equal(owner.get(ticket.league), ticket.bin);
+test('ticket sorting: a team from one of the round\'s four leagues, each with a logo', () => {
+  for (const [set, leagues] of Object.entries(SORT_SETS)) {
+    assert.equal(leagues.length, 4);
+    for (const league of leagues) assert.ok(leagueTeams(league).length >= 6, league);
+    for (let i = 0; i < 40; i++) {
+      const ticket = sortTicket(set);
+      assert.ok(leagues.includes(ticket.league));
+      assert.ok(leagueTeams(ticket.league).includes(ticket.team));
+    }
   }
+  assert.ok(SORT_SETS[sortSet()]);
   assert.equal(sortPayout(SORT.tickets), SORT.tickets * SORT.pay);
+});
+
+test('streaks and penalties follow how hard each game is', () => {
+  // The easy work punishes mistakes most; the hardest game not at all and pays streaks most.
+  assert.ok(STREAK.typing.penalty >= STREAK.sort.penalty && STREAK.sort.penalty >= STREAK.freethrow.penalty && STREAK.freethrow.penalty > STREAK.derby.penalty);
+  assert.equal(STREAK.derby.penalty, 0);
+  assert.ok(STREAK.derby.bonus / STREAK.derby.every > STREAK.typing.bonus / STREAK.typing.every);
+  // A streak pays its bonus on every `every`th in a row; a mistake resets it.
+  const score = scorer('typing');
+  for (let i = 0; i < 4; i++) assert.equal(score.good(3), 0);
+  assert.equal(score.good(3), STREAK.typing.bonus);
+  assert.equal(score.bad(), STREAK.typing.penalty);
+  assert.equal(score.run, 0);
+  assert.equal(score.total, 5 * 3 + STREAK.typing.bonus - STREAK.typing.penalty);
+  // A round never pays under 0.
+  assert.equal(scoreRound('typing', ['bad', 'bad', 'bad']).total, 0);
 });
 
 test('free throws: the arrow sweeps faster and the zone narrows; the middle swishes', () => {
@@ -76,7 +98,7 @@ test('free throws: the arrow sweeps faster and the zone narrows; the middle swis
   assert.equal(shotResult(0.5, plan), 'swish');
   assert.equal(shotResult(0.5 + plan.zone / 3, plan), 'make');
   assert.equal(shotResult(0.9, plan), 'miss');
-  assert.equal(freeThrowPayout(['swish', 'make', 'miss']), FREE_THROW.pay.swish + FREE_THROW.pay.make);
+  assert.equal(freeThrowPayout(['swish', 'make', 'miss']), FREE_THROW.pay.swish + FREE_THROW.pay.make - STREAK.freethrow.penalty);
   // No math and no luck: every game is work or timing.
   assert.deepEqual(ARCADE.games, ['typing', 'sort', 'derby', 'freethrow']);
 });
@@ -99,6 +121,5 @@ test('the pay is balanced: every game pays about the same per minute of typical 
     assert.ok(Math.abs(rate - ARCADE.perMinute) / ARCADE.perMinute < 0.15, `${game} ${rate}`);
   }
   // A perfect round of a skill game pays at most about four times a typical one.
-  assert.ok(derbyPayout(Array(10).fill('hr')) <= 4.5 * derbyPayout(PACE.derby.results));
-  assert.ok(freeThrowPayout(Array(10).fill('swish')) <= 4.5 * freeThrowPayout(PACE.freethrow.results));
+  for (const game of ['derby', 'freethrow']) assert.ok(bestRound(game) <= 4.5 * scoreRound(game, PACE[game].events).total, game);
 });

@@ -1060,13 +1060,9 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .arcade-actions { display: grid; gap: 8px; justify-items: start; }
 .arcade-result { font-weight: 600; }
 .typing-code { font: 700 1.6rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.06em; margin: 0; }
-.typing-form { display: flex; gap: 8px; }
-.typing-input { flex: 1 1 auto; min-width: 0; font: 600 1.2rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--grid); background: var(--surface); color: inherit; }
-.typing-input.typo { border-color: #c62828; box-shadow: 0 0 0 1px #c62828 inset; }
 .arcade-wage { margin: 0; font-size: 0.86rem; color: var(--text-secondary); }
 .arcade-tiles { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
-.typing-code.typing-form .primary-button { flex: none; white-space: nowrap; }
-.value-count { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+.typing-code.value-count { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
 .arcade-max { font-weight: 700; color: var(--text-secondary); }
 .game-hud { display: grid; gap: 6px; }
 .hud-row { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: var(--text-secondary); }
@@ -1097,3 +1093,31 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .sort-bin.flash { animation: bin-flash 0.35s; }
 @keyframes bin-flash { from { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); transform: scale(0.96); } }
 @media (prefers-reduced-motion: reduce) { .lotto-ticket, .hud-streak.hot, .sort-bin.flash, .lotto-ticket.shake { animation: none; transition: none; } }
+.hud-note { font-weight: 800; opacity: 0; }
+.hud-note.bonus { color: #f9a825; }
+.hud-note.penalty { color: #c62828; }
+.hud-note.show { animation: hud-note 1.1s ease-out; }
+@keyframes hud-note { 0% { opacity: 1; transform: translateY(4px); } 70% { opacity: 1; transform: translateY(-2px); } 100% { opacity: 0; transform: translateY(-6px); } }
+.arcade-score { margin: 0; font-size: 0.86rem; font-weight: 600; }
+.sort-team { display: grid; justify-items: center; gap: 6px; font-size: 1.15rem; text-align: center; }
+.sort-team .logo-lg, .sort-team .logo.logo-lg { width: 56px; height: 56px; }
+.sort-bin .league-badge { --s: 34px; }
+.sort-bin span:not(.league-badge):not(.logo-wrap) { font-size: 0.8rem; line-height: 1.2; }
+.typing-entry { margin: 0; text-align: center; font: 700 1.5rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; color: var(--text); }
+.typing-entry.typo { color: #c62828; animation: ticket-shake 0.3s; }
+.num-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 360px; width: 100%; justify-self: center; }
+.num-key { padding: 14px 0; border-radius: 12px; border: 1px solid var(--grid); background: var(--surface); color: inherit; font: 700 1.35rem system-ui, sans-serif; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.num-key:active { background: var(--surface-sunken); transform: scale(0.97); }
+.num-key.num-enter { background: var(--accent); color: #fff; border-color: transparent; }
+.num-key.num-back { color: var(--text-secondary); }
+
+/* The page's own number pad: a sheet from the bottom, for every number field. */
+.pad-field { cursor: pointer; caret-color: transparent; }
+.pad-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.35); display: flex; align-items: flex-end; justify-content: center; animation: pad-fade 0.15s ease-out; }
+.pad-sheet { width: min(100%, 420px); background: var(--surface); color: var(--text); border-radius: 18px 18px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.2); animation: pad-up 0.18s ease-out; }
+.pad-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.pad-value { margin: 0; font: 800 2rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.pad-sheet .num-pad { max-width: none; }
+@keyframes pad-up { from { transform: translateY(100%); } }
+@keyframes pad-fade { from { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .pad-backdrop, .pad-sheet { animation: none; } }
