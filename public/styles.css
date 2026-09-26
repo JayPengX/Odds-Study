@@ -1022,3 +1022,4 @@ details.market[open] > summary { margin-bottom: 6px; }
 .flow-equation strong { font-size: 1.05rem; }
 .flow-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: 12px 0 6px; background: var(--surface-sunken); }
 .flow-bar span { display: block; height: 100%; }
+.trait-tag { background: var(--accent-wash); color: var(--accent); }

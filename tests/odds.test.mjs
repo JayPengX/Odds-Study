@@ -130,7 +130,7 @@ test('habit pools pick favorites, underdogs and the least costly bets', () => {
 
 test('a season is reproducible and its path adds up', () => {
   const pools = habitPools(examplePool());
-  const run = () => simulateHabit({ habit: habit('casual'), pools, weeks: 52, random: seededRandom(5), big: false });
+  const run = () => simulateHabit({ habit: habit('casual'), pools, weeks: 52, random: seededRandom(5), big: false, traits: false });
   assert.deepEqual(run(), run());
   const a = run();
   assert.equal(a.path.length, 52);
@@ -141,7 +141,7 @@ test('a season is reproducible and its path adds up', () => {
 
 test('the chaser doubles after a losing week and stays under the cap', () => {
   const pools = habitPools(examplePool());
-  const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2), big: false });
+  const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2), big: false, traits: false });
   assert.ok(run.maxStake > 200 && run.maxStake <= 3000);
   assert.ok([400, 800, 1600, 3000].includes(run.maxStake));
 });
@@ -160,7 +160,7 @@ test('riders keep betting their winnings, within the ticket limit', () => {
 
 test('the habits\' quirks: breaks, hot hands and burnout', () => {
   const pools = habitPools(examplePool());
-  const run = (key, change = {}) => simulateHabit({ habit: { ...habit(key), ...change }, pools, weeks: 156, random: seededRandom(7), big: false });
+  const run = (key, change = {}) => simulateHabit({ habit: { ...habit(key), ...change }, pools, weeks: 156, random: seededRandom(7), big: false, traits: false });
   // Casual, chaser and careful take weeks off; the others never do.
   for (const key of ['casual', 'chaser', 'careful']) assert.ok(run(key).restWeeks > 0, key);
   for (const key of ['fan', 'underdog', 'dreamer']) assert.equal(run(key).restWeeks, 0, key);
@@ -615,5 +615,26 @@ test('big bets (the default): stakes grow with the balance, and every winner\'s 
     assert.ok(f.winnersLost > 0);
     assert.ok(f.take > 0);
     assert.equal(f.weeks, 52);
+  }
+});
+
+test('personality traits: people are combinations, and traits change what they do', async () => {
+  const { simulateCrowdStats, replayPlayer, habitPools, sportTemplate, SPORTS, TRAITS, traitKeys } = await import('../public/lib/odds.mjs');
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
+  const opts = { sportPools, startWeek: 10, weeks: 52, perGroup: 60, seed: 4, big: false };
+  const stats = simulateCrowdStats(opts);
+  const by = key => stats.traitSummaries.find(x => x.trait.key === key);
+  assert.equal(stats.traitSummaries.length, TRAITS.length + 1);
+  // Each trait is about as common as its share.
+  for (const trait of TRAITS) assert.ok(Math.abs(by(trait.key).share - trait.share) < 0.03, trait.key);
+  // Tilting raises stakes; the easily bored really quit.
+  assert.ok(by('tilt').avgStaked > by('none').avgStaked);
+  assert.ok(by('bored').quitShare > 0.1);
+  assert.equal(by('none').quitShare, 0);
+  // Replayed players keep their traits.
+  for (const who of Object.values(stats.notable).slice(0, 4)) {
+    const again = replayPlayer({ ...opts, index: who.serial - 1 });
+    assert.deepEqual(traitKeys(again.traits), traitKeys(who.traits));
+    assert.equal(again.final, who.final);
   }
 });

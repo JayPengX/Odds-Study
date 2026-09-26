@@ -448,6 +448,42 @@ export const SIM_WEEKLY_GRANT = 5_000;
 // tickets grow. `false` keeps the survey-based stakes (真實).
 export const BIG_BET_SHARE = { casual: 0.02, fan: 0.05, underdog: 0.04, dreamer: 0.02, chaser: 0.03, careful: 0.015 };
 let bigBets = true;
+
+// Personality traits: how a person reacts to what happens to them, on top of
+// their habit. Each person draws every trait on its own (`share` of people
+// have it), so a person is a combination: a careful casual bettor who tilts
+// and gets bored, say. Traits:
+// - tilt 越輸越大: each losing week raises the stake 1.5x (up to 4x); a winning week resets it;
+// - cashOut 見好就收: once NT$5,000 up, 8 weeks off, then the next NT$5,000 is the goal;
+// - streaky 手感派: after a winning week, one more ticket the next week;
+// - revenge 報復型: after losing NT$2,000+ in a week, twice the tickets the next week;
+// - heartbroken 玻璃心: missing a parlay by one pick, 2 weeks off;
+// - jackpot 大獎夢: after a win of 10x the stake or more, one more pick per ticket (up to 3 more);
+// - guardian 守本派: with the balance under the NT$10,000 start, half stakes;
+// - moody 看心情: each week's stakes somewhere between half and double;
+// - bored 三分鐘熱度: after 10 losing tickets in a row, quits for good.
+export const TRAITS = [
+  { key: 'tilt', share: 0.2 },
+  { key: 'cashOut', share: 0.15 },
+  { key: 'streaky', share: 0.2 },
+  { key: 'revenge', share: 0.12 },
+  { key: 'heartbroken', share: 0.15 },
+  { key: 'jackpot', share: 0.1 },
+  { key: 'guardian', share: 0.2 },
+  { key: 'moody', share: 0.25 },
+  { key: 'bored', share: 0.1 }
+];
+const TRAIT_BIT = Object.fromEntries(TRAITS.map((trait, i) => [trait.key, 1 << i]));
+// Off for unit tests of a habit's own behaviour.
+let withTraits = true;
+function drawTraits(random) {
+  let mask = 0;
+  for (let i = 0; i < TRAITS.length; i++) if (random() < TRAITS[i].share) mask |= 1 << i;
+  return mask;
+}
+export function traitKeys(mask) {
+  return TRAITS.filter((_, i) => mask & (1 << i)).map(trait => trait.key);
+}
 const unitRound = x => Math.floor(x / SLIP_RULES.unit) * SLIP_RULES.unit;
 const BOOST_MAX = 3000;
 // `share`: how much of the crowd bets this way. Most bettors are casual:
@@ -628,7 +664,15 @@ function freshState(habit) {
     wonPaid: 0,
     weekStaked: 0,
     weekGross: 0,
-    weekTax: 0
+    weekTax: 0,
+    // Traits (a bit mask, drawn when the season starts) and their state.
+    traits: null,
+    tiltMult: 1,
+    cashTarget: 5000,
+    lastWeekWon: false,
+    revengeNext: false,
+    extraLegs: 0,
+    quit: false
   };
 }
 
@@ -664,7 +708,9 @@ function storyOf(st) {
     shortWeeks: st.shortWeeks,
     lowestCash: st.lowestCash,
     lostStakes: st.lostStakes,
-    wonPaid: st.wonPaid
+    wonPaid: st.wonPaid,
+    traits: st.traits ?? 0,
+    quit: st.quit
   };
 }
 
@@ -679,6 +725,8 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
   const [lo, hi] = legsCap ?? habit.legs;
   const legSpan = hi - lo + 1;
   const base = habit.stakes[0];
+  if (st.traits == null) st.traits = withTraits ? drawTraits(random) : 0;
+  const has = key => (st.traits & TRAIT_BIT[key]) !== 0;
   for (let w = from; w < weeks; w++) {
     if (w > 0) st.cash += SIM_WEEKLY_GRANT;
     st.weekStaked = 0;
@@ -691,6 +739,16 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
     // Poisson number of tickets this week (none when there's nothing to bet on).
     let count = 0;
     if (pick) for (let p = random(); p > noTicket; p *= random()) count++;
+    if (pick && count > 0) {
+      if (has('streaky') && st.lastWeekWon) count++;
+      if (has('revenge') && st.revengeNext) count *= 2;
+    }
+    // This week's stake multiplier from the traits.
+    let mood = 1;
+    if (has('tilt')) mood *= st.tiltMult;
+    if (has('moody')) mood *= 0.5 + random() * 1.5;
+    if (has('guardian') && st.cash < SIM_START_BALANCE) mood *= 0.5;
+    if (st.quit) count = 0;
     if (st.rest > 0) {
       st.rest--;
       st.restWeeks++;
@@ -701,7 +759,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
     let week = 0;
     let winnings = 0;
     for (let i = 0; i < count || (riding() && i < count + RIDE_EXTRA_TICKETS); i++) {
-      const want = Math.min(lo + Math.floor(random() * legSpan), pick.games);
+      const want = Math.min(lo + Math.floor(random() * legSpan) + st.extraLegs, pick.games, SLIP_RULES.maxLegs);
       let legs = 0;
       let won = true;
       let missed = 0;
@@ -753,6 +811,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         stake = Math.max(stake, Math.min(bigBets ? SLIP_RULES.maxTicket : BOOST_MAX, stake * st.boost));
         st.boost = 1;
       }
+      if (mood !== 1 && stake > 0) stake = Math.max(SLIP_RULES.minTicket, unitRound(stake * mood));
       stake = Math.min(stake, SLIP_RULES.maxTicket);
       // Only what's left this week can be bet.
       const afford = Math.floor((st.cash - spent) / SLIP_RULES.unit) * SLIP_RULES.unit;
@@ -786,6 +845,7 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       if (won) {
         if (habit.ride) winnings += afterTax(gross);
         if (habit.hotHand) st.boost = 2;
+        if (has('jackpot') && odds >= 10) st.extraLegs = Math.min(3, st.extraLegs + 1);
         if (habit.satisfied) st.rest = Math.max(st.rest, habit.satisfied);
         st.wonTickets++;
         st.losing = 0;
@@ -808,6 +868,8 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         st.winning = 0;
         if (++st.losing > st.longestLosing) st.longestLosing = st.losing;
         if (habit.nearMiss && missed === 1 && legs > 1) st.boost = 2;
+        if (has('heartbroken') && missed === 1 && legs > 1) st.rest = Math.max(st.rest, 2);
+        if (has('bored') && st.losing >= 10) st.quit = true;
         if (habit.quitStreak && st.losing % habit.quitStreak[0] === 0) st.rest = Math.max(st.rest, habit.quitStreak[1]);
       }
     }
@@ -830,6 +892,16 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
     }
     if (habit.stopLoss && week <= -habit.stopLoss[0]) st.rest = Math.max(st.rest, habit.stopLoss[1]);
     st.profit += week;
+    // The traits react to how the week went.
+    if (st.weekStaked > 0) {
+      if (has('tilt')) st.tiltMult = week < 0 ? Math.min(4, st.tiltMult * 1.5) : 1;
+      st.lastWeekWon = week > 0;
+      st.revengeNext = week <= -2000;
+    }
+    if (has('cashOut') && st.profit >= st.cashTarget) {
+      st.rest = Math.max(st.rest, 8);
+      st.cashTarget = st.profit + 5000;
+    }
     if (path) path[w] = st.profit;
     if (st.profit > st.peak) {
       st.peak = st.profit;
@@ -842,9 +914,10 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
 }
 
 // One player's season with their full week-by-week path.
-export function simulateHabit({ habit, pools, weeks, random = Math.random, seed = 1, big = true }) {
+export function simulateHabit({ habit, pools, weeks, random = Math.random, seed = 1, big = true, traits = true }) {
   worldSeed = seed;
   bigBets = big;
+  withTraits = traits;
   const path = new Float64Array(weeks);
   const pick = picker([pools[habit.pick]]);
   return { path, ...playSeason(habit, () => pick, weeks, random, path) };
@@ -1060,9 +1133,10 @@ function layout(groups, per) {
 // year). `resume` (from an earlier run's `resume`) carries every player on
 // from where that run stopped instead of starting over, so 3 years is the
 // 1-year run plus 2 more years. Returns { results: {weeks: stats}, resume }.
-export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpoints = [weeks], perHabit, perGroup, seed = 1, onProgress, resume = null, big = true }) {
+export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpoints = [weeks], perHabit, perGroup, seed = 1, onProgress, resume = null, big = true, traits = true }) {
   worldSeed = seed;
   bigBets = big;
+  withTraits = traits;
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {
@@ -1095,6 +1169,8 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       {
         finals: new Float64Array(total),
         sums: groups.map(emptySum),
+        // Per trait, and for people with no trait at all (the last one).
+        traitSums: [...TRAITS, null].map(emptySum),
         // Each record per habit: [player index, value].
         records: Object.fromEntries(Object.entries(RECORD_START).map(([key, start]) => [key, HABITS.map(() => [-1, start])])),
         crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0, short: 0, broke: 0, winners: 0, winnersPaid: 0, winnersLost: 0, winnersStaked: 0 }
@@ -1110,6 +1186,21 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     const sum = tally.sums[g];
     const c = tally.crowd;
     tally.finals[index] = story.final;
+    for (let k = 0; k <= TRAITS.length; k++) {
+      if (k < TRAITS.length ? !(story.traits & (1 << k)) : story.traits) continue;
+      const ts = tally.traitSums[k];
+      const back = story.staked + story.final;
+      ts.n++;
+      ts.staked += story.staked;
+      ts.net += story.final;
+      ts.tickets += story.tickets;
+      ts.rr += back * back;
+      ts.rs += back * story.staked;
+      ts.ss += story.staked * story.staked;
+      if (story.final > 0) ts.ahead++;
+      if (story.everAhead) ts.everAhead++;
+      if (story.quit) ts.capHits++;
+    }
     const returned = story.staked + story.final;
     sum.n++;
     sum.staked += story.staked;
@@ -1241,6 +1332,8 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     const { finals, sums, records, crowd } = tally;
     const summaries = HABITS.map(habit => ({ habit, ...summarize(sums.filter((_, g) => groups[g].habit === habit)) }));
     const fanSummaries = sportPools ? FANS.map(fan => ({ fan, ...summarize(sums.filter((_, g) => groups[g].fan === fan)) })) : [];
+    // Traits: each one's players (and people with none), share of the crowd.
+    const traitSummaries = [...TRAITS, { key: 'none' }].map((trait, k) => ({ trait, share: tally.traitSums[k].n / total, quitShare: tally.traitSums[k].n ? tally.traitSums[k].capHits / tally.traitSums[k].n : 0, ...summarize([tally.traitSums[k]]) }));
     // Sorted results (a plain numeric sort, far quicker than sorting indexes).
     const sorted = finals.slice().sort();
     // Replays one player exactly up to this checkpoint; `serial` is their
@@ -1289,6 +1382,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       bands: bands.slice(0, m),
       summaries,
       fanSummaries,
+      traitSummaries,
       groupStats,
       characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
       totals: {
@@ -1355,9 +1449,10 @@ export function moneyFlow(weeks, crowd, staked, net) {
   };
 }
 
-export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup, perHabit, seed = 1, index, big = true }) {
+export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup, perHabit, seed = 1, index, big = true, traits = true }) {
   worldSeed = seed;
   bigBets = big;
+  withTraits = traits;
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {

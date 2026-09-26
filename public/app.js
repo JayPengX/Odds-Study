@@ -4,6 +4,7 @@ import {
   groupSize,
   SPORTS,
   SIM_SPORTS,
+  traitKeys,
   sportTemplate,
   weekOfYear,
   K_DRAFTKINGS,
@@ -2764,6 +2765,8 @@ function crowdCard(s) {
       el('span', { text: t('crowdLike', { habit: t(`habit_${habit.key}`), ahead: summary ? fmtPctShort(summary.aheadShare) : '–', back: summary ? fmtBack(summary.back) : '–', period: periodName(weeks) }) })
     ]),
     el('ul', { class: 'facts' }, [
+      // A trait that shows in the slips: raising the stake after a losing slip.
+      profile.chase >= 0.5 && crowd.traitSummaries ? el('li', { text: t('crowdTilt', { final: fmtMoney(crowd.traitSummaries.find(x => x.trait.key === 'tilt').avgFinal), none: fmtMoney(crowd.traitSummaries.find(x => x.trait.key === 'none').avgFinal), period: periodName(weeks) }) }) : null,
       el('li', { text: t('crowdAhead', { share: fmtPctShort(crowd.totals.aheadShare), period: periodName(weeks) }) }),
       el('li', { text: t('crowdNote', { weeks: fmtCount(Math.max(1, Math.round(profile.weeks))) }) })
     ])
@@ -2983,6 +2986,7 @@ function drawSim(stats, weeks) {
   renderPlayers(characters);
   renderHabits(summaries);
   renderFans(stats.fanSummaries);
+  renderTraits(stats.traitSummaries);
   renderFacts(stats, totals, characters, summaries, period);
   renderFlow(stats, period);
   renderStories(stats, period);
@@ -3048,6 +3052,7 @@ function renderPlayers(characters) {
         ]),
         el('div', { class: 'player-tags' }, [
           p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null,
+          ...traitTags(p),
           el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) }),
           el('span', { class: 'habit-tag detail-only', text: `${t('playerMaxStake')} ${fmtMoney(p.maxStake, { sign: false })}` }),
           p.restWeeks > 0 ? el('span', { class: 'habit-tag detail-only', text: t('playerRest', { n: fmtCount(p.restWeeks) }) }) : null
@@ -3088,6 +3093,35 @@ function renderHabits(summaries) {
       })
     )
   );
+}
+
+// Personality traits, from the most money back to the least; people with no
+// trait at all for comparison.
+const TRAIT_ICON = { tilt: '🔥', cashOut: '💰', streaky: '🍀', revenge: '😤', heartbroken: '💔', jackpot: '🌠', guardian: '🛡️', moody: '🎭', bored: '🥱', none: '😐' };
+function renderTraits(traits) {
+  const t = state.t;
+  if (!traits?.length) return;
+  // By the average result: traits change how much people stake, not the cut.
+  const sorted = [...traits].sort((a, b) => b.avgFinal - a.avgFinal);
+  const scaleMax = Math.max(100, ...sorted.map(x => x.back)) * 1.04;
+  $('sim-traits').replaceChildren(
+    ...sorted.map(x =>
+      barItem({
+        icon: badge(TRAIT_ICON[x.trait.key], 'var(--accent)', 'emoji'),
+        name: t(`trait_${x.trait.key}`),
+        desc: t(`traitDesc_${x.trait.key}`),
+        back: x.back,
+        margin: x.backMargin,
+        scaleMax,
+        meta: t('traitMeta', { share: fmtShare(x.share), ahead: fmtShare(x.aheadShare), final: fmtMoney(x.avgFinal) }) + (x.quitShare >= 0.05 ? ` · ${t('traitQuit', { v: fmtShare(x.quitShare) })}` : '')
+      })
+    )
+  );
+}
+
+// A person's trait tags.
+function traitTags(p) {
+  return traitKeys(p.traits ?? 0).map(key => el('span', { class: 'habit-tag trait-tag', text: `${TRAIT_ICON[key]} ${state.t(`trait_${key}`)}` }));
 }
 
 // The same crowd by what they bet on: one sport all year, or everything.
@@ -3515,7 +3549,7 @@ function renderLookup(serial) {
     el('div', { class: 'lookup-card' }, [
       el('div', { class: 'story-head' }, [
         el('span', { class: 'story-icon', 'aria-hidden': 'true', text: p.final > 0 ? '😎' : p.everAhead ? '😬' : '😶' }),
-        el('div', {}, [el('p', { class: 'story-serial' }, [document.createTextNode(`#${fmtCount(n)}`), pr ? el('span', { class: 'serial-pr', text: t('playerPR', { n: pr }) }) : null]), el('div', { class: 'player-tags' }, [p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null, el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })])])
+        el('div', {}, [el('p', { class: 'story-serial' }, [document.createTextNode(`#${fmtCount(n)}`), pr ? el('span', { class: 'serial-pr', text: t('playerPR', { n: pr }) }) : null]), el('div', { class: 'player-tags' }, [p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null, el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) }), ...traitTags(p)])])
       ]),
       el('p', { class: `story-big ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
       sparkline(p.path),
@@ -3568,7 +3602,7 @@ function renderStories(stats, period) {
   // `tone`: how the big figure reads (good, bad or neutral); money by its sign.
   // A record held only within the player's habit says so in its title.
   const add = (icon, titleKey, p, big, textKey, vars, tone = null) =>
-    p && stories.push({ icon, title: p.overall ? t(titleKey) : t('storyAmong', { title: t(titleKey), habit: t(`habit_${p.habit.key}`) }), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), t(`habit_${p.habit.key}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
+    p && stories.push({ icon, title: p.overall ? t(titleKey) : t('storyAmong', { title: t(titleKey), habit: t(`habit_${p.habit.key}`) }), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), t(`habit_${p.habit.key}`), ...traitKeys(p.traits ?? 0).map(key => `${TRAIT_ICON[key]} ${t(`trait_${key}`)}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
   const w = notable.biggestWin;
   if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), 'storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds), final: fmtMoney(w.final) });
   const best = notable.best;
