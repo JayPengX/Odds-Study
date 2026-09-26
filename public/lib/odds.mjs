@@ -7,16 +7,22 @@ export const K_BOTH = 1.151;
 export const K_DRAFTKINGS = 1.153;
 export const K_POLYMARKET = 1.158;
 // F1 race winner, drivers the lottery prices one by one: lottery implied
-// chance ~= fair chance ^ F1_EXPONENT. Checked on 9 prices from two snapshots
-// of the 2026 Azerbaijan GP (average error ~8%); a refit didn't beat it.
-export const F1_EXPONENT = 0.692;
+// chance ~= F1_SCALE x fair chance ^ F1_EXPONENT. Fitted on the lottery's 2026
+// Azerbaijan GP board on race eve (8 drivers at 1% or more, against
+// Polymarket's devigged prices the same hour): about 10% average error. The
+// old curve without a scale (fair ^ 0.692) priced the favourite at 1.37 when
+// the lottery had 1.20, and every longshot at the wrong step.
+export const F1_SCALE = 1.17;
+export const F1_EXPONENT = 0.765;
+// Never below this, however big the favourite.
+export const F1_MIN_ODDS = 1.05;
 // Longshots aren't on that curve: the lottery puts them on a few fixed prices.
-// On 2026-09-25 a 0.6% driver was 65, 0.15-0.25% drivers 325, the rest 500.
-// [fair chance at or above, price], checked in order.
+// Race eve: a 0.35% driver 275, 0.08-0.13% drivers mostly 500 (one 275, one
+// 56); earlier that week a 0.6% driver was 65. [fair chance at or above, price].
 export const F1_LONGSHOT_STEPS = [
   [0.01, null],
   [0.004, 65],
-  [0.001, 325],
+  [0.0015, 275],
   [0, 500]
 ];
 
@@ -89,9 +95,9 @@ export function estimateFuturesOdds(fairChances, overround) {
   });
 }
 
-export function estimateF1LotteryOdds(fairChance, exponent = F1_EXPONENT) {
+export function estimateF1LotteryOdds(fairChance) {
   const [, step] = F1_LONGSHOT_STEPS.find(([min]) => fairChance >= min);
-  return step ?? round2(1 / fairChance ** exponent);
+  return step ?? Math.max(F1_MIN_ODDS, round2(1 / (F1_SCALE * fairChance ** F1_EXPONENT)));
 }
 
 // Average amount returned per `stake` over many identical bets.
@@ -106,10 +112,14 @@ export const ODDS_ERROR = {
   mlbTotal: { rel: 0.02, checked: true }, // 68 total-line prices, 12 games (model)
   mlbRunLine: { rel: 0.016, checked: true }, // 38 run-line prices, 10 games
   mlbTeamTotal: { rel: 0.03, checked: true }, // 36 team-total prices, 9 games (model)
+  // Lines past the ones the lottery posted that day: the same model, unchecked.
+  mlbTotalExtra: { rel: 0.05, checked: false },
+  mlbRunLineExtra: { rel: 0.06, checked: false },
+  mlbTeamTotalExtra: { rel: 0.05, checked: false },
   topInning: { rel: 0.03, checked: true }, // the lottery's own table, 8 games
   epl: { rel: 0.1, checked: false }, // soccer never checked
-  f1: { rel: 0.08, checked: true }, // 9 prices
-  f1Longshot: { rel: 0.35, checked: true }, // 325 vs 500 can't be told apart
+  f1: { rel: 0.1, checked: true }, // 8 prices, race eve
+  f1Longshot: { rel: 0.4, checked: true }, // 275 vs 500 can't be told apart
   future_al: { rel: 0.06, checked: true },
   future_nl: { rel: 0.2, checked: true },
   future_ws: { rel: 0.15, checked: true },
@@ -303,6 +313,38 @@ export function lotteryTeamTotal(teamMean, r = TEAM_RUNS_DISPERSION) {
   while (line < 15 && Math.abs(over(line + 1) - 0.5) < Math.abs(over(line) - 0.5)) line += 1;
   return { line, over: over(line) };
 }
+
+// Chance a team scores over a half-run line, from its mean runs.
+export function teamOverChance(teamMean, line, r = TEAM_RUNS_DISPERSION) {
+  const pmf = runsPmf(teamMean, r);
+  let under = 0;
+  for (let k = 0; k <= Math.floor(line) && k <= TEAM_RUNS_MAX; k++) under += pmf[k];
+  return 1 - under;
+}
+
+// Chance the away team covers a run line (away score + awayLine > home
+// score), from the fitted score grid. Any half-run line, either direction.
+export function runLineCover(grid, awayLine) {
+  return gridChance(grid, (h, a) => a + awayLine > h);
+}
+
+// Extra lines beyond the ones the lottery was checked on: only those whose
+// chance is between these, so a pick is never a near-certainty or a lottery
+// ticket by accident.
+export const LINE_CHANCE_RANGE = [0.03, 0.97];
+// Odds for any line: implied chance p x k (the lottery's usual cut), but never
+// more than halfway from p to certainty, so a lopsided line still pays a bit.
+// The same as p x k for every line the lottery posts (p under ~0.77).
+export function estimateLineOdds(p, k) {
+  return Math.max(1.01, round2(1 / Math.min(p * k, p + (1 - p) / 2)));
+}
+
+export function lineInRange(p) {
+  return p >= LINE_CHANCE_RANGE[0] && p <= LINE_CHANCE_RANGE[1];
+}
+
+// Soccer goals: nearly Poisson, the same negative binomial with a huge dispersion.
+export const GOALS_DISPERSION = 200;
 
 // 得分最高單局: which inning (1-9, extra innings excluded) scores the most runs,
 // or a tie for the most. No other source prices it, and the lottery's table
@@ -1316,6 +1358,15 @@ export function slipPayoutTable({ legs, sizes, stake }) {
     net[won] = t;
   }
   return { gross, net };
+}
+
+// What a finished ticket pays. Each leg is 'won', 'lost' or 'void' (called
+// off: the lottery counts it at odds 1.00, so a single gets its stake back
+// and a parlay goes on without it). Gross is before tax, net after.
+export function settleSlip({ legs, sizes, stake }) {
+  const { gross, net } = slipPayoutTable({ legs: legs.map(l => ({ odds: l.result === 'void' ? 1 : l.odds })), sizes, stake });
+  const mask = legs.reduce((m, l, i) => (l.result === 'lost' ? m : m | (1 << i)), 0);
+  return { gross: gross[mask], net: net[mask] };
 }
 
 // A deep look at one ticket, all exact except the one-year outlook:

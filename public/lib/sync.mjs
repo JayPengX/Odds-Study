@@ -1,0 +1,52 @@
+// Syncs the simulated account across devices through the shared Worker's
+// /odds-sync route (Firestore behind it). One 8-character passcode is both
+// the account's address and its only key; the Worker stores the account
+// under the passcode's hash, never the passcode itself.
+export const SYNC_URL = 'https://orbit-workers-proxy.pengzjay.workers.dev/odds-sync';
+export const PASSCODE_PATTERN = /^[2-9A-HJ-NP-Z]{8}$/;
+
+// What people type: lower case, spaces and dashes are fine. (Passcodes never
+// use 0, 1, O or I, so they can't be misread.)
+export function cleanPasscode(text) {
+  return String(text || '')
+    .toUpperCase()
+    .replace(/[\s-]/g, '');
+}
+
+async function request(method, { passcode, payload } = {}) {
+  const url = passcode ? `${SYNC_URL}?passcode=${encodeURIComponent(passcode)}` : SYNC_URL;
+  const res = await fetch(url, {
+    method,
+    headers: payload ? { 'Content-Type': 'application/json' } : {},
+    body: payload ? JSON.stringify({ payload }) : undefined,
+    signal: AbortSignal.timeout(20_000)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(body?.error?.message || `HTTP ${res.status}`);
+    error.code = body?.error?.code || `HTTP_${res.status}`;
+    throw error;
+  }
+  return body;
+}
+
+// New synced account: returns its passcode.
+export async function createSync(account) {
+  const { passcode } = await request('POST', { payload: JSON.stringify(account) });
+  return passcode;
+}
+
+// The synced account, or null if no account has this passcode.
+export async function readSync(passcode) {
+  const body = await request('GET', { passcode });
+  if (!body.exists || !body.payload) return null;
+  try {
+    return JSON.parse(body.payload);
+  } catch {
+    return null;
+  }
+}
+
+export async function writeSync(passcode, account) {
+  await request('PATCH', { passcode, payload: JSON.stringify(account) });
+}

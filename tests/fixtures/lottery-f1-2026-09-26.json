@@ -1,0 +1,121 @@
+{
+ "note": "2026 Azerbaijan GP race winner, 2026-09-26 07:32 Taiwan time. lottery: the Taiwan Sports Lottery board (drivers it did not show are 500). polymarket: Polymarket Yes prices (midpoint) the same hour, before devig.",
+ "event": "f1-azerbaijan-grand-prix-winner-2026-09-26",
+ "drivers": [
+  {
+   "name": "George Russell",
+   "polymarket": 0.645,
+   "lottery": 1.2
+  },
+  {
+   "name": "Kimi Antonelli",
+   "polymarket": 0.135,
+   "lottery": 4.25
+  },
+  {
+   "name": "Charles Leclerc",
+   "polymarket": 0.0735,
+   "lottery": 7.5
+  },
+  {
+   "name": "Max Verstappen",
+   "polymarket": 0.047,
+   "lottery": 10.75
+  },
+  {
+   "name": "Oscar Piastri",
+   "polymarket": 0.0425,
+   "lottery": 8.75
+  },
+  {
+   "name": "Lando Norris",
+   "polymarket": 0.0345,
+   "lottery": 12
+  },
+  {
+   "name": "Lewis Hamilton",
+   "polymarket": 0.028,
+   "lottery": 12
+  },
+  {
+   "name": "Isack Hadjar",
+   "polymarket": 0.0145,
+   "lottery": 28
+  },
+  {
+   "name": "Franco Colapinto",
+   "polymarket": 0.004,
+   "lottery": 275
+  },
+  {
+   "name": "Pierre Gasly",
+   "polymarket": 0.0015,
+   "lottery": 56
+  },
+  {
+   "name": "Alexander Albon",
+   "polymarket": 0.0015,
+   "lottery": 500
+  },
+  {
+   "name": "Carlos Sainz Jr.",
+   "polymarket": 0.001,
+   "lottery": 275
+  },
+  {
+   "name": "Oliver Bearman",
+   "polymarket": 0.001,
+   "lottery": 500
+  },
+  {
+   "name": "Arvid Lindblad",
+   "polymarket": 0.001,
+   "lottery": 500
+  },
+  {
+   "name": "Liam Lawson",
+   "polymarket": 0.001,
+   "lottery": 500
+  },
+  {
+   "name": "Fernando Alonso",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Gabriel Bortoleto",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Sergio Perez",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Esteban Ocon",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Nico Hulkenberg",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Valtteri Bottas",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Lance Stroll",
+   "polymarket": 0.0005,
+   "lottery": 500
+  },
+  {
+   "name": "Yuki Tsunoda",
+   "polymarket": 0.0005,
+   "lottery": 500
+  }
+ ]
+}

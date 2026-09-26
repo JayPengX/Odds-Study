@@ -859,3 +859,51 @@ details.market[open] > summary { margin-bottom: 6px; }
 .buy strong { display: block; }
 .serial-pr { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.72rem; font-weight: 700; vertical-align: middle; white-space: nowrap; }
 .player-line small { color: var(--text-muted); font-size: 0.66rem; }
+
+/* Any-line stepper under a game's markets */
+.line-stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; background: var(--surface); border: 1px dashed var(--axis); border-radius: var(--radius-sm); }
+.line-stepper select { font: inherit; font-size: 0.84rem; padding: 5px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-raised); color: var(--text-primary); max-width: 100%; }
+.stepper { display: inline-flex; align-items: center; gap: 6px; }
+.stepper .ghost-button { width: 32px; height: 32px; padding: 0; font-size: 1.1rem; line-height: 1; }
+.stepper strong { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.line-stepper .primary-button { font-size: 0.82rem; padding: 7px 14px; box-shadow: none; }
+.primary-button:disabled { background: var(--axis); color: var(--text-muted); box-shadow: none; cursor: not-allowed; }
+.ghost-button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Placing a slip on the practice account */
+.place-row { display: grid; gap: 6px; margin: 4px 0 12px; }
+.place-button { width: 100%; }
+
+/* Practice account */
+.account-card { display: grid; gap: 10px; }
+.account-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px 20px; }
+.account-balance { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.15; }
+.account-side { display: grid; gap: 2px; font-size: 0.86rem; text-align: right; }
+.account-side strong { font-variant-numeric: tabular-nums; }
+.account-card .muted.small { font-size: 0.76rem; }
+.sync { border-top: 1px solid var(--grid); padding-top: 10px; display: grid; gap: 8px; }
+.sync > summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; }
+.sync[open] { gap: 10px; }
+.sync-code-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sync-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.15rem; font-weight: 700; letter-spacing: 0.08em; padding: 3px 10px; border-radius: 8px; background: var(--surface-sunken); }
+.sync-form { display: flex; flex-wrap: wrap; gap: 8px; }
+.sync-input { flex: 1 1 10em; min-width: 0; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-raised); color: var(--text-primary); }
+
+/* Saved slips */
+.saved-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-size: 0.84rem; }
+.saved-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); margin-bottom: 12px; }
+.saved-slip { margin-bottom: 0; display: grid; gap: 10px; min-width: 0; }
+.saved-slip.fresh { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-wash), var(--shadow); }
+.saved-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.saved-head small { font-size: 0.74rem; }
+.slip-pill { flex: none; font-size: 0.76rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); white-space: nowrap; }
+.slip-pill.open { background: var(--accent-wash); color: var(--accent); }
+.slip-pill.won { background: var(--good-wash); color: var(--good); }
+.slip-pill.lost { background: var(--bad-wash); color: var(--bad); }
+.saved-legs { margin: 0; }
+.leg-result { flex: none; width: 22px; text-align: center; font-weight: 800; }
+.leg-won .leg-result { color: var(--good); }
+.leg-lost .leg-result { color: var(--bad); }
+.leg-void .leg-result { color: var(--text-muted); }
+.leg-lost .leg-main strong { text-decoration: line-through; text-decoration-color: var(--bad); }
+.saved-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 0.86rem; font-variant-numeric: tabular-nums; flex-wrap: wrap; }

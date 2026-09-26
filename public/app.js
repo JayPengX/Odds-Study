@@ -23,6 +23,16 @@ import {
   lotteryRunLines,
   fitTeamRuns,
   lotteryTeamTotal,
+  fitTotalRuns,
+  totalOverChance,
+  MLB_TOTAL_DISPERSION,
+  GOALS_DISPERSION,
+  scoreGrid,
+  runLineCover,
+  teamOverChance,
+  lineInRange,
+  estimateLineOdds,
+  settleSlip,
   TOP_INNING_ODDS,
   MLB_MARKET_OVERROUND,
   median,
@@ -39,7 +49,24 @@ import {
   slipErrors,
   slipSizes,
 } from './lib/odds.mjs';
-import { loadOdds, taipeiDayKey } from './lib/sources.mjs';
+import { loadOdds, taipeiDayKey, fetchOutcomes } from './lib/sources.mjs';
+import {
+  START_BALANCE,
+  WEEKLY_GRANT,
+  newAccount,
+  balance,
+  canClaim,
+  claimGrant,
+  nextGrantAt,
+  weekKey,
+  newSlipId,
+  placeSlip,
+  legResult,
+  applyResults,
+  mergeAccounts,
+  isAccount
+} from './lib/account.mjs';
+import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo } from './lib/teams.mjs';
 
@@ -62,6 +89,10 @@ const HABIT_ICON = { casual: '🎟️', fan: '📣', underdog: '🎯', dreamer: 
 const HABIT_COLOR = { casual: '#0ea5e9', fan: '#f59e0b', underdog: '#8b5cf6', dreamer: '#ec4899', chaser: '#ef4444', careful: '#10b981' };
 const DETAIL_KEY = 'oddsStudy.detail';
 const USER_ODDS_KEY = 'oddsStudy.userOdds';
+const ACCOUNT_KEY = 'oddsStudy.account';
+const SYNC_KEY = 'oddsStudy.syncCode';
+// Saved slips shown before the rest fold away.
+const SAVED_SHOWN = 10;
 
 const state = {
   locale: detectLocale(),
@@ -83,8 +114,21 @@ const state = {
   // Game cards showing all their markets, and cards showing real-odds boxes.
   open: new Set(),
   editing: new Set(),
+  // Lines added with a game's stepper: `${gameId}|${kind}` -> Set of lines.
+  customLines: new Map(),
+  // Each game's stepper: { kind, line }.
+  stepper: new Map(),
   // Off: only the odds and the average back. On: margins, chances, takes, extra stats.
-  detail: loadDetail()
+  detail: loadDetail(),
+  // The simulated account (play money) and its sync.
+  account: null,
+  sync: { code: '', busy: false, error: '', at: null },
+  syncOpen: false,
+  // Slips saved or settled since the page opened, highlighted.
+  freshSlips: new Set(),
+  checking: false,
+  checkedAt: 0,
+  showAllSaved: false
 };
 state.t = makeT(state.locale);
 
@@ -193,6 +237,199 @@ function matchupText(game) {
     : `${teamName(game.away)} @ ${teamName(game.home)}`;
 }
 
+// ---- Lines (大小分, 讓分, 單隊大小) -------------------------------------------
+
+// Lines shown besides the lottery's own: totals and team totals this many
+// either side of the main line, run lines up to 4.5 runs either way. Any
+// other line can be added with the stepper under a game's markets.
+const TOTAL_SPAN = 3;
+const TEAM_TOTAL_SPAN = 2;
+const RUN_LINES = [1.5, 2.5, 3.5, 4.5];
+// How far the stepper goes.
+const STEPPER = {
+  total: { min: 0.5, max: 25.5 },
+  goals: { min: 0.5, max: 9.5 },
+  runline: { min: -9.5, max: 9.5 },
+  teamtotal: { min: 0.5, max: 15.5 }
+};
+
+// Each game's run and goal models, fitted once: fitting team runs is slow.
+const modelCache = new Map();
+function gameModel(game) {
+  const key = `${game.id}|${game.total?.line}|${game.total?.overFair}|${game.draftKings?.home}`;
+  if (modelCache.has(key)) return modelCache.get(key);
+  const model = {};
+  if (game.total) model.mu = fitTotalRuns(game.total.line, game.total.overFair, game.sport === 'mlb' ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION);
+  if (game.sport === 'mlb' && game.total && game.draftKings) {
+    model.means = fitTeamRuns(game.draftKings.home, game.total.line, game.total.overFair);
+    model.grid = scoreGrid(model.means.home, model.means.away);
+  }
+  modelCache.set(key, model);
+  return model;
+}
+
+// The chance behind one line of a game (total or team total over, the away
+// team covering a run line), or null without a model.
+function lineChance(game, kind, line) {
+  const model = gameModel(game);
+  if (kind === 'total') return model.mu == null ? null : totalOverChance(line, model.mu, game.sport === 'mlb' ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION);
+  if (kind === 'runline') return model.grid ? runLineCover(model.grid, line) : null;
+  const team = kind.split('|')[1];
+  return model.means ? teamOverChance(model.means[team], line) : null;
+}
+// A line the viewer adds must not be a near-certainty either way.
+const customOk = p => p >= 0.01 && p <= 0.99;
+
+function fmtLine(line) {
+  return `${line > 0 ? '+' : line < 0 ? '−' : ''}${Math.abs(line)}`;
+}
+
+// Lines the viewer added with the stepper, per game and market.
+function customLines(gameId, kind) {
+  return [...(state.customLines.get(`${gameId}|${kind}`) ?? [])];
+}
+
+// Every line of a game's totals, run lines and team totals: the lottery's own
+// (checked against its prices), the wider range and the viewer's own lines.
+function lineBets(game, base, matchup) {
+  const t = state.t;
+  const bets = [];
+  const model = gameModel(game);
+  const total = game.total;
+  const mlb = game.sport === 'mlb';
+
+  // 大小分. MLB: the lottery's three lines, modelled from DraftKings' one line
+  // (any line, whole or half). Premier League: DraftKings' own half-goal line.
+  const totals = new Map();
+  if (total && mlb) for (const l of lotteryTotalLines(total.line, total.overFair)) totals.set(l.line, { ...l, posted: true });
+  else if (total && total.line % 1 !== 0) totals.set(total.line, { line: total.line, over: total.overFair, main: true, posted: true });
+  if (model.mu != null) {
+    const r = mlb ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION;
+    const main = [...totals.values()].find(l => l.main)?.line ?? Math.floor(model.mu) + 0.5;
+    const wanted = [];
+    for (let d = -TOTAL_SPAN; d <= TOTAL_SPAN; d++) wanted.push({ line: main + d, custom: false });
+    for (const line of customLines(game.id, 'total')) wanted.push({ line, custom: true });
+    for (const { line, custom } of wanted) {
+      if (line <= 0 || totals.has(line)) continue;
+      const over = totalOverChance(line, model.mu, r);
+      if (custom ? customOk(over) : lineInRange(over) && lineInRange(1 - over)) totals.set(line, { line, over, main: false, posted: false, custom });
+    }
+  }
+  for (const { line, over, main, posted, custom } of [...totals.values()].sort((a, b) => a.line - b.line)) {
+    for (const side of ['over', 'under']) {
+      const p = side === 'over' ? over : 1 - over;
+      bets.push({
+        ...base,
+        id: `${game.id}|tot|${line}|${side}`,
+        kind: 'total',
+        side,
+        totalLine: line,
+        mainLine: main,
+        custom,
+        market: `total|${line}`,
+        marketLabel: String(line),
+        chip: t(side),
+        // The main line's margin is the usual source gap (filled in below);
+        // the lines either side add the model's error, ~1-3 points.
+        fairMargin: main ? null : posted ? 0.02 : 0.03,
+        errKey: !mlb ? game.sport : posted ? 'mlbTotal' : 'mlbTotalExtra',
+        label: `${matchup} ${t(side)} ${line}`,
+        shortLabel: `${t(side)} ${line}`,
+        fairChance: p,
+        estOdds: estimateLineOdds(p, K_DRAFTKINGS)
+      });
+    }
+  }
+
+  // 讓分: true chance from DraftKings; the lottery's two posted lines priced
+  // from its own (shrunk) chance, which differs from the true one. Other
+  // lines come from the per-team score model at the lottery's usual cut.
+  if (mlb && (game.spread || model.grid)) {
+    const lines = new Map();
+    if (game.spread) {
+      for (const [i, l] of lotteryRunLines(game.spread.awayLine, game.spread.awayFair).entries()) lines.set(l.awayLine, { ...l, posted: true, first: i === 0 });
+    }
+    if (model.grid) {
+      const wanted = [];
+      for (const abs of RUN_LINES) for (const dir of [-1, 1]) wanted.push({ awayLine: dir * abs, custom: false });
+      for (const awayLine of customLines(game.id, 'runline')) wanted.push({ awayLine, custom: true });
+      for (const { awayLine, custom } of wanted) {
+        if (lines.has(awayLine)) continue;
+        const fair = runLineCover(model.grid, awayLine);
+        if (custom ? customOk(fair) : lineInRange(fair) && lineInRange(1 - fair)) lines.set(awayLine, { awayLine, fair, lottery: fair, posted: false, custom });
+      }
+    }
+    const order = [...lines.values()].sort((a, b) => Math.abs(a.awayLine) - Math.abs(b.awayLine) || a.awayLine - b.awayLine);
+    for (const { awayLine, fair, lottery, posted, first, custom } of order) {
+      const giver = awayLine < 0 ? 'away' : 'home';
+      for (const side of ['away', 'home']) {
+        const line = side === 'away' ? awayLine : -awayLine;
+        const text = `${teamName(game[side])} ${fmtLine(line)}`;
+        const p = side === 'away' ? fair : 1 - fair;
+        const priced = side === 'away' ? lottery : 1 - lottery;
+        bets.push({
+          ...base,
+          id: `${game.id}|rl|${line}|${side}`,
+          kind: 'runline',
+          side,
+          runLine: line,
+          custom,
+          market: `rl|${awayLine}`,
+          marketLabel: `${teamName(game[giver])} ${fmtLine(-Math.abs(awayLine))}`,
+          chip: text,
+          // DraftKings' own line has one source; the extra run adds model error.
+          fairMargin: first ? 0.02 : 0.03,
+          errKey: posted ? 'mlbRunLine' : 'mlbRunLineExtra',
+          label: text,
+          shortLabel: `${t('runLine')} ${text}`,
+          fairChance: p,
+          estOdds: estimateLineOdds(priced, MLB_MARKET_OVERROUND)
+        });
+      }
+    }
+  }
+
+  // 單隊大小: each team's runs from a model fitted to DraftKings' win chance
+  // and total; the lottery's line is the one closest to 50/50.
+  if (model.means) {
+    for (const team of ['away', 'home']) {
+      const posted = lotteryTeamTotal(model.means[team]).line;
+      const wanted = [];
+      for (let d = -TEAM_TOTAL_SPAN; d <= TEAM_TOTAL_SPAN; d++) wanted.push({ line: posted + d, custom: false });
+      for (const line of customLines(game.id, `teamtotal|${team}`)) wanted.push({ line, custom: true });
+      const seen = new Set();
+      for (const { line, custom } of wanted.sort((a, b) => a.line - b.line)) {
+        if (line <= 0 || seen.has(line)) continue;
+        const over = teamOverChance(model.means[team], line);
+        if (custom ? !customOk(over) : !(lineInRange(over) && lineInRange(1 - over))) continue;
+        seen.add(line);
+        for (const side of ['over', 'under']) {
+          const p = side === 'over' ? over : 1 - over;
+          bets.push({
+            ...base,
+            id: `${game.id}|tt|${team}|${line}|${side}`,
+            kind: 'teamtotal',
+            side,
+            team,
+            teamLine: line,
+            custom,
+            market: `tt|${team}|${line}`,
+            marketLabel: `${teamName(game[team])} ${line}`,
+            chip: t(side),
+            fairMargin: line === posted ? 0.03 : 0.04,
+            errKey: line === posted ? 'mlbTeamTotal' : 'mlbTeamTotalExtra',
+            label: `${teamName(game[team])} ${t(side)} ${line}`,
+            shortLabel: `${teamName(game[team])} ${t(side)} ${line}`,
+            fairChance: p,
+            estOdds: estimateLineOdds(p, MLB_MARKET_OVERROUND)
+          });
+        }
+      }
+    }
+  }
+  return bets;
+}
+
 function buildBets(data) {
   const t = state.t;
   const bets = [];
@@ -223,59 +460,7 @@ function buildBets(data) {
         estOdds: estimateLotteryOdds(p, blend.k)
       });
     }
-    const total = game.total;
-    // MLB: the lottery's three lines, modelled from DraftKings' one line (any
-    // line, whole or half). Premier League: DraftKings' own half-goal line only.
-    const lines =
-      !total ? [] : game.sport === 'mlb' ? lotteryTotalLines(total.line, total.overFair) : total.line % 1 !== 0 ? [{ line: total.line, over: total.overFair, main: true }] : [];
-    for (const { line, over, main } of lines) {
-      for (const side of ['over', 'under']) {
-        const p = side === 'over' ? over : 1 - over;
-        bets.push({
-          ...base,
-          id: `${game.id}|tot|${line}|${side}`,
-          kind: 'total',
-          totalLine: line,
-          mainLine: main,
-          market: `total|${line}`,
-          marketLabel: String(line),
-          chip: t(side),
-          // The main line's margin is the usual source gap (filled in below);
-          // the lines either side add the model's error, ~1-3 points.
-          fairMargin: main ? null : 0.02,
-          errKey: game.sport === 'mlb' ? 'mlbTotal' : game.sport,
-          label: `${matchup} ${t(side)} ${line}`,
-          shortLabel: `${t(side)} ${line}`,
-          fairChance: p,
-          estOdds: estimateLotteryOdds(p, K_DRAFTKINGS)
-        });
-      }
-    }
-    // MLB team totals (單隊大小): each team's runs from a model fitted to
-    // DraftKings' win chance and total; the line closest to 50/50.
-    if (game.sport === 'mlb' && game.total && game.draftKings) {
-      const means = fitTeamRuns(game.draftKings.home, game.total.line, game.total.overFair);
-      for (const team of ['away', 'home']) {
-        const { line, over } = lotteryTeamTotal(means[team]);
-        for (const side of ['over', 'under']) {
-          const p = side === 'over' ? over : 1 - over;
-          bets.push({
-            ...base,
-            id: `${game.id}|tt|${team}|${line}|${side}`,
-            kind: 'teamtotal',
-            market: `tt|${team}`,
-            marketLabel: teamName(game[team]),
-            chip: `${t(side)} ${line}`,
-            fairMargin: 0.03,
-            errKey: 'mlbTeamTotal',
-            label: `${teamName(game[team])} ${t(side)} ${line}`,
-            shortLabel: `${teamName(game[team])} ${t(side)} ${line}`,
-            fairChance: p,
-            estOdds: Math.round((1 / (p * MLB_MARKET_OVERROUND)) * 100) / 100
-          });
-        }
-      }
-    }
+    bets.push(...lineBets(game, base, matchup));
     // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed.
     if (game.sport === 'mlb') {
       const book = TOP_INNING_ODDS.reduce((sum, o) => sum + 1 / o, 0);
@@ -286,6 +471,7 @@ function buildBets(data) {
           id: `${game.id}|inning|${i}`,
           kind: 'inning',
           market: 'inning',
+          inning: i,
           chip: name,
           fairMargin: null,
           errKey: 'topInning',
@@ -296,36 +482,11 @@ function buildBets(data) {
         });
       });
     }
-    // MLB run lines (讓分): true chance from DraftKings; the price from the
-    // lottery's own (shrunk) chance, which differs from the true one.
-    if (game.sport === 'mlb' && game.spread) {
-      for (const [i, { awayLine, fair, lottery }] of lotteryRunLines(game.spread.awayLine, game.spread.awayFair).entries()) {
-        for (const side of ['away', 'home']) {
-          const line = side === 'away' ? awayLine : -awayLine;
-          const text = `${teamName(game[side])} ${line > 0 ? '+' : ''}${line}`;
-          const p = side === 'away' ? fair : 1 - fair;
-          const priced = side === 'away' ? lottery : 1 - lottery;
-          bets.push({
-            ...base,
-            id: `${game.id}|rl|${line}|${side}`,
-            kind: 'runline',
-            market: `rl|${Math.abs(line)}`,
-            marketLabel: `±${Math.abs(line)}`,
-            chip: text,
-            // DraftKings' own line has one source; the extra run adds model error.
-            fairMargin: i === 0 ? 0.02 : 0.03,
-            errKey: 'mlbRunLine',
-            label: text,
-            shortLabel: `${t('runLine')} ${text}`,
-            fairChance: p,
-            estOdds: Math.round((1 / (priced * MLB_MARKET_OVERROUND)) * 100) / 100
-          });
-        }
-      }
-    }
   }
   if (data.f1) {
     for (const d of data.f1.drivers) {
+      const driver = f1Driver(d.name);
+      const name = state.locale === 'zh' ? driver.zh : d.name;
       bets.push({
         id: `f1|${d.name}`,
         gameId: 'f1',
@@ -333,9 +494,10 @@ function buildBets(data) {
         sport: 'f1',
         matchup: data.f1.title,
         start: data.f1.startUtc,
-        label: `F1 ${d.name}`,
-        shortLabel: d.name,
-        driver: f1Driver(d.name),
+        label: `F1 ${name}`,
+        shortLabel: name,
+        driverEn: d.name,
+        driver,
         fairChance: d.fair,
         fairMargin: null,
         errKey: d.fair < 0.01 ? 'f1Longshot' : 'f1',
@@ -368,6 +530,7 @@ function buildFutures(data) {
       label: `${title} ${teamName(team.name)}`,
       shortLabel: teamName(team.name),
       teamEn: team.name.en,
+      eventSlug: market.slug,
       fairChance: team.fair,
       fairMargin: null,
       errKey: team.fair < 0.004 && market.sport !== 'nba' ? 'futureLongshot' : `future_${market.key}`,
@@ -570,6 +733,8 @@ function renderStatic() {
     ['games-title', 'gamesTitle'],
     ['futures-title', 'futuresTitle'],
     ['parlay-title', 'parlayTitle'],
+    ['account-title', 'accountTitle'],
+    ['saved-title', 'savedTitle'],
     ['sim-title', 'simTitle'],
     ['f1-title', 'f1Title'],
     ['math-title', 'mathTitle']
@@ -628,7 +793,8 @@ function renderStatus(kind) {
 function betIcon(bet) {
   if (bet.kind === 'f1') return driverBadge(bet, 'logo-sm');
   if (bet.kind === 'future') return logoImg(bet.sport, bet.teamEn, bet.shortLabel, 'logo-sm');
-  const side = bet.side ?? (/\|(away|home)$/.exec(bet.id)?.[1] || /\|tt\|(away|home)\|/.exec(bet.id)?.[1]);
+  // Totals' side is over/under: they show the league, team totals the team.
+  const side = bet.kind === 'teamtotal' ? bet.team : ['away', 'home'].includes(bet.side) ? bet.side : null;
   if (bet.game && side) return logoImg(bet.sport, bet.game[side].en, teamName(bet.game[side]), 'logo-sm');
   return leagueImg(bet.sport, 'logo-sm');
 }
@@ -798,11 +964,74 @@ function gameMore(game, bets, editing) {
   if (thin) notes.push(t('thin'));
   return el('div', { class: 'game-more' }, [
     markets.length ? el('div', { class: 'markets' }, markets) : null,
+    lineStepper(game, bets),
     el('div', { class: 'game-foot' }, [
       el('span', { class: 'detail-only', text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }),
       editToggle(game.id, renderGames),
       notes.length ? el('details', { class: 'info detail-only' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
     ])
+  ]);
+}
+
+// Any other line: pick a market, step the line, add it to the card.
+function lineStepper(game, bets) {
+  const t = state.t;
+  const model = gameModel(game);
+  const kinds = [];
+  if (model.mu != null) kinds.push({ key: 'total', label: t('secTotal'), range: STEPPER[game.sport === 'mlb' ? 'total' : 'goals'], shown: bets.filter(b => b.kind === 'total').map(b => b.totalLine) });
+  if (model.grid) kinds.push({ key: 'runline', label: `${t('secRunLine')} ${teamName(game.away)}`, range: STEPPER.runline, shown: bets.filter(b => b.kind === 'runline' && b.side === 'away').map(b => b.runLine) });
+  if (model.means) {
+    for (const team of ['away', 'home']) kinds.push({ key: `teamtotal|${team}`, label: `${t('secTeamTotal')} ${teamName(game[team])}`, range: STEPPER.teamtotal, shown: bets.filter(b => b.kind === 'teamtotal' && b.team === team).map(b => b.teamLine) });
+  }
+  if (!kinds.length) return null;
+  const pick = state.stepper.get(game.id) ?? {};
+  const kind = kinds.find(k => k.key === pick.kind) ?? kinds[0];
+  const next = Math.min(kind.range.max, Math.max(...kind.shown, kind.range.min - 1) + 1);
+  let line = pick.kind === kind.key && pick.line != null ? pick.line : next;
+  const set = (patch) => {
+    state.stepper.set(game.id, { kind: kind.key, line, ...patch });
+    renderGames();
+  };
+  const step = dir => {
+    let l = line + dir;
+    // Run lines skip ±0.5 (the same as the win line).
+    if (kind.key === 'runline' && Math.abs(l) < 1) l += dir;
+    if (l >= kind.range.min && l <= kind.range.max) set({ line: l });
+  };
+  const exists = kind.shown.includes(line);
+  const chance = lineChance(game, kind.key, line);
+  const extreme = !customOk(chance);
+  const valueText = kind.key === 'runline' ? `${teamName(game.away)} ${fmtLine(line)}` : String(line);
+  return el('div', { class: 'line-stepper' }, [
+    el('span', { class: 'market-title', text: t('customLine') }),
+    el('select', {
+      'aria-label': t('customLine'),
+      onchange: event => set({ kind: event.target.value, line: null })
+    }, kinds.map(k => {
+      const option = el('option', { value: k.key, text: k.label });
+      if (k.key === kind.key) option.selected = true;
+      return option;
+    })),
+    el('div', { class: 'stepper' }, [
+      el('button', { type: 'button', class: 'ghost-button', 'aria-label': '−', text: '−', onclick: () => step(-1) }),
+      el('strong', { text: valueText }),
+      el('button', { type: 'button', class: 'ghost-button', 'aria-label': '+', text: '+', onclick: () => step(1) })
+    ]),
+    el('button', {
+      type: 'button',
+      class: 'primary-button',
+      disabled: exists || extreme ? '' : null,
+      text: exists ? t('customLineShown') : extreme ? t('customLineExtreme') : t('customLineAdd'),
+      onclick: () => {
+        const key = `${game.id}|${kind.key}`;
+        if (!state.customLines.has(key)) state.customLines.set(key, new Set());
+        state.customLines.get(key).add(line);
+        state.stepper.delete(game.id);
+        state.bets = buildBets(state.data);
+        renderGames();
+        renderRanking();
+      }
+    })
   ]);
 }
 
@@ -944,7 +1173,7 @@ function onUserOdds(bet, raw) {
 // ---- Championships and F1: one board each -------------------------------------
 
 function driverBadge(bet, size = '') {
-  const initials = bet.shortLabel.split(/\s+/).filter(w => !/^jr\.?$/i.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  const initials = bet.driverEn.split(/\s+/).filter(w => !/^jr\.?$/i.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase();
   return el('span', { class: `driver-badge ${size}`, style: `--team:${bet.driver.color}`, 'aria-hidden': 'true', text: initials });
 }
 
@@ -1485,6 +1714,8 @@ function renderParlay() {
   if (errors.length) {
     ticket.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit }) }))));
   }
+  const cost = sizes.reduce((sum, k) => sum + choose(n, k), 0) * stake;
+  ticket.push(placeButton(legs, sizes, cost, errors));
   ticket.push(el('details', { class: 'info' }, [el('summary', { text: t('slipRulesTitle') }), el('p', { text: t('slipRulesNote') })]));
 
   let results = [];
@@ -1517,6 +1748,344 @@ function renderParlay() {
     });
   }
   body.replaceChildren(el('div', { class: 'slip has-legs' }, [el('div', { class: 'card ticket' }, ticket), el('div', { class: 'slip-results' }, results)]));
+}
+
+// ---- Simulated account and saved slips ------------------------------------------
+
+function loadAccount() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ACCOUNT_KEY));
+    if (isAccount(stored)) return stored;
+  } catch {}
+  return newAccount();
+}
+
+function loadSyncCode() {
+  try {
+    return localStorage.getItem(SYNC_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveAccountLocal() {
+  try {
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(state.account));
+    if (state.sync.code) localStorage.setItem(SYNC_KEY, state.sync.code);
+    else localStorage.removeItem(SYNC_KEY);
+  } catch {}
+}
+
+// Every change goes to this device at once and to the synced copy shortly after.
+function commitAccount(next) {
+  if (next === state.account) return;
+  state.account = next;
+  saveAccountLocal();
+  renderAccount();
+  renderSaved();
+  pushSoon();
+}
+
+let pushTimer = null;
+function pushSoon() {
+  if (!state.sync.code) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => syncNow(), 1200);
+}
+
+// Reads the synced copy, merges it with this device's and writes the result
+// back if this device had anything new: no device ever overwrites another's
+// slips or top-ups.
+async function syncNow() {
+  const code = state.sync.code;
+  if (!code || state.sync.busy) return;
+  state.sync = { ...state.sync, busy: true, error: '' };
+  renderAccount();
+  try {
+    const remote = await readSync(code);
+    if (remote && !isAccount(remote)) throw new Error('bad account');
+    const merged = mergeAccounts(state.account, remote);
+    if (!remote || JSON.stringify(merged) !== JSON.stringify(remote)) await writeSync(code, merged);
+    if (JSON.stringify(merged) !== JSON.stringify(state.account)) {
+      state.account = merged;
+      saveAccountLocal();
+      renderSaved();
+    }
+    state.sync = { ...state.sync, busy: false, at: new Date().toISOString() };
+  } catch (error) {
+    console.error(error);
+    state.sync = { ...state.sync, busy: false, error: state.t('syncFailed') };
+  }
+  renderAccount();
+}
+
+async function createSyncCode() {
+  state.sync = { ...state.sync, busy: true, error: '' };
+  renderAccount();
+  try {
+    const code = await createSync(state.account);
+    state.sync = { code, busy: false, error: '', at: new Date().toISOString(), fresh: true };
+    saveAccountLocal();
+  } catch (error) {
+    console.error(error);
+    state.sync = { ...state.sync, busy: false, error: state.t('syncFailed') };
+  }
+  renderAccount();
+}
+
+// Joining an account from another device: that account and this device's
+// merged (the NT$10,000 start counts once).
+async function linkSyncCode(raw) {
+  const code = cleanPasscode(raw);
+  if (!PASSCODE_PATTERN.test(code)) {
+    state.sync = { ...state.sync, error: state.t('syncBadCode') };
+    renderAccount();
+    return;
+  }
+  state.sync = { ...state.sync, busy: true, error: '' };
+  renderAccount();
+  try {
+    const remote = await readSync(code);
+    if (!isAccount(remote)) {
+      state.sync = { ...state.sync, busy: false, error: state.t('syncNotFound') };
+      renderAccount();
+      return;
+    }
+    state.sync = { code, busy: false, error: '', at: null };
+    state.account = mergeAccounts(remote, state.account);
+    saveAccountLocal();
+    renderSaved();
+    await syncNow();
+  } catch (error) {
+    console.error(error);
+    state.sync = { ...state.sync, busy: false, error: state.t('syncFailed') };
+    renderAccount();
+  }
+}
+
+function unlinkSync() {
+  if (!confirm(state.t('syncUnlinkConfirm'))) return;
+  state.sync = { code: '', busy: false, error: '', at: null };
+  saveAccountLocal();
+  renderAccount();
+}
+
+// What a pick on the slip needs to be settled later, whatever the board shows then.
+function legRecord(bet) {
+  return {
+    id: bet.id,
+    kind: bet.kind,
+    sport: bet.sport,
+    label: bet.label,
+    shortLabel: bet.shortLabel,
+    matchup: bet.matchup,
+    start: bet.start ?? null,
+    odds: effectiveOdds(bet),
+    fairChance: bet.fairChance,
+    side: bet.side ?? null,
+    line: bet.totalLine ?? bet.runLine ?? bet.teamLine ?? null,
+    team: bet.kind === 'future' ? bet.teamEn : bet.team ?? null,
+    inning: bet.inning ?? null,
+    away: bet.game?.away.en ?? null,
+    home: bet.game?.home.en ?? null,
+    driver: bet.driverEn ?? null,
+    eventSlug: bet.eventSlug ?? null
+  };
+}
+
+// The 模擬下注 button: buys the slip on the simulated account.
+function placeButton(legs, sizes, cost, errors) {
+  const t = state.t;
+  const funds = balance(state.account);
+  const short = cost > funds;
+  const blocked = errors.length > 0 || sizes.length === 0 || short;
+  return el('div', { class: 'place-row' }, [
+    el('button', {
+      class: 'primary-button place-button',
+      type: 'button',
+      disabled: blocked ? '' : null,
+      text: short ? t('placeShort', { v: fmtMoney(funds, { sign: false }) }) : t('placeSlip', { v: fmtMoney(cost, { sign: false }) }),
+      onclick: () => {
+        const slip = { id: newSlipId(), mode: state.slipMode, sizes, stake: state.slipStake, cost, legs: legs.map(legRecord) };
+        const { account, error } = placeSlip(state.account, slip);
+        if (error) return;
+        state.parlay = [];
+        state.freshSlips.add(slip.id);
+        commitAccount(account);
+        renderGames();
+        renderF1();
+        renderFutures();
+        renderRanking();
+        renderParlay();
+        $('saved').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }),
+    el('small', { class: 'muted', text: t('placeNote', { v: fmtMoney(funds, { sign: false }) }) })
+  ]);
+}
+
+// Legs of open slips whose games are over get their results; a slip is paid
+// once every leg is decided. A game still not found three days after its
+// start (postponed and never replayed) counts as void, as the lottery does.
+const RESULT_CHECK_MS = 90_000;
+const VOID_AFTER_MS = 3 * 86_400_000;
+async function checkResults(force = false) {
+  const open = state.account.slips.filter(s => s.status === 'open');
+  const now = new Date();
+  const pending = open.flatMap(s => s.legs.filter(l => !l.result && (l.kind === 'future' || (l.start && Date.parse(l.start) <= now.getTime()))));
+  if (!pending.length || state.checking) return;
+  if (!force && now.getTime() - state.checkedAt < RESULT_CHECK_MS) return;
+  state.checking = true;
+  state.checkedAt = now.getTime();
+  renderSaved();
+  try {
+    const outcomes = await fetchOutcomes(pending, now);
+    let account = state.account;
+    for (const slip of open) {
+      const results = slip.legs.map(leg => {
+        if (leg.result) return leg.result;
+        const result = legResult(leg, outcomes.get(leg.id));
+        if (result) return result;
+        const stale = leg.kind !== 'future' && leg.start && now.getTime() - Date.parse(leg.start) > VOID_AFTER_MS;
+        return stale && !outcomes.has(leg.id) ? 'void' : null;
+      });
+      const next = applyResults(account, slip.id, results, now);
+      if (next !== account && next.slips.find(s => s.id === slip.id).status === 'settled') state.freshSlips.add(slip.id);
+      account = next;
+    }
+    commitAccount(account);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    state.checking = false;
+    renderSaved();
+  }
+}
+
+function renderAccount() {
+  const t = state.t;
+  const account = state.account;
+  const now = new Date();
+  const funds = balance(account);
+  const grants = account.ledger.filter(e => e.kind === 'grant').reduce((s, e) => s + e.amount, 0);
+  const open = account.slips.filter(s => s.status === 'open');
+  const atStake = open.reduce((s, x) => s + x.cost, 0);
+  // Won or lost on settled slips, and money still on open ones.
+  const net = funds + atStake - START_BALANCE - grants;
+  const claim = canClaim(account, now)
+    ? el('button', { class: 'primary-button', type: 'button', text: t('claimGrant', { v: fmtMoney(WEEKLY_GRANT, { sign: false }) }), onclick: () => commitAccount(claimGrant(state.account)) })
+    : el('p', { class: 'muted', text: t(account.ledger.some(e => e.id === `grant-${weekKey(now)}`) ? 'nextGrant' : 'firstGrant', { v: fmtMoney(WEEKLY_GRANT, { sign: false }), when: fmtTime(nextGrantAt(now).toISOString()) }) });
+  const sync = state.sync;
+  let syncBody;
+  if (sync.code) {
+    syncBody = [
+      el('p', { class: 'sync-code-line' }, [
+        el('span', { text: t('syncCode') }),
+        el('code', { class: 'sync-code', text: `${sync.code.slice(0, 4)} ${sync.code.slice(4)}` }),
+        el('button', {
+          class: 'ghost-button',
+          type: 'button',
+          text: t('syncCopy'),
+          onclick: event => {
+            navigator.clipboard?.writeText(sync.code).then(() => (event.target.textContent = t('syncCopied'))).catch(() => {});
+          }
+        })
+      ]),
+      sync.fresh ? el('p', { class: 'note', text: t('syncKeep') }) : null,
+      el('p', { class: 'muted', text: sync.busy ? t('syncing') : sync.at ? t('syncedAt', { when: fmtTime(sync.at) }) : '' }),
+      el('div', { class: 'button-row' }, [
+        el('button', { class: 'ghost-button', type: 'button', text: t('syncNow'), disabled: sync.busy ? '' : null, onclick: () => syncNow() }),
+        el('button', { class: 'ghost-button', type: 'button', text: t('syncUnlink'), onclick: unlinkSync })
+      ])
+    ];
+  } else {
+    const input = el('input', { class: 'sync-input', type: 'text', maxlength: '9', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: t('syncPlaceholder'), 'aria-label': t('syncEnter') });
+    syncBody = [
+      el('p', { class: 'muted', text: t('syncIntro') }),
+      el('div', { class: 'button-row' }, [el('button', { class: 'ghost-button', type: 'button', text: t('syncCreate'), disabled: sync.busy ? '' : null, onclick: createSyncCode })]),
+      el('form', {
+        class: 'sync-form',
+        onsubmit: event => {
+          event.preventDefault();
+          linkSyncCode(input.value);
+        }
+      }, [input, el('button', { class: 'ghost-button', type: 'submit', text: t('syncLink'), disabled: sync.busy ? '' : null })])
+    ];
+  }
+  $('account-body').replaceChildren(
+    el('div', { class: 'card account-card' }, [
+      el('div', { class: 'account-top' }, [
+        el('div', {}, [el('p', { class: 'muted', text: t('accountBalance') }), el('p', { class: 'account-balance stat-value', text: fmtMoney(funds, { sign: false }) })]),
+        el('div', { class: 'account-side' }, [
+          el('p', {}, [el('span', { class: 'muted', text: `${t('accountAtStake')} ` }), el('strong', { text: fmtMoney(atStake, { sign: false }) })]),
+          el('p', {}, [el('span', { class: 'muted', text: `${t('accountNet')} ` }), el('strong', { class: net < -0.5 ? 'back-low' : net > 0.5 ? 'back-high' : '', text: fmtMoney(net) })])
+        ])
+      ]),
+      claim,
+      el('p', { class: 'muted small', text: t('accountNote', { start: fmtMoney(START_BALANCE, { sign: false }), v: fmtMoney(WEEKLY_GRANT, { sign: false }) }) }),
+      el('details', { class: 'sync', open: state.syncOpen || sync.error || sync.fresh ? '' : null, ontoggle: event => (state.syncOpen = event.target.open) }, [
+        el('summary', { text: sync.code ? t('syncOn') : t('syncTitle') }),
+        ...syncBody,
+        sync.error ? el('p', { class: 'back-low', text: sync.error }) : null
+      ])
+    ])
+  );
+}
+
+const RESULT_ICON = { won: '✓', lost: '✗', void: '↺' };
+
+function savedSlipCard(slip) {
+  const t = state.t;
+  const n = slip.legs.length;
+  const settled = slip.status === 'settled';
+  const top = slipPayoutTable({ legs: slip.legs, sizes: slip.sizes, stake: slip.stake }).net[(1 << n) - 1];
+  const profit = settled ? slip.payout - slip.cost : null;
+  const mode = slip.mode === 'system' ? slip.sizes.map(k => sizeName(k, n)).join('、') : t(`slipMode_${slip.mode}`);
+  const pill = settled
+    ? el('span', { class: `slip-pill ${profit > 0 ? 'won' : profit < 0 ? 'lost' : ''}`, text: slip.payout > 0 ? t('slipPaid', { v: fmtMoney(slip.payout, { sign: false }) }) : t('slipLost') })
+    : el('span', { class: 'slip-pill open', text: t('slipOpen') });
+  return el('article', { class: `card saved-slip ${state.freshSlips.has(slip.id) ? 'fresh' : ''}` }, [
+    el('div', { class: 'saved-head' }, [
+      el('div', {}, [el('strong', { text: `${mode} · ${t('slipLegs', { n })}` }), el('small', { class: 'muted', text: ` ${fmtTime(slip.t)}` })]),
+      pill
+    ]),
+    el('ul', { class: 'parlay-legs saved-legs' },
+      slip.legs.map(leg =>
+        el('li', { class: leg.result ? `leg-${leg.result}` : '' }, [
+          el('span', { class: 'leg-result', 'aria-label': leg.result ? t(`legResult_${leg.result}`) : t('legPending'), text: RESULT_ICON[leg.result] ?? '⏳' }),
+          el('span', { class: 'leg-main' }, [el('strong', { text: leg.shortLabel }), el('small', { class: 'slip-leg-game', text: leg.start ? `${leg.matchup} · ${fmtTime(leg.start)}` : leg.matchup })]),
+          el('span', { class: 'leg-odds', text: fmtOdds(leg.odds) })
+        ])
+      )
+    ),
+    el('p', { class: 'saved-foot' }, [
+      el('span', { text: `${t('slipCost')} ${fmtMoney(slip.cost, { sign: false })}` }),
+      settled
+        ? el('strong', { class: profit > 0 ? 'back-high' : profit < 0 ? 'back-low' : '', text: `${t('slipResult')} ${fmtMoney(profit)}` })
+        : el('span', { class: 'muted', text: `${t('slipTop')} ${fmtMoney(top, { sign: false })}` })
+    ])
+  ]);
+}
+
+function renderSaved() {
+  const t = state.t;
+  const slips = state.account.slips;
+  const open = slips.filter(s => s.status === 'open');
+  $('saved').hidden = slips.length === 0;
+  if (!slips.length) return;
+  const shown = state.showAllSaved ? slips : slips.slice(0, SAVED_SHOWN);
+  $('saved-body').replaceChildren(
+    el('div', { class: 'saved-toolbar' }, [
+      el('span', { class: 'muted', text: t('savedCount', { open: open.length, all: slips.length }) }),
+      open.length
+        ? el('button', { class: 'ghost-button', type: 'button', disabled: state.checking ? '' : null, text: state.checking ? t('checking') : t('checkResults'), onclick: () => checkResults(true) })
+        : null
+    ]),
+    el('div', { class: 'saved-list' }, shown.map(savedSlipCard)),
+    ...(slips.length > shown.length
+      ? [el('button', { class: 'ghost-button', type: 'button', text: t('savedMore', { n: slips.length - shown.length }), onclick: () => ((state.showAllSaved = true), renderSaved()) })]
+      : [])
+  );
 }
 
 // ---- Simulator ----------------------------------------------------------------
@@ -2501,6 +3070,8 @@ function renderAll() {
   renderParlay();
   renderSim();
   renderF1();
+  renderAccount();
+  renderSaved();
 }
 
 // Longest the loading screen waits at start-up; after that the page opens and
@@ -2629,6 +3200,7 @@ function showTab(tab) {
   window.scrollTo({ top: 0 });
   // The chart sizes itself to its container, which is hidden until now.
   if (tab === 'sim' && state.data) renderSim();
+  if (tab === 'slip') checkResults();
 }
 
 for (const button of document.querySelectorAll('#tabs .tab')) button.addEventListener('click', () => showTab(button.dataset.tab));
@@ -2717,6 +3289,17 @@ if ('ResizeObserver' in window) {
 
 // Tells the page's failsafe (in index.html) that the scripts loaded and started.
 window.__oddsStarted = true;
+state.account = loadAccount();
+state.sync = { ...state.sync, code: loadSyncCode() };
 renderStatic();
 renderTabs();
-load();
+renderAccount();
+renderSaved();
+load().then(() => checkResults());
+syncNow();
+// Back on the tab: pick up what another device did, and any games that ended.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  syncNow();
+  if (state.tab === 'slip') checkResults();
+});

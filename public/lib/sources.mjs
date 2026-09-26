@@ -291,6 +291,7 @@ export function parseF1RaceWinner(events, now) {
   const fair = devigPower(drivers.map(d => d.raw));
   return {
     title: event.title,
+    slug: event.slug,
     startUtc: new Date(event.startTime).toISOString(),
     drivers: drivers
       .map((d, i) => ({ name: d.name, fair: fair[i] }))
@@ -333,6 +334,7 @@ export function parseFutures(events, sport) {
     out.push({
       key: market.key,
       sport,
+      slug: event.slug,
       season: seasonLabel(event, sport),
       teams: teams
         .map((t, i) => ({ name: { en: t.name, zh: teamZh(sport, t.name) }, fair: fair[i] }))
@@ -403,4 +405,113 @@ export async function loadOdds(now = new Date(), onProgress) {
     f1: parseF1RaceWinner(f1, now),
     futures: [...parseFutures(mlbPm, 'mlb'), ...parseFutures(eplPm, 'epl'), ...(nbaInSeason(now) ? parseFutures(nbaPm, 'nba') : [])]
   };
+}
+
+// ---- Results (for saved slips) ------------------------------------------------
+
+const ESPN_PATH = { mlb: 'baseball/mlb', epl: 'soccer/eng.1' };
+const VOID_STATUS = /POSTPONED|CANCELED|CANCELLED|FORFEIT|ABANDONED/;
+
+// Every game on an ESPN scoreboard with how it stands: 'final', 'void'
+// (called off) or 'pending', and for baseball the runs of each inning.
+export function parseEspnResults(data, sport) {
+  const games = [];
+  for (const event of data.events || []) {
+    const comp = event.competitions?.[0];
+    if (!comp) continue;
+    const side = ha => comp.competitors.find(c => c.homeAway === ha);
+    const away = side('away');
+    const home = side('home');
+    if (!away || !home) continue;
+    const type = comp.status?.type || {};
+    const status = VOID_STATUS.test(type.name || '') ? 'void' : type.completed && type.state === 'post' ? 'final' : 'pending';
+    games.push({
+      sport,
+      startUtc: new Date(event.date).toISOString(),
+      away: away.team.displayName,
+      home: home.team.displayName,
+      status,
+      awayScore: Number(away.score),
+      homeScore: Number(home.score),
+      awayInnings: (away.linescores || []).map(l => Number(l.value) || 0),
+      homeInnings: (home.linescores || []).map(l => Number(l.value) || 0)
+    });
+  }
+  return games;
+}
+
+// The race winner from ESPN's F1 scoreboard: { status, winner } for the race
+// starting near `startUtc`.
+export function parseEspnRace(data, startUtc) {
+  for (const event of data.events || []) {
+    for (const comp of event.competitions || []) {
+      if (comp.type?.abbreviation !== 'Race') continue;
+      if (Math.abs(Date.parse(comp.date) - Date.parse(startUtc)) > MATCH_TOLERANCE_MS) continue;
+      const type = comp.status?.type || {};
+      if (VOID_STATUS.test(type.name || '')) return { status: 'void' };
+      if (!type.completed) return { status: 'pending' };
+      const first = (comp.competitors || []).find(c => c.winner) ?? (comp.competitors || []).find(c => Number(c.order) === 1);
+      return first ? { status: 'final', winner: first.athlete?.displayName || first.athlete?.fullName } : { status: 'pending' };
+    }
+  }
+  return null;
+}
+
+// A championship's winner once Polymarket has resolved the market.
+export function parseFutureResult(events) {
+  const event = events?.[0];
+  if (!event?.closed) return { status: 'pending' };
+  for (const m of event.markets || []) {
+    const name = /^Will (?:the )?(.+?) win the /i.exec(m.question || '')?.[1];
+    const outcomes = parseJsonArray(m.outcomes);
+    const prices = parseJsonArray(m.outcomePrices);
+    const yes = Number(prices?.[outcomes?.findIndex(o => /^yes$/i.test(o)) ?? 0]);
+    if (name && yes >= 0.99) return { status: 'final', winner: name };
+  }
+  return { status: 'pending' };
+}
+
+// ESPN files games under the US Eastern date.
+function espnDates(startUtc) {
+  const t = Date.parse(startUtc);
+  return [...new Set([4, 5].map(h => yyyymmdd(new Date(t - h * 3_600_000))))];
+}
+
+// Outcomes for saved-slip legs that have started: legId -> outcome (see
+// legResult in account.mjs). Legs whose results can't be fetched are left out.
+export async function fetchOutcomes(legs, now = new Date()) {
+  const out = new Map();
+  const pages = new Map();
+  const page = url => {
+    if (!pages.has(url)) pages.set(url, getJson(url).catch(() => null));
+    return pages.get(url);
+  };
+  await Promise.all(
+    legs.map(async leg => {
+      if (leg.kind === 'future') {
+        if (!leg.eventSlug) return;
+        const events = await page(`${GAMMA}/events?slug=${encodeURIComponent(leg.eventSlug)}`);
+        if (events) out.set(leg.id, parseFutureResult(events));
+        return;
+      }
+      if (!leg.start || Date.parse(leg.start) > now.getTime()) return;
+      if (leg.kind === 'f1') {
+        const data = await page(`${ESPN}/racing/f1/scoreboard?dates=${yyyymmdd(new Date(leg.start))}`);
+        const result = data && parseEspnRace(data, leg.start);
+        if (result) out.set(leg.id, result);
+        return;
+      }
+      const path = ESPN_PATH[leg.sport];
+      if (!path) return;
+      for (const date of espnDates(leg.start)) {
+        const data = await page(`${ESPN}/${path}/scoreboard?dates=${date}`);
+        const game = data && parseEspnResults(data, leg.sport).find(g => sameGame(g, { sport: leg.sport, away: leg.away, home: leg.home, startUtc: leg.start }));
+        if (game) {
+          out.set(leg.id, game);
+          return;
+        }
+      }
+    })
+  );
+  return out;
 }

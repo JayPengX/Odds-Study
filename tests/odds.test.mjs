@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   americanToProbability,
   devigTwoWay,
@@ -60,14 +61,21 @@ test('lottery estimate reproduces real MLB prices within a few cents', () => {
   close(estimateLotteryOdds(0.502, K_BOTH), 1.73, 0.01);
 });
 
-test('F1 estimate follows the power rule', () => {
-  close(estimateF1LotteryOdds(0.4081), 1.86, 0.01);
-  close(estimateF1LotteryOdds(0.041), 9.1, 0.1);
-  close(estimateF1LotteryOdds(0.0287), 11.67, 0.01);
-  // Longshots sit on the lottery's fixed prices (2026 Azerbaijan GP).
+test('F1 estimate matches the lottery board on race eve', () => {
+  const { drivers } = JSON.parse(readFileSync(new URL('./fixtures/lottery-f1-2026-09-26.json', import.meta.url)));
+  const fair = devigPower(drivers.map(d => d.polymarket));
+  const priced = drivers.map((d, i) => ({ ...d, fair: fair[i], est: estimateF1LotteryOdds(fair[i]) })).filter(d => d.fair >= 0.01);
+  assert.equal(priced.length, 8);
+  const err = priced.reduce((s, d) => s + Math.abs(d.est - d.lottery) / d.lottery, 0) / priced.length;
+  assert.ok(err < 0.11, `average error ${err}`);
+  // The favourite: 1.20 on the board.
+  close(priced[0].est, 1.2, 0.03);
+  // Longshots sit on the lottery's fixed prices.
   assert.equal(estimateF1LotteryOdds(0.0064), 65);
-  assert.equal(estimateF1LotteryOdds(0.0025), 325);
+  assert.equal(estimateF1LotteryOdds(0.0035), 275);
   assert.equal(estimateF1LotteryOdds(0.0005), 500);
+  // A huge favourite never drops below the floor.
+  assert.equal(estimateF1LotteryOdds(0.95), 1.05);
 });
 
 test('expected return and overround', () => {
@@ -542,4 +550,21 @@ test('everyone bets into one world: a race has one winner for all', async () => 
   }
   // 24 races, each with ~2% combined chance for a 300+ driver: ~40% of seasons at most.
   assert.ok(longshotSeasons <= 5, `${longshotSeasons} of 8 seasons`);
+});
+
+test('wider lines: team totals and run lines from the score model, odds never below 1.01', async () => {
+  const { fitTeamRuns, scoreGrid, runLineCover, teamOverChance, estimateLineOdds, totalOverChance, fitTotalRuns } = await import('../public/lib/odds.mjs');
+  const means = fitTeamRuns(0.58, 8.5, 0.5);
+  const grid = scoreGrid(means.home, means.away);
+  // The away underdog getting runs covers more often the more runs it gets.
+  const covers = [-4.5, -3.5, -2.5, -1.5, 1.5, 2.5, 3.5, 4.5].map(l => runLineCover(grid, l));
+  for (let i = 1; i < covers.length; i++) assert.ok(covers[i] > covers[i - 1]);
+  // +1.5 for the away side and -1.5 for the home side are the same bet.
+  close(runLineCover(grid, 1.5) + (1 - runLineCover(grid, 1.5)), 1);
+  assert.ok(teamOverChance(means.home, 2.5) > teamOverChance(means.home, 5.5));
+  const mu = fitTotalRuns(8.5, 0.5);
+  close(totalOverChance(8.5, mu), 0.5, 0.01);
+  // Near-certain lines still pay a bit; the usual lines are the usual price.
+  assert.ok(estimateLineOdds(0.97, 1.158) >= 1.01);
+  close(estimateLineOdds(0.5, 1.158), 1.73, 0.01);
 });

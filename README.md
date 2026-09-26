@@ -26,17 +26,19 @@ The choice is remembered.
   - MLB games up to the end of tomorrow, Taiwan time.
   - The Premier League's next matchweek, once its first game is within 3 days.
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
-  - The next F1 race winner, with **every** driver the market prices.
+  - The next F1 race winner, with **every** driver the market prices, named as the lottery writes them (G.羅素, AK.安東內利 …).
 - **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). Every league logo sits on the same small white disc in both themes (as in Match-Find); the Premier League shows just its purple lion, cropped by ESPN's own resizer.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
   - the estimated lottery odds, tinted green or red when a bet is unusually good or bad;
   - with 詳細 on: the odds' ± error, the fair chance and the average back per NT$100 (usually just 100 minus the take).
 - **更多玩法 (more markets)** opens the other markets:
-  - 大小分 (totals, 3 lines);
-  - 讓分 (run lines, ±1.5 and ±2.5);
-  - 單隊大小 (team totals);
+  - 大小分 (totals): the lottery's 3 lines, plus up to 3 more either side of the main line (Premier League: DraftKings' line and 3 either side);
+  - 讓分 (run lines): the lottery's ±1.5 and ±2.5, plus 1.5 to 4.5 runs given by either team;
+  - 單隊大小 (team totals): the lottery's line for each team, plus 2 either side;
   - 得分最高單局 (top-scoring inning).
+
+  Extra lines whose chance is under 3% or over 97% are left out. **自訂盤口 (any line)** under the markets adds any other line: pick the market, step the line with − / +, add it (up to 25.5 runs for totals, ±9.5 for run lines, 15.5 for team totals; not for lines under 1% or over 99%). Lines the lottery didn't post are priced by the same models at its usual cut and marked unchecked (`?`).
 
   With 詳細 on, each market shows its own house take.
 - **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.
@@ -67,6 +69,19 @@ The choice is remembered.
 - **Grade:** a letter from the average back per NT$100 (a single game at the usual cut gets an A), a type from the chance of profit (steady to lottery ticket), the average loss per ticket in bubble teas, and how many tickets it takes on average to get paid once. With 詳細 on: what all-correct would pay at fair odds, and how much less the lottery pays.
 - **How hard is it to win?** The ticket's chances of all correct and of any profit, placed among well-known odds: a coin, a die, a stranger's birthday, 10 heads in a row, a royal flush, the Lotto 6/49 and Power Lottery jackpots.
 - **Try a draw:** opens the ticket with each pick drawn from its fair chance. One ticket at a time, the picks revealed one by one; the button reads 開始 (Start), then 再開一張 (Restart) once a ticket is done. A running tally shows tickets opened, how many paid, the result so far with a small chart, the biggest ticket, and what the odds say that many tickets average.
+
+### 模擬帳戶 Practice account and saved slips
+
+- **Play money only:** a new account has NT$10,000. From the next week on, NT$5,000 can be claimed once a week, from Monday 00:00 Taiwan time; unclaimed weeks don't add up.
+- **模擬下注 (place with play money)** on the slip buys it at the odds shown (real odds when typed in): the cost comes off the balance at once, and the slip moves to **我的投注單 (my slips)**. A slip costing more than the balance can't be placed.
+- **Settling:** opening the 投注單 tab (or coming back to it) checks every open slip whose games have started, at most every 90 seconds, or at once with 檢查結果:
+  - MLB and Premier League from ESPN's final scores (innings for the top-scoring inning);
+  - F1 from ESPN's race result;
+  - championships from Polymarket once it resolves the market.
+
+  Each pick is marked won, lost or void. Once all are decided the slip pays like a real ticket: a postponed or cancelled game counts at odds 1.00, every combination over NT$5,000 is taxed 20.4%, NT$20 million at most. A game still without a result three days after its start counts as void.
+- **The card** shows the balance, the money on open slips, the total won or lost, and each slip with its picks (✓ ✗ ↺ ⏳), cost and payout.
+- **Sync:** 建立同步碼 creates an 8-character passcode (letters and digits, no 0/1/O/I); typing it on another device links that device to the same account. The two copies merge: the balance is a ledger of entries with fixed ids (start, each week's grant, each slip's stake and payout), so nothing counts twice, and a slip settled on either device is settled on both. Changes are sent a second after they happen, and picked up when the page opens or the tab comes back. The account lives in `localStorage` on each device and in Firestore (through Shared-Proxy's `/odds-sync`), stored under the passcode's hash.
 
 ### 模擬 Simulator
 
@@ -141,7 +156,8 @@ Folding cards explain:
 | MLB run lines | Lottery chance `0.5 + 0.732 × (p − 0.5)` for ±1.5, then 8.6 points more for ±2.5; 1.6% off on 38 prices |
 | MLB team totals | Each team's runs as negative binomial (r = 4) fitted to the win chance and total; 17 of 18 lines matched |
 | Top-scoring inning | The lottery's own fixed table (about a 48% take) |
-| F1 winner | `1 ÷ fair^0.69`; drivers under 1% get the lottery's fixed 65 / 325 / 500 |
+| F1 winner | `1 ÷ (1.17 × fair^0.765)`, at least 1.05; drivers under 1% get the lottery's fixed 65 (0.4–1%) / 275 (0.15–0.4%) / 500. About 10% off on 8 drivers the eve of the 2026 Azerbaijan GP (`tests/fixtures/lottery-f1-2026-09-26.json`); the old `1 ÷ fair^0.69` priced the 1.20 favourite at 1.37 |
+| Extra lines | Totals from the same negative binomial; run lines and team totals from the per-team score grid; odds `1 ÷ (p × 1.158)` (totals × 1.153), never above halfway from p to 1 in implied chance, at least 1.01. Not checked against the lottery |
 | Championships | Implied chance ∝ `fair^0.7`, scaled to the lottery's total (MLB 200%, EPL 160%); longshots 133 / 300 |
 | Back per NT$100 | `fair chance × odds × 100`; below 100 loses on average |
 | House take | `1 − 1 ÷ Σ(1 / odds)` |
@@ -153,7 +169,7 @@ Every estimate carries its **margin of error**:
 - **Estimated odds:** their measured error against real lottery prices. `?` marks one not yet checked.
 - **Simulator results:** 95% sampling error.
 
-The calibration data is the real lottery prices in `tests/fixtures/lottery-mlb-2026-09-25.json`. Soccer prices haven't been checked against the lottery yet.
+The calibration data is the real lottery prices in `tests/fixtures/lottery-mlb-2026-09-25.json` and `tests/fixtures/lottery-f1-2026-09-26.json`. Soccer prices haven't been checked against the lottery yet.
 
 ## How it works
 
@@ -165,12 +181,16 @@ The page depends on that Worker:
 - **Allowed origins only:** `https://jaypengx.github.io` and `http://localhost:<port>`. Hosting elsewhere needs the origin added to `ALLOWED_ORIGINS` in Shared-Proxy's `sports-proxy-worker.js`.
 - **Allowed hosts only:** `site.api.espn.com` and `gamma-api.polymarket.com` are the ones used here.
 
+The practice account's sync uses Shared-Proxy's other Worker, `orbit-workers-proxy` (`SYNC_URL` in `public/lib/sync.mjs`), route `/odds-sync`. Without it the account still works on each device alone.
+
 | File | Purpose |
 | --- | --- |
 | `public/lib/odds.mjs` | The math: devig, estimated odds, bet slip analysis, simulation |
 | `public/lib/sources.mjs` | Fetching and parsing ESPN and Polymarket; what the lottery would list |
-| `public/lib/teams.mjs` | Chinese team names, ESPN logo ids, the F1 grid's team colours |
+| `public/lib/teams.mjs` | Chinese team and driver names, ESPN logo ids, the F1 grid's team colours |
 | `public/lib/i18n.mjs` | Traditional Chinese and English text (follows the browser's language) |
+| `public/lib/account.mjs` | The practice account: ledger, weekly grant, placing and settling slips, merging two copies |
+| `public/lib/sync.mjs` | The account's sync through Shared-Proxy's `/odds-sync` |
 | `public/app.js` | Rendering |
 | `public/sim-worker.js` | Runs the crowd simulation off the main thread |
 | `public/styles.css` | Design tokens (light and dark) and components |

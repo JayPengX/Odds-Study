@@ -189,11 +189,41 @@ const F1_TEAMS = {
   cadillac: { name: 'Cadillac', color: '#c9a227', drivers: ['Perez', 'Bottas'] }
 };
 
-// { team, color } for a driver's full name ("Carlos Sainz Jr."), or a neutral badge.
+// Driver names as the lottery writes them ("G.羅素"). The ones on the
+// 2026 Azerbaijan GP board are the lottery's own; the rest follow the usual
+// Taiwanese transliteration.
+const F1_ZH = {
+  Russell: 'G.羅素',
+  Antonelli: 'AK.安東內利',
+  Leclerc: 'C.勒克萊爾',
+  Piastri: 'O.皮亞斯特里',
+  Verstappen: 'M.維斯塔潘',
+  Hamilton: 'L.漢米爾頓',
+  Norris: 'L.諾里斯',
+  Hadjar: 'I.哈賈爾',
+  Gasly: 'P.蓋斯利',
+  Sainz: 'C.塞恩斯',
+  Colapinto: 'F.科拉平托',
+  Stroll: 'L.斯托羅爾',
+  Perez: 'S.培瑞茲',
+  Alonso: 'F.阿隆索',
+  Albon: 'A.艾爾朋',
+  Lawson: 'L.勞森',
+  Lindblad: 'A.林德布拉德',
+  Ocon: 'E.歐康',
+  Bearman: 'O.貝爾曼',
+  Hulkenberg: 'N.霍肯伯格',
+  Bortoleto: 'G.博托萊托',
+  Bottas: 'V.博塔斯',
+  Tsunoda: 'Y.角田裕毅'
+};
+
+// { team, color, zh } for a driver's full name ("Carlos Sainz Jr."), or a neutral badge.
 export function f1Driver(name) {
-  const plain = (name || '').normalize('NFKD').replace(/[̀-ͯ]/g, '');
+  const plain = (name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const zh = Object.entries(F1_ZH).find(([d]) => new RegExp(`\\b${d}\\b`, 'i').test(plain))?.[1] ?? name;
   for (const team of Object.values(F1_TEAMS)) {
-    if (team.drivers.some(d => new RegExp(`\\b${d}\\b`, 'i').test(plain))) return { team: team.name, color: team.color };
+    if (team.drivers.some(d => new RegExp(`\\b${d}\\b`, 'i').test(plain))) return { team: team.name, color: team.color, zh };
   }
-  return { team: '', color: '#8a8f98' };
+  return { team: '', color: '#8a8f98', zh };
 }
