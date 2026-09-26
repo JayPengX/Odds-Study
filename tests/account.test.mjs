@@ -159,3 +159,63 @@ test('F1 winner from ESPN, championship winner from Polymarket', () => {
   ] }]);
   assert.deepEqual(done, { status: 'final', winner: 'Los Angeles Dodgers' });
 });
+
+test('a slip outlook: average payout, spread and chance of any payout', async () => {
+  const { slipOutlook, evaluateSlip } = await import('../public/lib/odds.mjs');
+  const legs = [{ odds: 2, fairChance: 0.5 }, { odds: 3, fairChance: 0.3 }];
+  const look = slipOutlook({ legs, sizes: [2], stake: 100 });
+  // Pays 600 with chance 0.15.
+  assert.ok(Math.abs(look.mean - 90) < 1e-9);
+  assert.ok(Math.abs(look.any - 0.15) < 1e-9);
+  assert.ok(Math.abs(look.sd - 600 * Math.sqrt(0.15 * 0.85)) < 1e-6);
+  assert.ok(Math.abs(evaluateSlip({ legs, sizes: [2], stake: 100 }).expectedNet - look.mean) < 1e-9);
+});
+
+test('history stats: money, luck, picks against their chances, streaks', async () => {
+  const { historyStats } = await import('../public/lib/history.mjs');
+  let account = newAccount(at('2026-09-01T00:00:00Z'));
+  const legs = (...r) => r.map((result, i) => ({ id: `l${i}`, kind: i ? 'total' : 'ml', sport: 'mlb', odds: 2, fairChance: 0.45, result }));
+  const place = (id, t, results) => {
+    ({ account } = placeSlip(account, { id, mode: 'single', sizes: [1], stake: 100, cost: 100 * results.length, legs: legs(...results.map(() => null)) }, at(t)));
+    account = applyResults(account, id, results, at(t));
+  };
+  place('a', '2026-09-02T00:00:00Z', ['won', 'lost']); // pays 200 of 200
+  place('b', '2026-09-03T00:00:00Z', ['lost', 'lost']); // 0 of 200
+  place('c', '2026-09-10T00:00:00Z', ['won', 'won']); // 400 of 200
+  ({ account } = placeSlip(account, { id: 'd', mode: 'parlay', sizes: [2], stake: 100, cost: 100, legs: legs(null, null) }, at('2026-09-11T00:00:00Z')));
+  const s = historyStats(account);
+  assert.equal(s.placed, 4);
+  assert.equal(s.settled, 3);
+  assert.equal(s.open, 1);
+  assert.equal(s.staked, 600);
+  assert.equal(s.paid, 600);
+  assert.equal(s.net, 0);
+  // Each NT$100 single at 2.0 and 45% averages 90 back.
+  assert.ok(Math.abs(s.expected - 540) < 1e-9);
+  assert.ok(Math.abs(s.luck - 60) < 1e-9);
+  assert.equal(s.picks.legs, 6);
+  assert.equal(s.picks.won, 3);
+  assert.ok(Math.abs(s.picks.expectedRate - 0.45) < 1e-9);
+  assert.equal(s.streak.bestLoss, 1);
+  assert.equal(s.streak.current, 1);
+  assert.equal(s.records.best.slip.id, 'c');
+  assert.equal(s.records.worst.slip.id, 'b');
+  assert.equal(s.weeks.length, 2);
+  assert.equal(s.timeline.at(-1).balance, 10_000 - 700 + 600);
+});
+
+test('saves are gzip-compressed and read back; old plain saves still read', async () => {
+  const { pack, unpack } = await import('../public/lib/codec.mjs');
+  let account = newAccount(at('2026-09-01T00:00:00Z'));
+  for (let i = 0; i < 40; i++) {
+    const legs = Array.from({ length: 4 }, (_, j) => ({ id: `mlb_2026-09-0${j}|tot|8.5|over`, kind: 'total', sport: 'mlb', label: 'Texas Rangers @ Minnesota Twins Over 8.5', shortLabel: 'Over 8.5', matchup: 'Texas Rangers @ Minnesota Twins', start: '2026-09-26T00:10:00.000Z', odds: 1.87, fairChance: 0.5, side: 'over', line: 8.5, away: 'Texas Rangers', home: 'Minnesota Twins' }));
+    ({ account } = placeSlip(account, { id: `s${i}`, mode: 'parlay', sizes: [4], stake: 10, cost: 10, legs }));
+  }
+  const json = JSON.stringify(account);
+  const packed = await pack(account);
+  assert.ok(packed.startsWith('gz1:'));
+  assert.ok(packed.length * 5 < json.length, `${packed.length} vs ${json.length}`);
+  assert.deepEqual(await unpack(packed), account);
+  assert.deepEqual(await unpack(json), account);
+  assert.equal(await unpack('gz1:!!'), null);
+});

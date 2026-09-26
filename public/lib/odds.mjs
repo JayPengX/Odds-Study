@@ -1360,6 +1360,24 @@ export function slipPayoutTable({ legs, sizes, stake }) {
   return { gross, net };
 }
 
+// A ticket's outlook when bought: average payout after tax, its spread
+// (standard deviation) and the chance of any payout, over every way its legs
+// can land. Used to tell luck from the lottery's cut in the slip history.
+export function slipOutlook({ legs, sizes, stake }) {
+  const { net } = slipPayoutTable({ legs, sizes, stake });
+  let mean = 0;
+  let square = 0;
+  let any = 0;
+  for (let won = 0; won < net.length; won++) {
+    let chance = 1;
+    for (let i = 0; i < legs.length; i++) chance *= won & (1 << i) ? legs[i].fairChance : 1 - legs[i].fairChance;
+    mean += chance * net[won];
+    square += chance * net[won] ** 2;
+    if (net[won] > 0) any += chance;
+  }
+  return { mean, sd: Math.sqrt(Math.max(0, square - mean * mean)), any };
+}
+
 // What a finished ticket pays. Each leg is 'won', 'lost' or 'void' (called
 // off: the lottery counts it at odds 1.00, so a single gets its stake back
 // and a parlay goes on without it). Gross is before tax, net after.

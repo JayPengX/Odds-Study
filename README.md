@@ -8,7 +8,7 @@ An educational app about the math of the Taiwan Sports Lottery (台灣運彩): w
 
 ## The app
 
-Four tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, 詳細, refresh) sit in a slim row at the top. Big numbers never wrap: they shrink (to 60% at most) to fit on one line. On desktop the tabs are in the top bar.
+Five tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, 詳細, refresh) sit in a slim row at the top. Big numbers never wrap: they shrink (to 60% at most) to fit on one line. On desktop the tabs are in the top bar.
 
 Logos come from ESPN, with dark-background versions in dark mode: the leagues on the filters, cards and boards, and the teams on the games.
 
@@ -70,17 +70,27 @@ The choice is remembered.
 - **How hard is it to win?** The ticket's chances of all correct and of any profit, placed among well-known odds: a coin, a die, a stranger's birthday, 10 heads in a row, a royal flush, the Lotto 6/49 and Power Lottery jackpots.
 - **Try a draw:** opens the ticket with each pick drawn from its fair chance. One ticket at a time, the picks revealed one by one; the button reads 開始 (Start), then 再開一張 (Restart) once a ticket is done. A running tally shows tickets opened, how many paid, the result so far with a small chart, the biggest ticket, and what the odds say that many tickets average.
 
-### 模擬帳戶 Practice account and saved slips
+### 紀錄 History: practice account, saved slips and stats
 
 - **Play money only:** a new account has NT$10,000. From the next week on, NT$5,000 can be claimed once a week, from Monday 00:00 Taiwan time; unclaimed weeks don't add up.
-- **模擬下注 (place with play money)** on the slip buys it at the odds shown (real odds when typed in): the cost comes off the balance at once, and the slip moves to **我的投注單 (my slips)**. A slip costing more than the balance can't be placed.
-- **Settling:** opening the 投注單 tab (or coming back to it) checks every open slip whose games have started, at most every 90 seconds, or at once with 檢查結果:
+- **模擬下注 (place with play money)** on the slip buys it at the odds shown (real odds when typed in): the cost comes off the balance at once, and the page opens the 紀錄 (history) tab with the slip in **我的投注單 (my slips)**. A slip costing more than the balance can't be placed.
+- **Settling:** opening the 紀錄 tab (or coming back to it) checks every open slip whose games have started, at most every 90 seconds, or at once with 檢查結果:
   - MLB and Premier League from ESPN's final scores (innings for the top-scoring inning);
   - F1 from ESPN's race result;
   - championships from Polymarket once it resolves the market.
 
   Each pick is marked won, lost or void. Once all are decided the slip pays like a real ticket: a postponed or cancelled game counts at odds 1.00, every combination over NT$5,000 is taxed 20.4%, NT$20 million at most. A game still without a result three days after its start counts as void.
 - **The card** shows the balance, the money on open slips, the total won or lost, and each slip with its picks (✓ ✗ ↺ ⏳), cost and payout.
+- **Slip history:** filters for all, open, won and lost slips (10 shown, the rest behind a button). Each slip folds out what the odds said when it was bought: its average payout, the chance of any payout, each pick's fair chance and value per NT$100, and once settled, its result against that average (luck) and the tax withheld.
+- **統計與分析 (stats and analysis)**, from `public/lib/history.mjs`:
+  - key numbers: slips settled, staked, paid after tax, net, back per NT$100 and the share of slips that paid, each against what the odds said to expect;
+  - the balance over time, a step line with payouts and weekly claims marked;
+  - luck or the cut: the expected loss (the lottery's cut plus tax) against the actual result, the usual luck range (one standard deviation over all settled slips) and how rare the result is (normal approximation);
+  - how good the picks are: won against their fair chances, overall, by chance band (0–20% … 80–100%) and by market, with average odds;
+  - by sport (slips from several sports count as mixed), by mode and by number of picks: slips, staked, net, back per NT$100 actual and expected;
+  - streaks and records: the current and longest winning and losing runs, the best and worst slip, the biggest return, the average slip and the tax paid;
+  - week by week (Taiwan weeks from Monday).
+- **Saves are always compressed:** the account is gzip-compressed (JSON → gzip → base64, marked `gz1:`, see `public/lib/codec.mjs`) both in `localStorage` and in the synced copy, about 8–10 times smaller. Older plain-JSON saves still open, and are rewritten compressed.
 - **Sync:** 建立同步碼 creates an 8-character passcode (letters and digits, no 0/1/O/I); typing it on another device links that device to the same account. The two copies merge: the balance is a ledger of entries with fixed ids (start, each week's grant, each slip's stake and payout), so nothing counts twice, and a slip settled on either device is settled on both. Changes are sent a second after they happen, and picked up when the page opens or the tab comes back. The account lives in `localStorage` on each device and in Firestore (through Shared-Proxy's `/odds-sync`), stored under the passcode's hash.
 
 ### 模擬 Simulator
@@ -191,6 +201,8 @@ The practice account's sync uses Shared-Proxy's other Worker, `orbit-workers-pro
 | `public/lib/i18n.mjs` | Traditional Chinese and English text (follows the browser's language) |
 | `public/lib/account.mjs` | The practice account: ledger, weekly grant, placing and settling slips, merging two copies |
 | `public/lib/sync.mjs` | The account's sync through Shared-Proxy's `/odds-sync` |
+| `public/lib/history.mjs` | Stats over saved slips: money, luck against the cut, picks against their chances, breakdowns, streaks, records |
+| `public/lib/codec.mjs` | gzip + base64 for every save |
 | `public/app.js` | Rendering |
 | `public/sim-worker.js` | Runs the crowd simulation off the main thread |
 | `public/styles.css` | Design tokens (light and dark) and components |

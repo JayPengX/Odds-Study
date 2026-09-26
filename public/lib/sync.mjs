@@ -1,7 +1,10 @@
 // Syncs the simulated account across devices through the shared Worker's
 // /odds-sync route (Firestore behind it). One 8-character passcode is both
 // the account's address and its only key; the Worker stores the account
-// under the passcode's hash, never the passcode itself.
+// under the passcode's hash, never the passcode itself. The account travels
+// gzip-compressed (see codec.mjs).
+import { pack, unpack } from './codec.mjs';
+
 export const SYNC_URL = 'https://orbit-workers-proxy.pengzjay.workers.dev/odds-sync';
 export const PASSCODE_PATTERN = /^[2-9A-HJ-NP-Z]{8}$/;
 
@@ -32,7 +35,7 @@ async function request(method, { passcode, payload } = {}) {
 
 // New synced account: returns its passcode.
 export async function createSync(account) {
-  const { passcode } = await request('POST', { payload: JSON.stringify(account) });
+  const { passcode } = await request('POST', { payload: await pack(account) });
   return passcode;
 }
 
@@ -40,13 +43,9 @@ export async function createSync(account) {
 export async function readSync(passcode) {
   const body = await request('GET', { passcode });
   if (!body.exists || !body.payload) return null;
-  try {
-    return JSON.parse(body.payload);
-  } catch {
-    return null;
-  }
+  return unpack(body.payload);
 }
 
 export async function writeSync(passcode, account) {
-  await request('PATCH', { passcode, payload: JSON.stringify(account) });
+  await request('PATCH', { passcode, payload: await pack(account) });
 }

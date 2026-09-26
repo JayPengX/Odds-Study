@@ -907,3 +907,23 @@ details.market[open] > summary { margin-bottom: 6px; }
 .leg-void .leg-result { color: var(--text-muted); }
 .leg-lost .leg-main strong { text-decoration: line-through; text-decoration-color: var(--bad); }
 .saved-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 0.86rem; font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+
+/* History: stats and analysis */
+#stats-body > .card, #stats-body > .two-col { margin-bottom: 14px; }
+#stats-body .two-col > .card { margin-bottom: 0; }
+#stats-body .table-view { overflow-x: auto; margin-top: 10px; }
+.balance-chart { width: 100%; height: auto; display: block; }
+.balance-chart .zero-line { stroke: var(--axis); stroke-width: 1; stroke-dasharray: 4 4; }
+.balance-line { fill: none; stroke: var(--series-1); stroke-width: 2.5; stroke-linejoin: round; }
+.balance-win { fill: var(--good); stroke: var(--surface); stroke-width: 1.5; }
+.balance-grant { fill: var(--gold); stroke: var(--surface); stroke-width: 1.5; }
+.chart-note { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.legend-key.dot { width: 9px; height: 9px; border-radius: 50%; }
+.legend-key.dot.win { background: var(--good); }
+.legend-key.dot.grant { background: var(--gold); }
+.history-filter { margin-bottom: 10px; }
+.slip-insight { font-size: 0.8rem; color: var(--text-secondary); }
+.slip-insight > summary { cursor: pointer; }
+.slip-insight > p { margin-top: 6px; }
+.records li::before { content: '🏅'; }
+#stats-body .table-view th { white-space: nowrap; }

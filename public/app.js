@@ -67,6 +67,8 @@ import {
   isAccount
 } from './lib/account.mjs';
 import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
+import { pack, unpack } from './lib/codec.mjs';
+import { historyStats, outlookOf, chanceOf } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo } from './lib/teams.mjs';
 
@@ -122,13 +124,15 @@ const state = {
   detail: loadDetail(),
   // The simulated account (play money) and its sync.
   account: null,
+  accountReady: false,
   sync: { code: '', busy: false, error: '', at: null },
   syncOpen: false,
   // Slips saved or settled since the page opened, highlighted.
   freshSlips: new Set(),
   checking: false,
   checkedAt: 0,
-  showAllSaved: false
+  showAllSaved: false,
+  historyFilter: 'all'
 };
 state.t = makeT(state.locale);
 
@@ -735,6 +739,7 @@ function renderStatic() {
     ['parlay-title', 'parlayTitle'],
     ['account-title', 'accountTitle'],
     ['saved-title', 'savedTitle'],
+    ['stats-title', 'statsTitle'],
     ['sim-title', 'simTitle'],
     ['f1-title', 'f1Title'],
     ['math-title', 'mathTitle']
@@ -1752,9 +1757,10 @@ function renderParlay() {
 
 // ---- Simulated account and saved slips ------------------------------------------
 
-function loadAccount() {
+// This device's copy, gzip-compressed (see codec.mjs). Older plain-JSON saves still read.
+async function loadAccount() {
   try {
-    const stored = JSON.parse(localStorage.getItem(ACCOUNT_KEY));
+    const stored = await unpack(localStorage.getItem(ACCOUNT_KEY));
     if (isAccount(stored)) return stored;
   } catch {}
   return newAccount();
@@ -1768,17 +1774,26 @@ function loadSyncCode() {
   }
 }
 
+// Writes go one after another, so an older (slower to compress) save never
+// lands after a newer one.
+let saving = Promise.resolve();
 function saveAccountLocal() {
-  try {
-    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(state.account));
-    if (state.sync.code) localStorage.setItem(SYNC_KEY, state.sync.code);
-    else localStorage.removeItem(SYNC_KEY);
-  } catch {}
+  const account = state.account;
+  const code = state.sync.code;
+  saving = saving.then(async () => {
+    try {
+      localStorage.setItem(ACCOUNT_KEY, await pack(account));
+      if (code) localStorage.setItem(SYNC_KEY, code);
+      else localStorage.removeItem(SYNC_KEY);
+    } catch {}
+  });
+  return saving;
 }
 
 // Every change goes to this device at once and to the synced copy shortly after.
 function commitAccount(next) {
-  if (next === state.account) return;
+  // Nothing is written before the saved account has opened: it would be lost.
+  if (next === state.account || !state.accountReady) return;
   state.account = next;
   saveAccountLocal();
   renderAccount();
@@ -1798,7 +1813,7 @@ function pushSoon() {
 // slips or top-ups.
 async function syncNow() {
   const code = state.sync.code;
-  if (!code || state.sync.busy) return;
+  if (!code || state.sync.busy || !state.accountReady) return;
   state.sync = { ...state.sync, busy: true, error: '' };
   renderAccount();
   try {
@@ -1898,7 +1913,7 @@ function placeButton(legs, sizes, cost, errors) {
   const t = state.t;
   const funds = balance(state.account);
   const short = cost > funds;
-  const blocked = errors.length > 0 || sizes.length === 0 || short;
+  const blocked = errors.length > 0 || sizes.length === 0 || short || !state.accountReady;
   return el('div', { class: 'place-row' }, [
     el('button', {
       class: 'primary-button place-button',
@@ -1917,7 +1932,7 @@ function placeButton(legs, sizes, cost, errors) {
         renderFutures();
         renderRanking();
         renderParlay();
-        $('saved').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showTab('history');
       }
     }),
     el('small', { class: 'muted', text: t('placeNote', { v: fmtMoney(funds, { sign: false }) }) })
@@ -1930,6 +1945,7 @@ function placeButton(legs, sizes, cost, errors) {
 const RESULT_CHECK_MS = 90_000;
 const VOID_AFTER_MS = 3 * 86_400_000;
 async function checkResults(force = false) {
+  if (!state.accountReady) return;
   const open = state.account.slips.filter(s => s.status === 'open');
   const now = new Date();
   const pending = open.flatMap(s => s.legs.filter(l => !l.result && (l.kind === 'future' || (l.start && Date.parse(l.start) <= now.getTime()))));
@@ -1963,6 +1979,7 @@ async function checkResults(force = false) {
 }
 
 function renderAccount() {
+  if (!state.accountReady) return;
   const t = state.t;
   const account = state.account;
   const now = new Date();
@@ -2058,6 +2075,7 @@ function savedSlipCard(slip) {
         ])
       )
     ),
+    slipInsight(slip),
     el('p', { class: 'saved-foot' }, [
       el('span', { text: `${t('slipCost')} ${fmtMoney(slip.cost, { sign: false })}` }),
       settled
@@ -2067,25 +2085,217 @@ function savedSlipCard(slip) {
   ]);
 }
 
+// What the odds said when the slip was bought, and (once settled) how it
+// went against that; each pick's chance in the folded part.
+function slipInsight(slip) {
+  const t = state.t;
+  const look = outlookOf(slip);
+  const lines = [t('insightBought', { exp: fmtMoney(look.mean, { sign: false }), back: fmtBack((look.mean / slip.cost) * 100), any: fmtPctShort(look.any) })];
+  if (slip.status === 'settled') lines.push(t('insightLuck', { v: fmtMoney(slip.payout - look.mean) }));
+  const tax = (slip.gross ?? slip.payout) - slip.payout;
+  if (tax > 0) lines.push(t('insightTax', { v: fmtMoney(tax, { sign: false }) }));
+  return el('details', { class: 'slip-insight' }, [
+    el('summary', { text: lines[0] }),
+    ...lines.slice(1).map(text => el('p', { text })),
+    table([t('colPick'), t('colOddsBought'), t('colFair'), t('colBackPer')], slip.legs.map(leg => [leg.shortLabel, fmtOdds(leg.odds), fmtPctShort(chanceOf(leg)), fmtBack(chanceOf(leg) * leg.odds * 100)]))
+  ]);
+}
+
+const HISTORY_FILTERS = {
+  all: () => true,
+  open: s => s.status === 'open',
+  won: s => s.status === 'settled' && s.payout > s.cost,
+  lost: s => s.status === 'settled' && s.payout <= s.cost
+};
+
 function renderSaved() {
+  renderStats();
+  if (!state.accountReady) return;
   const t = state.t;
   const slips = state.account.slips;
   const open = slips.filter(s => s.status === 'open');
   $('saved').hidden = slips.length === 0;
   if (!slips.length) return;
-  const shown = state.showAllSaved ? slips : slips.slice(0, SAVED_SHOWN);
+  const filtered = slips.filter(HISTORY_FILTERS[state.historyFilter]);
+  const shown = state.showAllSaved ? filtered : filtered.slice(0, SAVED_SHOWN);
   $('saved-body').replaceChildren(
+    el('div', { class: 'chips history-filter', role: 'group', 'aria-label': t('savedTitle') },
+      Object.keys(HISTORY_FILTERS).map(key =>
+        chip({
+          pressed: key === state.historyFilter,
+          text: t(`filter_${key}`),
+          count: String(slips.filter(HISTORY_FILTERS[key]).length),
+          onclick: () => {
+            state.historyFilter = key;
+            state.showAllSaved = false;
+            renderSaved();
+          }
+        })
+      )
+    ),
     el('div', { class: 'saved-toolbar' }, [
       el('span', { class: 'muted', text: t('savedCount', { open: open.length, all: slips.length }) }),
       open.length
         ? el('button', { class: 'ghost-button', type: 'button', disabled: state.checking ? '' : null, text: state.checking ? t('checking') : t('checkResults'), onclick: () => checkResults(true) })
         : null
     ]),
-    el('div', { class: 'saved-list' }, shown.map(savedSlipCard)),
-    ...(slips.length > shown.length
-      ? [el('button', { class: 'ghost-button', type: 'button', text: t('savedMore', { n: slips.length - shown.length }), onclick: () => ((state.showAllSaved = true), renderSaved()) })]
+    shown.length ? el('div', { class: 'saved-list' }, shown.map(savedSlipCard)) : el('p', { class: 'muted', text: t('filterEmpty') }),
+    ...(filtered.length > shown.length
+      ? [el('button', { class: 'ghost-button', type: 'button', text: t('savedMore', { n: filtered.length - shown.length }), onclick: () => ((state.showAllSaved = true), renderSaved()) })]
       : [])
   );
+}
+
+// ---- History: stats and analysis --------------------------------------------------
+
+function table(head, rows) {
+  return el('div', { class: 'table-view' }, el('table', {}, [
+    el('thead', {}, el('tr', {}, head.map(h => el('th', { text: h })))),
+    el('tbody', {}, rows.map(cells => el('tr', {}, cells.map(c => (c instanceof Node ? el('td', {}, c) : el('td', { text: c }))))))
+  ]));
+}
+
+const fmtBack = v => (v == null ? '–' : fmtInt(Math.round(v)));
+const fmtRate = v => (v == null ? '–' : fmtPctShort(v));
+function netCell(v) {
+  return el('span', { class: v < -0.5 ? 'back-low' : v > 0.5 ? 'back-high' : '', text: fmtMoney(v) });
+}
+
+// The balance after every entry: start, weekly top-ups, slips bought, payouts.
+function balanceChart(timeline) {
+  const t = state.t;
+  const w = 600;
+  const h = 170;
+  const m = { top: 12, right: 8, bottom: 22, left: 8 };
+  const values = timeline.map(p => p.balance);
+  const lo = Math.min(0, ...values);
+  const hi = Math.max(START_BALANCE, ...values);
+  const x = i => m.left + (timeline.length < 2 ? 0 : (i / (timeline.length - 1)) * (w - m.left - m.right));
+  const y = v => m.top + ((hi - v) / (hi - lo || 1)) * (h - m.top - m.bottom);
+  const svg = svgEl('svg', { class: 'balance-chart', viewBox: `0 0 ${w} ${h}`, role: 'img', 'aria-label': t('balanceChart') });
+  svg.append(
+    svgEl('line', { class: 'zero-line', x1: m.left, x2: w - m.right, y1: y(START_BALANCE), y2: y(START_BALANCE) }),
+    Object.assign(svgEl('text', { class: 'chart-note', x: w - m.right, y: y(START_BALANCE) - 4, 'text-anchor': 'end' }), { textContent: fmtMoney(START_BALANCE, { sign: false }) })
+  );
+  // Steps: the balance holds until the next entry.
+  let d = `M${x(0)},${y(values[0])}`;
+  for (let i = 1; i < values.length; i++) d += `H${x(i).toFixed(1)}V${y(values[i]).toFixed(1)}`;
+  svg.append(svgEl('path', { class: 'balance-line', d }));
+  timeline.forEach((p, i) => {
+    if (p.kind === 'payout' && p.amount > 0) svg.append(svgEl('circle', { class: 'balance-win', cx: x(i), cy: y(p.balance), r: 3.5 }));
+    if (p.kind === 'grant') svg.append(svgEl('circle', { class: 'balance-grant', cx: x(i), cy: y(p.balance), r: 3 }));
+  });
+  const first = new Date(timeline[0].t);
+  const last = new Date(timeline.at(-1).t);
+  const day = d => formatter('md', locale => new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric', timeZone: 'Asia/Taipei' })).format(d);
+  svg.append(
+    Object.assign(svgEl('text', { class: 'chart-note', x: m.left, y: h - 6 }), { textContent: day(first) }),
+    Object.assign(svgEl('text', { class: 'chart-note', x: w - m.right, y: h - 6, 'text-anchor': 'end' }), { textContent: day(last) })
+  );
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('balanceChart') }),
+    svg,
+    el('p', { class: 'legend' }, [
+      el('span', {}, [el('span', { class: 'legend-key dot win' }), document.createTextNode(t('chartPayout'))]),
+      el('span', {}, [el('span', { class: 'legend-key dot grant' }), document.createTextNode(t('chartGrant'))])
+    ])
+  ]);
+}
+
+// Luck against the lottery's cut: what the odds said these slips would pay
+// back, what they did, and how unusual the gap is.
+function luckCard(s) {
+  const t = state.t;
+  const pct = Math.round(s.luckShare * 100);
+  const verdict =
+    Math.abs(s.luckZ) < 0.5 ? t('luckNormal') : s.luckZ > 0 ? t('luckGood', { p: Math.max(1, 100 - pct) }) : t('luckBad', { p: Math.max(1, pct) });
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('luckTitle') }),
+    el('ul', { class: 'facts' }, [
+      el('li', { text: t('luckExpected', { staked: fmtMoney(s.staked, { sign: false }), exp: fmtMoney(s.expected, { sign: false }), back: fmtBack(s.expectedBack), loss: fmtMoney(s.expectedLoss, { sign: false }) }) }),
+      el('li', { text: t('luckActual', { paid: fmtMoney(s.paid, { sign: false }), back: fmtBack(s.back), diff: fmtMoney(s.luck), sd: fmtMoney(s.luckSd, { sign: false }) }) }),
+      el('li', { text: verdict }),
+      el('li', { text: t('luckLongRun') })
+    ])
+  ]);
+}
+
+function picksCard(s) {
+  const t = state.t;
+  if (!s.picks.legs) return null;
+  const bandName = ([lo, hi]) => `${Math.round(lo * 100)}–${Math.min(100, Math.round(hi * 100))}%`;
+  const kindName = k => t({ ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'secTopInning', f1: 'f1Title', future: 'futuresTitle' }[k] ?? k);
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('picksTitle') }),
+    el('p', { class: 'lede', text: t('picksSummary', { n: fmtInt(s.picks.legs), won: fmtInt(s.picks.won), rate: fmtRate(s.picks.rate), exp: fmtRate(s.picks.expectedRate), odds: fmtOdds(s.picks.avgOdds), voids: fmtInt(s.picks.void) }) }),
+    table([t('colChance'), t('colPicks'), t('colHit'), t('colExpectedHit')], s.bands.filter(b => b.legs).map(b => [bandName(b.range), fmtInt(b.legs), fmtRate(b.rate), fmtRate(b.expectedRate)])),
+    el('p', { class: 'note', text: t('picksBandsNote') }),
+    table([t('colMarket'), t('colPicks'), t('colHit'), t('colExpectedHit'), t('colAvgOdds')], s.byKind.map(k => [kindName(k.key), fmtInt(k.legs), fmtRate(k.rate), fmtRate(k.expectedRate), fmtOdds(k.avgOdds)]))
+  ]);
+}
+
+function breakdownCard(s) {
+  const t = state.t;
+  const moneyRows = list => list.map(b => [b.name, fmtInt(b.slips), fmtMoney(b.staked, { sign: false }), netCell(b.net), fmtBack(b.back), fmtBack(b.expectedBack)]);
+  const head = first => [first, t('colSlips'), t('colStaked'), t('colNet'), t('colBackActual'), t('colExpectedBack')];
+  const sports = s.bySport.filter(b => b.slips).map(b => ({ ...b, name: b.key === 'mixed' ? t('sportMixed') : t(`sport_${b.key}`) }));
+  const modes = s.byMode.map(b => ({ ...b, name: t(`slipMode_${b.key}`) }));
+  const legs = s.byLegs.map(b => ({ ...b, name: t('legsN', { n: b.key }) }));
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('breakdownTitle') }),
+    el('p', { class: 'note', text: t('breakdownNote') }),
+    table(head(t('colSport')), moneyRows(sports)),
+    table(head(t('colMode')), moneyRows(modes)),
+    table(head(t('colLegs')), moneyRows(legs))
+  ]);
+}
+
+function recordsCard(s) {
+  const t = state.t;
+  const r = s.records;
+  const slipName = slip => `${fmtTime(slip.t)} · ${t(`slipMode_${slip.mode}`)} ${t('slipLegs', { n: slip.legs.length })}`;
+  const items = [];
+  const streakNow = s.streak.current > 0 ? t('streakWinNow', { n: s.streak.current }) : s.streak.current < 0 ? t('streakLossNow', { n: -s.streak.current }) : null;
+  if (streakNow) items.push(streakNow);
+  items.push(t('streakBest', { win: s.streak.bestWin, loss: s.streak.bestLoss }));
+  if (r.best && r.best.profit > 0) items.push(t('recordBest', { v: fmtMoney(r.best.profit), slip: slipName(r.best.slip) }));
+  if (r.worst && r.worst.profit < 0) items.push(t('recordWorst', { v: fmtMoney(r.worst.profit), slip: slipName(r.worst.slip) }));
+  if (r.longest) items.push(t('recordLongest', { x: fmtOdds(r.longest.odds), slip: slipName(r.longest.slip) }));
+  items.push(t('recordAverage', { cost: fmtMoney(s.avgCost, { sign: false }), combos: fmtInt(s.combos) }));
+  if (s.tax > 0) items.push(t('recordTax', { v: fmtMoney(s.tax, { sign: false }) }));
+  return el('div', { class: 'card' }, [el('h3', { class: 'card-title', text: t('recordsTitle') }), el('ul', { class: 'facts records' }, items.map(text => el('li', { text })))]);
+}
+
+function weeksCard(s) {
+  const t = state.t;
+  if (s.weeks.length < 2) return null;
+  const day = iso => formatter('md', locale => new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric', timeZone: 'UTC' })).format(new Date(`${iso}T00:00:00Z`));
+  return el('details', { class: 'card fold' }, [
+    el('summary', { text: t('weeksTitle') }),
+    table([t('colWeek'), t('colSlips'), t('colStaked'), t('colNet'), t('colBackActual')], s.weeks.map(b => [t('weekOf', { d: day(b.week) }), fmtInt(b.slips), fmtMoney(b.staked, { sign: false }), netCell(b.net), fmtBack(b.back)]))
+  ]);
+}
+
+function renderStats() {
+  if (!state.accountReady) return;
+  const t = state.t;
+  const s = historyStats(state.account);
+  $('stats').hidden = s.placed === 0;
+  if (!s.placed) return;
+  const kpis = el('div', { class: 'kpis' }, [
+    statTile(t('kpiSettled'), `${fmtInt(s.settled)} / ${fmtInt(s.placed)}`),
+    statTile(t('kpiStaked'), fmtMoney(s.staked, { sign: false })),
+    statTile(t('kpiPaid'), fmtMoney(s.paid, { sign: false })),
+    statTile(t('kpiNet'), fmtMoney(s.net), s.net < -0.5 ? 'back-low' : s.net > 0.5 ? 'back-high' : ''),
+    statTile(t('kpiBack'), s.settled ? `${fmtBack(s.back)} / ${fmtBack(s.expectedBack)}` : '–'),
+    statTile(t('kpiHit'), s.settled ? `${fmtRate(s.paidSlips / s.settled)} / ${fmtRate(s.expectedPaidSlips / s.settled)}` : '–'),
+    statTile(t('kpiOpen'), `${fmtInt(s.open)} · ${fmtMoney(s.openStake, { sign: false })}`)
+  ]);
+  const cards = [el('div', { class: 'card' }, [kpis, el('p', { class: 'note', text: t('kpiNote') })])];
+  if (s.timeline.length > 1) cards.push(balanceChart(s.timeline));
+  if (s.settled) cards.push(el('div', { class: 'two-col' }, [luckCard(s), recordsCard(s)]), picksCard(s), breakdownCard(s), weeksCard(s));
+  else cards.push(el('p', { class: 'muted', text: t('statsWait') }));
+  $('stats-body').replaceChildren(...cards.filter(Boolean));
 }
 
 // ---- Simulator ----------------------------------------------------------------
@@ -3105,10 +3315,10 @@ async function load() {
 
 // ---- Tabs ---------------------------------------------------------------------
 
-const TABS = ['games', 'slip', 'sim', 'math'];
+const TABS = ['games', 'slip', 'history', 'sim', 'math'];
 
 function tabAvailable(tab) {
-  if (!state.data) return tab === 'games' || tab === 'math';
+  if (!state.data) return tab === 'games' || tab === 'math' || tab === 'history';
   return true;
 }
 
@@ -3200,7 +3410,7 @@ function showTab(tab) {
   window.scrollTo({ top: 0 });
   // The chart sizes itself to its container, which is hidden until now.
   if (tab === 'sim' && state.data) renderSim();
-  if (tab === 'slip') checkResults();
+  if (tab === 'history') checkResults();
 }
 
 for (const button of document.querySelectorAll('#tabs .tab')) button.addEventListener('click', () => showTab(button.dataset.tab));
@@ -3289,17 +3499,23 @@ if ('ResizeObserver' in window) {
 
 // Tells the page's failsafe (in index.html) that the scripts loaded and started.
 window.__oddsStarted = true;
-state.account = loadAccount();
+state.account = newAccount();
 state.sync = { ...state.sync, code: loadSyncCode() };
 renderStatic();
 renderTabs();
-renderAccount();
-renderSaved();
-load().then(() => checkResults());
-syncNow();
+// The saved account is compressed, so it opens a moment after the page.
+loadAccount().then(account => {
+  state.account = account;
+  state.accountReady = true;
+  renderAccount();
+  renderSaved();
+  syncNow();
+  if (state.data) checkResults();
+});
+load().then(() => state.accountReady && checkResults());
 // Back on the tab: pick up what another device did, and any games that ended.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   syncNow();
-  if (state.tab === 'slip') checkResults();
+  if (state.tab === 'history') checkResults();
 });
