@@ -168,3 +168,61 @@ test('tennis results from ESPN, whichever side each player is on', () => {
   assert.deepEqual([flipped.homeScore, flipped.awayScore], [1, 2]);
   assert.equal(parseEspnTennis(data, 'Nobody', 'Someone'), null);
 });
+
+test('every match gets a full set of plays', async () => {
+  const { gameOptions } = await import('../public/lib/board.mjs');
+  const kinds = game => new Set(gameOptions(game).map(o => o.kind));
+  const has = (game, list) => {
+    const got = kinds(game);
+    for (const k of list) assert.ok(got.has(k), `${game.sport} missing ${k}`);
+  };
+  // A table-tennis match with no bookmaker lines still gets point lines.
+  has({ id: 'tt', sport: 'tabletennis', draftKings: { home: 0.6, away: 0.4 } }, ['ml', 'firstset', 'sets', 'totalsets', 'sethcap', 'gamehcap', 'gametotal']);
+  // Snooker: the match length guessed from the frame total, then frame score and first frame.
+  has({ id: 'sn', sport: 'snooker', draftKings: { home: 0.6, away: 0.4 }, total: { line: 8.5, overFair: 0.5 }, spread: { awayLine: 1.5, awayFair: 0.55 } }, ['sets', 'firstset', 'gamehcap', 'gametotal']);
+  // Soccer: team totals, first-half total and double chance.
+  has({ id: 'so', sport: 'epl', draftKings: { home: 0.45, draw: 0.27, away: 0.28 }, total: { line: 2.5, overFair: 0.5 } }, ['teamtotal', 'htotal', 'dc', 'htft', 'goalbands']);
+  // Basketball: team totals and a first-half total.
+  has({ id: 'bb', sport: 'nba', draftKings: { home: 0.6, away: 0.4 }, spread: { awayLine: 3.5, awayFair: 0.5 }, total: { line: 224.5, overFair: 0.5 } }, ['teamtotal', 'htotal', 'q1', 'margin']);
+  // Every baseball league has the top-scoring inning.
+  has({ id: 'np', sport: 'npb', draftKings: { home: 0.55, away: 0.45 }, total: { line: 7.5, overFair: 0.5 } }, ['inning', 'teamtotal', 'f5']);
+  // Nothing ever pays back less than the stake.
+  const heavy = gameOptions({ id: 'h', sport: 'ncaaf', draftKings: { home: 0.96, away: 0.04 }, spread: { awayLine: 24.5, awayFair: 0.5 }, total: { line: 52.5, overFair: 0.5 } });
+  assert.ok(heavy.every(o => o.estOdds >= 1.01), 'odds under 1.01');
+});
+
+test('model lines agree with the bookmaker\'s own line', async () => {
+  const { unitModel, unitLineMarkets } = await import('../public/lib/markets.mjs');
+  const spec = LEAGUES.tennis.sets;
+  const model = unitModel({ homeWin: 0.7, bestOf: 3, spec });
+  close(model.total.reduce((a, b) => a + b, 0), 1, 1e-6);
+  close(model.diff.reduce((a, b) => a + b, 0), 1, 1e-6);
+  const total = { line: 22.5, overFair: 0.5 };
+  const lines = unitLineMarkets(model, { total, spec }).filter(m => m.kind === 'gametotal');
+  // Lines either side of the bookmaker's, over less likely the higher the line.
+  const overs = lines.sort((a, b) => a.line - b.line).map(m => m.picks[0].fair);
+  assert.ok(lines.every(m => m.line !== 22.5));
+  assert.ok(overs.every((p, i) => i === 0 || p <= overs[i - 1]));
+  assert.ok(overs[0] > 0.5 && overs.at(-1) < 0.5);
+});
+
+test('double chance, first-half total and podium settle', () => {
+  const game = { status: 'final', awayScore: 1, homeScore: 1, awayInnings: [1, 0], homeInnings: [0, 1] };
+  assert.equal(legResult({ kind: 'dc', side: 'home|draw' }, game), 'won');
+  assert.equal(legResult({ kind: 'dc', side: 'home|away' }, game), 'lost');
+  assert.equal(legResult({ kind: 'htotal', sport: 'epl', side: 'over', line: 0.5 }, game), 'won');
+  assert.equal(legResult({ kind: 'htotal', sport: 'epl', side: 'under', line: 0.5 }, game), 'lost');
+  const race = { status: 'final', winner: 'Max Verstappen', podium: ['Max Verstappen', 'Lando Norris', 'Oscar Piastri'] };
+  assert.equal(legResult({ kind: 'f1podium', driver: 'Oscar Piastri' }, race), 'won');
+  assert.equal(legResult({ kind: 'f1podium', driver: 'Charles Leclerc' }, race), 'lost');
+});
+
+test('F1 podium chances add up to three and pay what the winner board does', async () => {
+  const { f1Podium } = await import('../public/lib/board.mjs');
+  const fair = [0.4, 0.25, 0.15, 0.1, 0.05, 0.03, 0.02];
+  const drivers = fair.map(p => ({ fair: p, odds: estimateF1LotteryOdds(p) }));
+  const podium = f1Podium(drivers);
+  close(podium.reduce((s, p) => s + p.fair, 0), 3, 0.01);
+  assert.ok(podium.every((p, i) => p.fair >= fair[i] && p.odds >= 1.01));
+  assert.ok(podium[0].odds < podium.at(-1).odds);
+});

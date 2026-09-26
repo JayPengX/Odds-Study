@@ -94,6 +94,7 @@ export function legResult(leg, outcome) {
   const win = test => (test ? 'won' : 'lost');
   if (leg.kind === 'f1') return win(norm(outcome.winner) === norm(leg.driver));
   if (leg.kind === 'future') return win(norm(outcome.winner) === norm(leg.team));
+  if (leg.kind === 'f1podium') return outcome.podium ? win(outcome.podium.some(name => norm(name) === norm(leg.driver))) : null;
   const away = Number(outcome.awayScore);
   const home = Number(outcome.homeScore);
   if (!Number.isFinite(away) || !Number.isFinite(home)) return null;
@@ -130,6 +131,19 @@ export function legResult(leg, outcome) {
       if (!a.length && !h.length) return null;
       const res = (x, y) => (y > x ? 'home' : y === x ? 'draw' : 'away');
       return win(res(Number(a[0]) || 0, Number(h[0]) || 0) === leg.ht && res(away, home) === leg.ft);
+    }
+    case 'dc':
+      // Double chance: either of two results.
+      return win(leg.side.split('|').includes(away > home ? 'away' : away === home ? 'draw' : 'home'));
+    case 'htotal': {
+      // First-half total: one soccer half, two quarters.
+      const a = outcome.awayInnings || [];
+      const h = outcome.homeInnings || [];
+      if (!a.length && !h.length) return null;
+      const periods = leg.sport && isSoccer(leg.sport) ? 1 : 2;
+      const sum = list => list.slice(0, periods).reduce((s, x) => s + (Number(x) || 0), 0);
+      const pts = sum(a) + sum(h);
+      return push(leg.side === 'over' ? pts - leg.line : leg.line - pts);
     }
     case 'goalbands':
       return win(away + home >= leg.lo && (leg.hi == null || away + home <= leg.hi));

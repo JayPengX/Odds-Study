@@ -557,7 +557,9 @@ export function parseEspnRace(data, startUtc) {
       if (VOID_STATUS.test(type.name || '')) return { status: 'void' };
       if (!type.completed) return { status: 'pending' };
       const first = (comp.competitors || []).find(c => c.winner) ?? (comp.competitors || []).find(c => Number(c.order) === 1);
-      return first ? { status: 'final', winner: first.athlete?.displayName || first.athlete?.fullName } : { status: 'pending' };
+      const name = c => c.athlete?.displayName || c.athlete?.fullName;
+      const podium = [...(comp.competitors || [])].filter(c => Number(c.order) >= 1).sort((a, b) => Number(a.order) - Number(b.order)).slice(0, 3).map(name);
+      return first ? { status: 'final', winner: name(first), ...(podium.length === 3 ? { podium } : {}) } : { status: 'pending' };
     }
   }
   return null;
@@ -628,7 +630,7 @@ export async function fetchOutcomes(legs, now = new Date()) {
         return;
       }
       if (!leg.start || Date.parse(leg.start) > now.getTime()) return;
-      if (leg.kind === 'f1') {
+      if (leg.kind === 'f1' || leg.kind === 'f1podium') {
         const data = await page(`${ESPN}/racing/f1/scoreboard?dates=${yyyymmdd(new Date(leg.start))}`);
         const result = data && parseEspnRace(data, leg.start);
         if (result) out.set(leg.id, result);

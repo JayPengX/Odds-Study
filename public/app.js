@@ -20,6 +20,7 @@ import {
 } from './lib/odds.mjs';
 import {
   FANS,
+  fanSeries,
   STYLES,
   TRAITS,
   TRAIT_ROWS,
@@ -63,14 +64,14 @@ import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from
 import { pack, unpack } from './lib/codec.mjs';
 import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets } from './lib/teams.mjs';
+import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
-import { gameOptions, crowdPool } from './lib/board.mjs';
+import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
 const STAKE = 100;
-// Simulated people per pick style x fan type group, on average: each style
+// Simulated people per pick style x series-follow group, on average: each style
 // gets its share of the crowd, 100,000 people in all.
 const PER_GROUP = Math.ceil(100_000 / (STYLES.length * FANS.length));
 const SIM_PLAYERS = crowdSize(PER_GROUP);
@@ -209,9 +210,18 @@ function teamName(team) {
 // ---- Bets -------------------------------------------------------------------
 
 function matchupText(game) {
-  return isSoccer(game.sport)
+  // Players at a neutral venue: in the order the draw lists them.
+  return isSoccer(game.sport) || isNeutral(game.sport)
     ? `${teamName(game.home)} vs ${teamName(game.away)}`
     : `${teamName(game.away)} @ ${teamName(game.home)}`;
+}
+
+// Which competition a game is in: its league, and for tours and cups the
+// event (Kambi's group: "Chengdu", "Italy Serie A" …).
+function gameSeries(game) {
+  const league = state.t(`sport_${game.sport}`);
+  const event = game.group && normalizeTeamName(game.group) !== normalizeTeamName(league) ? game.group : null;
+  return event ? `${league} · ${event}` : league;
 }
 
 // ---- Names for the board's options (board.mjs prices them) --------------------
@@ -275,9 +285,14 @@ const RESULT_SHORT = { home: 'homeShort', draw: 'drawShort', away: 'awayShort' }
 function pickName(game, market, pick) {
   const t = state.t;
   if (market.kind === 'runline' || market.kind === 'sethcap') return `${teamName(game[pick.side])} ${fmtLine(pick.line)}`;
+  if (market.kind === 'dc') return pick.side.split('|').map(x => (x === 'draw' ? t('draw') : teamName(game[x]))).join(' / ');
   if (market.kind === 'htft') return `${t(RESULT_SHORT[pick.ht])}/${t(RESULT_SHORT[pick.ft])}`;
   if (market.kind === 'goalbands') return pick.hi == null ? `${pick.lo}+` : `${pick.lo}-${pick.hi}`;
-  if (market.kind === 'sets') return `${t('homeShort')} ${pick.score.replace('-', ':')} ${t('awayShort')}`;
+  if (market.kind === 'sets') {
+    // The winner and the score in sets (frames): "Sinner 2:1".
+    const [h, a] = pick.score.split('-').map(Number);
+    return `${teamName(game[h > a ? 'home' : 'away'])} ${Math.max(h, a)}:${Math.min(h, a)}`;
+  }
   if (market.kind === 'margin') return `${teamName(game[pick.team])} ${pick.hi == null ? `${pick.lo}+` : pick.lo === pick.hi ? pick.lo : `${pick.lo}-${pick.hi}`}`;
   if (market.kind === 'score') return pick.score === 'other' ? t('scoreOther') : pick.score.replace('-', ':');
   if (pick.side === 'away' || pick.side === 'home') return teamName(game[pick.side]);
@@ -315,6 +330,12 @@ function buildBets(data) {
         estOdds: estimateF1LotteryOdds(d.fair, phase)
       });
     }
+    // 前三名: the same drivers finishing in the top three.
+    const winners = bets.filter(b => b.kind === 'f1');
+    f1Podium(winners.map(b => ({ fair: b.fairChance, odds: b.estOdds }))).forEach((p, i) => {
+      const w = winners[i];
+      bets.push({ ...w, id: `f1pod|${w.driverEn}`, kind: 'f1podium', market: `f1podium|${w.driverEn}`, label: `F1 ${t('f1PodiumShort')} ${w.shortLabel}`, fairChance: p.fair, estOdds: p.odds, errKey: 'extra', lock: p.lock, minLegs: p.minLegs });
+    });
   }
   // Single-source games: the typical DraftKings-Polymarket gap of that sport.
   for (const sport of new Set(bets.map(b => b.sport))) {
@@ -397,7 +418,9 @@ const SPORT_GROUPS = {
   football: { icon: '🏈', leagues: ['nfl', 'ncaaf'] },
   hockey: { icon: '🏒', leagues: ['nhl'] },
   tennis: { icon: '🎾', leagues: ['tennis', 'wta'] },
-  net: { icon: '🏸', leagues: ['badminton', 'tabletennis', 'volleyball'] },
+  badminton: { icon: '🏸', leagues: ['badminton'] },
+  tabletennis: { icon: '🏓', leagues: ['tabletennis'] },
+  volleyball: { icon: '🏐', leagues: ['volleyball'] },
   snooker: { icon: '🎱', leagues: ['snooker'] },
   f1: { icon: '🏎️', leagues: ['f1'] }
 };
@@ -624,7 +647,7 @@ function renderStatus(kind) {
 // ---- Ranking ------------------------------------------------------------------
 
 function betIcon(bet) {
-  if (bet.kind === 'f1') return driverBadge(bet, 'logo-sm');
+  if (bet.kind === 'f1' || bet.kind === 'f1podium') return driverBadge(bet, 'logo-sm');
   if (bet.kind === 'future') return logoImg(bet.sport, bet.teamEn, bet.shortLabel, 'logo-sm');
   // Totals' side is over/under: they show the league, team totals the team.
   const side = bet.kind === 'teamtotal' ? bet.team : ['away', 'home'].includes(bet.side) ? bet.side : null;
@@ -657,7 +680,8 @@ function gameCard(game, bets) {
   const rerender = game.live ? renderLive : renderGames;
   const open = state.open.has(game.id);
   const ml = bets.filter(b => b.kind === 'ml');
-  const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : ['away', 'home'];
+  const neutral = isNeutral(game.sport);
+  const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : neutral ? ['home', 'away'] : ['away', 'home'];
   const rows = sides.map(side => {
     const bet = ml.find(b => b.side === side);
     const who =
@@ -665,7 +689,7 @@ function gameCard(game, bets) {
         ? [badge('=', 'var(--text-muted)'), el('span', { class: 'team-name', text: t('draw') })]
         : [
             logoImg(game.sport, game[side].en, teamName(game[side])),
-            el('span', { class: 'team-name' }, [document.createTextNode(teamName(game[side])), el('small', { text: t(side === 'home' ? 'homeTag' : 'awayTag') })])
+            el('span', { class: 'team-name' }, [document.createTextNode(teamName(game[side])), neutral ? null : el('small', { text: t(side === 'home' ? 'homeTag' : 'awayTag') })])
           ];
     const score = game.live && side !== 'draw' ? el('span', { class: 'live-score', text: String(game.live[`${side}Score`]) }) : null;
     return el('div', { class: 'team-row' }, [...who, score, bet ? pickButton(bet, '') : null]);
@@ -679,6 +703,7 @@ function gameCard(game, bets) {
   return el('article', { class: `game ${open ? 'open' : ''} ${game.live ? 'live' : ''}` }, [
     el('div', { class: 'game-top' }, [
       leagueImg(game.sport, 'logo-xs'),
+      el('span', { class: 'game-series', text: gameSeries(game) }),
       game.live
         ? el('span', { class: 'game-time live-state' }, [el('span', { class: 'live-dot', text: t('tagLive') }), document.createTextNode(liveStateText(game.live))])
         : el('span', { class: 'game-time', text: hhmm(game.startUtc) })
@@ -760,12 +785,13 @@ function marketPanel(game, section, bets) {
   const t = state.t;
   const by = (list, side) => list.find(b => b.side === side);
   let body;
-  if (section.kind === 'total') {
-    const rows = [...groupBy(bets, b => b.totalLine).values()]
-      .sort((a, b) => a[0].totalLine - b[0].totalLine)
-      .map(pair => lineRow(String(pair[0].totalLine), [by(pair, 'over'), by(pair, 'under')], { posted: pair[0].posted, main: pair[0].mainLine }));
+  if (TOTAL_KINDS.has(section.kind)) {
+    const lineOf = b => b.totalLine ?? b.line;
+    const rows = [...groupBy(bets, lineOf).values()]
+      .sort((a, b) => lineOf(a[0]) - lineOf(b[0]))
+      .map(pair => lineRow(String(lineOf(pair[0])), [by(pair, 'over'), by(pair, 'under')], { posted: pair[0].posted, main: pair[0].mainLine }));
     body = [lineTable([t('colLine'), t('over'), t('under')], rows)];
-  } else if (section.kind === 'runline') {
+  } else if (HCAP_KINDS.has(section.kind)) {
     // One block per team giving the runs: "遊騎兵 讓分" -1.5, -2.5, …
     body = ['away', 'home']
       .map(giver => {
@@ -773,7 +799,8 @@ function marketPanel(game, section, bets) {
         const markets = [...groupBy(bets.filter(b => b.giver === giver), b => b.market).values()].sort((a, b) => Math.abs(a[0].awayLine) - Math.abs(b[0].awayLine));
         if (!markets.length) return null;
         const rows = markets.map(pair => lineRow(fmtLine(-Math.abs(pair[0].awayLine)), [by(pair, giver), by(pair, taker)], { posted: pair[0].posted }));
-        return lineTable([t('colLine'), teamName(game[giver]), teamName(game[taker])], rows, t(isSoccer(game.sport) ? 'giveGoals' : 'giveRuns', { team: teamName(game[giver]) }));
+        const heading = section.kind === 'runline' ? t(isSoccer(game.sport) ? 'giveGoals' : familyOf(game.sport) === 'baseball' ? 'giveRuns' : 'givePoints', { team: teamName(game[giver]) }) : `${teamName(game[giver])} · ${t(section.title)}`;
+        return lineTable([t('colLine'), teamName(game[giver]), teamName(game[taker])], rows, heading);
       })
       .filter(Boolean);
   } else if (section.kind === 'teamtotal') {
@@ -798,6 +825,10 @@ function marketPanel(game, section, bets) {
   return el('div', { class: `market-panel ${section.kind}` }, [...body, note ? el('p', { class: 'note', text: note }) : null]);
 }
 
+// Kinds laid out as tables of lines: over/under, and one team giving a line.
+const TOTAL_KINDS = new Set(['total', 'gametotal', 'htotal', 'totalsets']);
+const HCAP_KINDS = new Set(['runline', 'gamehcap', 'sethcap']);
+
 // One section per kind of bet, each market of it with its own take. The
 // inning market's ten results take a whole row.
 const SECTIONS = [
@@ -809,6 +840,8 @@ const SECTIONS = [
   { kind: 'nextrun', title: 'secNextRun' },
   { kind: 'margin', title: 'secMargin' },
   { kind: 'half', title: 'secHalf' },
+  { kind: 'htotal', title: 'secHalfTotal' },
+  { kind: 'dc', title: 'secDoubleChance' },
   { kind: 'f5', title: 'secF5' },
   { kind: 'regulation', title: 'secRegulation' },
   { kind: 'firstinning', title: 'secFirstInning' },
@@ -860,8 +893,7 @@ function pickButton(bet, name) {
     rec ? el('span', { class: `rec rec-${rec.tag}`, text: t(`rec_${rec.tag}`) }) : null,
     name ? el('span', { class: 'pick-name', text: name }) : null,
     el('span', { class: 'pick-odds' }, [
-      locked ? el('span', { class: 'lock', 'aria-hidden': 'true', text: '🔒' }) : null,
-      document.createTextNode(locked ? t('lockedShort') : fmtOdds(effectiveOdds(bet))),
+      locked ? el('span', { class: 'lock', 'aria-hidden': 'true', text: '🔒' }) : document.createTextNode(fmtOdds(effectiveOdds(bet))),
       !locked && bet.minLegs > 1 ? el('small', { class: 'min-legs', text: t('minLegsTag', { n: bet.minLegs }) }) : null
     ])
   ];
@@ -1012,7 +1044,8 @@ function driverBadge(bet, size = '') {
 function entryRow(bet, i, picture, sub) {
   const t = state.t;
   const inSlip = state.parlay.includes(bet.id);
-  return el('div', { class: `entry ${inSlip ? 'in-slip' : ''}`, title: pickTitle(bet) }, [
+  const locked = Boolean(bet.lock);
+  return el('div', { class: `entry ${inSlip ? 'in-slip' : ''} ${locked ? 'locked' : ''}`, title: pickTitle(bet) }, [
     el('span', { class: 'entry-rank', text: String(i + 1) }),
     picture,
     el('span', { class: 'entry-name' }, [document.createTextNode(bet.shortLabel), el('small', { text: [fmtPctShort(bet.fairChance), sub].filter(Boolean).join(' · ') })]),
@@ -1020,9 +1053,10 @@ function entryRow(bet, i, picture, sub) {
       class: `entry-odds ${inSlip ? 'in-slip' : ''}`,
       type: 'button',
       'aria-pressed': String(inSlip),
-      'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}`,
-      onclick: () => toggleLeg(bet)
-    }, [document.createTextNode(fmtOdds(effectiveOdds(bet)))])
+      'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${locked ? t(`lock_${bet.lock}`) : inSlip ? t('removeLeg') : t('addLeg')}`,
+      disabled: locked ? true : null,
+      onclick: locked ? null : () => toggleLeg(bet)
+    }, [locked ? el('span', { class: 'lock', 'aria-hidden': 'true', text: '🔒' }) : document.createTextNode(fmtOdds(effectiveOdds(bet))), !locked && bet.minLegs > 1 ? el('small', { class: 'min-legs', text: t('minLegsTag', { n: bet.minLegs }) }) : null])
   ]);
 }
 
@@ -1546,9 +1580,15 @@ function renderParlay() {
 
 // ---- Slip: what each pick is, what the ticket pays ------------------------------
 
+// A kind of bet's name (its board section's).
+function kindKey(kind) {
+  const sec = SECTIONS.find(x => x.kind === kind);
+  return { f1: 'f1Title', f1podium: 'f1PodiumShort', future: 'futuresTitle' }[kind] ?? sec?.short ?? sec?.title ?? null;
+}
+
 // The market a pick is from, as a small tag: 不讓分, 大小分, 讓分 …
 function marketTag(kind) {
-  const key = { ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'topInningShort', nextrun: 'secNextRun', margin: 'secMargin', half: 'secHalf', f5: 'secF5', regulation: 'secRegulation', firstinning: 'secFirstInning', btts: 'secBtts', score: 'secScore', oddeven: 'secOddEven', f1: 'f1Short', future: 'futuresTitle' }[kind];
+  const key = { inning: 'topInningShort', f1: 'f1Short' }[kind] ?? kindKey(kind);
   return key ? el('span', { class: `market-tag tag-${kind}`, text: state.t(key) }) : null;
 }
 
@@ -1749,7 +1789,7 @@ function legLogo(bet) {
 
 // A saved pick's picture: its team's logo, the driver's badge, or the league's logo.
 function legIcon(leg) {
-  if (leg.kind === 'f1' && leg.driver) {
+  if ((leg.kind === 'f1' || leg.kind === 'f1podium') && leg.driver) {
     const driver = f1Driver(leg.driver);
     return driverBadge({ driverEn: leg.driver, driver }, 'logo-sm');
   }
@@ -2266,7 +2306,7 @@ function picksCard(s) {
   const t = state.t;
   if (!s.picks.legs) return null;
   const bandName = ([lo, hi]) => `${Math.round(lo * 100)}–${Math.min(100, Math.round(hi * 100))}%`;
-  const kindName = k => t({ ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'secTopInning', f1: 'f1Title', future: 'futuresTitle' }[k] ?? k);
+  const kindName = k => (kindKey(k) ? t(kindKey(k)) : k);
   return el('div', { class: 'card' }, [
     el('h3', { class: 'card-title', text: t('picksTitle') }),
     el('p', { class: 'lede', text: t('picksSummary', { n: fmtInt(s.picks.legs), won: fmtInt(s.picks.won), rate: fmtRate(s.picks.rate), exp: fmtRate(s.picks.expectedRate), odds: fmtOdds(s.picks.avgOdds), voids: fmtInt(s.picks.void) }) }),
@@ -2649,7 +2689,7 @@ function drawSim(stats, weeks) {
   renderLeaders(stats);
   state.simStats = stats;
   const unfair = auditCrowd(stats);
-  if (unfair.length) console.warn('Kinds of fan out of line with the crowd:', unfair);
+  if (unfair.length) console.warn('Series whose followers are out of line with the crowd:', unfair);
   renderYou();
   if (state.lookup) renderLookup(state.lookup);
   renderSimTable(bands, characters, weeks);
@@ -2691,10 +2731,33 @@ function taleOf(p) {
   return t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
 }
 
-// Who a simulated person is: their kind of fan and their traits.
+// The series a simulated person bets on, as a stack of small labels (league
+// logo and name); a long stack shows its first few and how many more.
+const fanByKey = key => (typeof key === 'string' ? FANS.find(f => f.key === key) : key) ?? null;
+function seriesTags(fanKey, max = 3) {
+  const t = state.t;
+  const fan = fanByKey(fanKey);
+  if (!fan) return [];
+  const series = fanSeries(fan);
+  if (!series.length) return [el('span', { class: 'series-tag', text: `🌐 ${t('fanEverything')}` })];
+  return [
+    ...series.slice(0, max).map(sp => el('span', { class: 'series-tag' }, [leagueImg(sp, 'logo-xxs'), document.createTextNode(t(`sport_${sp}`))])),
+    series.length > max ? el('span', { class: 'series-tag more', text: `+${series.length - max}` }) : null
+  ];
+}
+// The same as plain text: "MLB · NBA", "英超 +12", "全部".
+function followText(fanKey, max = 2) {
+  const t = state.t;
+  const fan = fanByKey(fanKey);
+  if (!fan) return '';
+  const series = fanSeries(fan);
+  if (!series.length) return t('fanEverything');
+  return series.slice(0, max).map(sp => t(`sport_${sp}`)).join('·') + (series.length > max ? ` +${series.length - max}` : '');
+}
+
+// Who a simulated person is: the series they bet on and their traits.
 function personTags(p) {
-  const fan = p.fan?.key ?? p.fan;
-  return [fan ? el('span', { class: 'habit-tag', text: state.t(`fan_${fan}`) }) : null, ...traitTags(p)];
+  return [el('span', { class: 'series-stack' }, seriesTags(p.fan)), ...traitTags(p)];
 }
 
 function renderPlayers(characters) {
@@ -2745,7 +2808,8 @@ function renderGroups(stats) {
   const tab = GROUP_TABS.includes(state.groupTab) ? state.groupTab : 'style';
   let rows;
   if (tab === 'fan') {
-    rows = stats.fanSummaries.map(f => ({ icon: f.fan.key === 'all' ? badge('🌐', 'var(--accent)', 'emoji') : leagueImg(f.fan.sports[0], 'logo-sm'), name: t(`fan_${f.fan.key}`), desc: t(`fanDesc_${f.fan.key}`), x: f, meta: t('fanMeta', { ahead: fmtShare(f.aheadShare), tickets: fmtCount(f.avgTickets), final: fmtMoney(f.avgFinal) }) }));
+    // Everyone who bets on a series, whatever else they bet on.
+    rows = (stats.seriesSummaries ?? []).map(f => ({ icon: leagueImg(f.series, 'logo-sm'), name: t(`sport_${f.series}`), desc: t('seriesDesc', { n: fmtCount(f.players * (SIM_PLAYERS_SHOWN / stats.players)), only: fmtCount(f.only.players * (SIM_PLAYERS_SHOWN / stats.players)) }), x: f, meta: t('fanMeta', { ahead: fmtShare(f.aheadShare), tickets: fmtCount(f.avgTickets), final: fmtMoney(f.avgFinal) }) }));
   } else {
     const groupOf = key => TRAITS.find(x => x.key === key)?.group ?? null;
     rows = stats.traitSummaries
@@ -3103,7 +3167,7 @@ function renderBuys(totals, period) {
   );
 }
 
-// How the people with one trait and one kind of fan did.
+// How the people with one trait who bet on one series did.
 function renderYou() {
   const t = state.t;
   const stats = state.simStats;
@@ -3112,12 +3176,12 @@ function renderYou() {
   const fanSelect = $('you-fan');
   if (!traitSelect.options.length || traitSelect.dataset.locale !== state.locale) {
     traitSelect.replaceChildren(...TRAIT_ROWS.map(x => el('option', { value: x.key, text: `${TRAIT_ICON[x.key]} ${t(`trait_${x.key}`)}` })));
-    fanSelect.replaceChildren(...FANS.map(f => el('option', { value: f.key, text: t(`fan_${f.key}`) })));
+    fanSelect.replaceChildren(...(stats.seriesSummaries ?? []).map(f => el('option', { value: f.series, text: t(`sport_${f.series}`) })));
     traitSelect.value = state.youTrait ?? 'parlay';
-    fanSelect.value = state.youFan ?? 'all';
+    fanSelect.value = state.youFan ?? 'mlb';
     traitSelect.dataset.locale = state.locale;
   }
-  const g = stats.groupStats.find(x => x.trait === traitSelect.value && x.fan === fanSelect.value);
+  const g = stats.groupStats.find(x => x.trait === traitSelect.value && x.series === fanSelect.value);
   if (!g || !g.players) return $('you-result').replaceChildren(el('p', { class: 'muted', text: t('youNone') }));
   const money = v => fmtMoney(v, { sign: false });
   const period = periodName(stats.weeks);
@@ -3301,7 +3365,7 @@ function renderLeaders(stats) {
                 $('lookup-result').scrollIntoView({ behavior: 'smooth', block: 'center' });
               }
             }),
-            el('small', { text: [x.fan && t(`fan_${x.fan}`), traitKeys(x.traits ?? 0).map(k => TRAIT_ICON[k]).join('')].filter(Boolean).join(' · ') })
+            el('small', { text: [x.fan && followText(x.fan), traitKeys(x.traits ?? 0).map(k => TRAIT_ICON[k]).join('')].filter(Boolean).join(' · ') })
           ]),
           el('span', { class: 'leader-value' }, [
             el('strong', { class: key === 'best' || key === 'biggestWin' ? 'back-high' : bad ? 'back-low' : '', text: leaderValue(key, x) }),
@@ -3323,7 +3387,7 @@ function renderStories(stats, period) {
   const stories = [];
   // `tone`: how the big figure reads (good, bad or neutral); money by its sign.
   const add = (icon, titleKey, p, big, textKey, vars, tone = null) =>
-    p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), ...traitKeys(p.traits ?? 0).map(key => `${TRAIT_ICON[key]} ${t(`trait_${key}`)}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
+    p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && followText(p.fan, 3), ...traitKeys(p.traits ?? 0).map(key => `${TRAIT_ICON[key]} ${t(`trait_${key}`)}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
   const w = notable.biggestWin;
   if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), 'storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds), final: fmtMoney(w.final) });
   const best = notable.best;
@@ -3539,6 +3603,7 @@ function renderF1() {
   $('f1').hidden = !inSport('f1') || !f1;
   if (!f1) return;
   const drivers = state.bets.filter(b => b.kind === 'f1');
+  const podium = state.bets.filter(b => b.kind === 'f1podium');
   $('f1-body').replaceChildren(
     board({
       emblem: 'f1',
@@ -3548,7 +3613,19 @@ function renderF1() {
       id: 'f1',
       notes: [t('f1Intro'), t('f1PhaseNote')],
       rows: (b, i) => entryRow(b, i, driverBadge(b), b.driver.team)
-    })
+    }),
+    podium.length
+      ? board({
+          emblem: 'f1',
+          title: `${f1.title} · ${t('f1Podium')}`,
+          sub: t('f1PodiumSub'),
+          bets: podium,
+          id: 'f1podium',
+          shown: 8,
+          notes: [t('f1PodiumNote')],
+          rows: (b, i) => entryRow(b, i, driverBadge(b), b.driver.team)
+        })
+      : null
   );
 }
 

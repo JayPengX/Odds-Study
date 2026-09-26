@@ -31,7 +31,8 @@ test('football: the model reproduces DraftKings spread and total, and every mark
 test('soccer and hockey goal markets', () => {
   const means = fitGoals(0.45, 0.28);
   const markets = goalMarkets(means, { family: 'soccer' });
-  for (const x of markets) close(sum(x.picks), 1, 1e-6);
+  // Double chance's three picks each cover two of three results: they add up to 2.
+  for (const x of markets) close(sum(x.picks), x.kind === 'dc' ? 2 : 1, 1e-6);
   const score = markets.find(x => x.kind === 'score');
   assert.equal(score.picks.at(-1).side, 'other');
   // Correct score is a many-outcome market: its odds add up to the bigger cut.

@@ -23,25 +23,27 @@ The page stays simple: odds, colours and the amounts that matter. What the numbe
   - The next F1 race winner, every driver named as the lottery writes them (G.羅素, AK.安東內利 …).
   - Championships (see Boards below).
   Everything but MLB, the Premier League and F1 loads in the background after the page opens.
-- **Filters:** kinds of sport as tiles (棒球, 籃球, 足球, 美式足球, 冰球, 網球, 羽・桌・排球, 撞球, F1, each with its games listed). Picking one with several leagues shows its leagues as chips underneath (全部聯賽, MLB, 日職 …). Then a day strip.
+- **Filters:** one tile per sport, never several sports in one (棒球, 籃球, 足球, 美式足球, 冰球, 網球, 羽球, 桌球, 排球, 撞球, F1, each with its games listed). Picking one with several leagues shows its leagues as chips underneath (全部聯賽, MLB, 日職 …). Then a day strip.
 - **Picks:** tap one to add it to the bet slip. It shows the estimated lottery odds, and:
-  - 🔒 停售 when the lottery doesn't sell it, and 限2關 / 限3關 when it's sold only in parlays (see House rules);
+  - 🔒 (just the lock) when the lottery doesn't sell it, and 限2關 / 限3關 when it's sold only in parlays (see House rules);
   - a corner tag when it's recommended: 划算 (value), 穩 (steady) or 值博 (worth a shot) (see Recommendations);
   - a green tint when it gives back more than most; its fair chance, the market's cut and the average back per NT$100 in its tooltip.
 - **更多玩法 (more markets)**, one tab per kind of market:
   - MLB: 大小分, 讓分 and 單隊大小 (the lottery's own lines, checked against its board, and a wider range), 得分最高單局, and from the score model 單雙, 勝分差, 首局得分, 前五局 and **首分** (who scores first);
-  - other baseball (NPB, KBO, CPBL): the same, from Kambi's win, run line and total;
-  - football and basketball: 讓分, 大小分, 單雙, 勝分差, 上半場 and **第一節** (first quarter);
-  - hockey: puck lines, totals, 60 分鐘勝負, 單雙;
-  - soccer: 讓球, 大小, 雙方進球, 波膽, 上半場, **半全場** (half-time and full-time results together, 9 outcomes) and **總進球數** (0–1, 2–3, 4–6, 7+);
-  - tennis, badminton, table tennis, volleyball: **第一局, 局數比分** (e.g. 2:1), **總局數, 讓局**, and Kambi's own handicap and total (games in tennis, points elsewhere). Set chances come from the match chance (best of 3 or 5, sets independent).
-- **場中 (live):** games in progress (MLB and the Premier League), refreshed every 30 seconds while on screen, with the same market tabs, 第N分 for MLB, and the live model (`public/lib/live.mjs`) checked on one real snapshot of the lottery's 場中 page. The house rules apply live too, so lopsided games show their lopsided side 停售.
+  - other baseball (NPB, KBO, CPBL): the same (得分最高單局 too), from Kambi's win, run line and total;
+  - football and basketball: 讓分, 大小分, **單隊總分** (team totals), 單雙, 勝分差, 上半場, **上半場大小** (first-half total) and **第一節** (first quarter);
+  - hockey: puck lines, totals, **單隊大小**, 60 分鐘勝負, 單雙;
+  - soccer: 讓球, 大小, **單隊大小**, 雙方進球, 波膽, 上半場, **上半場大小**, **雙重機會** (double chance: either of two results), **半全場** (half-time and full-time results together, 9 outcomes) and **總進球數** (0–1, 2–3, 4–6, 7+);
+  - tennis, badminton, table tennis, volleyball, snooker: **第一局, 局數比分** ("Sinner 2:1"), **總局數, 讓局**, and handicaps and totals in games (tennis), points or frames on every match: Kambi's own line plus lines from a point-by-point model (each game or point won with the chance that gives the set chance; a set to 6 with a tiebreak, 11, 21 capped at 30, or 25 with a 15-point decider), shifted so it agrees with Kambi's price. Snooker's match length isn't in the feed: it's the one whose frame total best matches Kambi's line. Set chances come from the match chance (best of 3 or 5, sets independent);
+  - F1: the race winner and **前三名** (podium): top-three chances from the win chances (Harville), priced to return what the winner board does.
+- **Cards:** each shows its series (日職 · NPB, 網球 WTA · Seoul: the league and, for tours and cups, the event). Players' sports (tennis, badminton, table tennis, snooker) have no 主/客: players are listed in the draw's order as "A vs B".
+- **場中 (live):** games in progress (MLB and the Premier League), refreshed every 30 seconds while on screen, with the same market tabs, 第N分 for MLB, and the live model (`public/lib/live.mjs`) checked on one real snapshot of the lottery's 場中 page. The house rules apply live too, so lopsided games show their lopsided side locked.
 - **Boards:** F1 (drivers with team-coloured badges, and whether the odds are before or after qualifying) and every championship: World Series, AL, NL, NBA, Premier League, and from Polymarket's search NFL, NHL, WNBA, college football, Champions League, Europa League, La Liga, Serie A, Bundesliga, Ligue 1, MLS, and the F1 drivers' and constructors' titles.
 
 ### House rules, the house cut and recommendations
 
 - **House rules** (`public/lib/rules.mjs`), for you and the simulated crowd alike:
-  - locked (停售): odds of 1.05 or less, or 8+ on ordinary markets (80+ on correct scores, margins, set scores and the like). F1 and championships are priced one by one up to 500 and never locked;
+  - locked (🔒): odds of 1.05 or less, or 8+ on ordinary markets (80+ on correct scores, margins, set scores and the like). F1 and championships are priced one by one up to 500 and never locked;
   - parlay only: under 1.30 only in parlays of 2+ games (限2關), under 1.15 of 3+ (限3關). The slip refuses a ticket with any combination too small for one of its picks. These thresholds are the house's usual shape, not measured on the lottery's board.
 - **A cut by the house's risk:** each market's overround starts from what the lottery was measured taking on that kind of market (1.158 on MLB's two-way markets, 1.20 three-way, 1.35 bands, 1.50 correct scores, 1.92 the top inning) and grows with the house's risk: the sources disagreeing beyond the usual 1 point (point for point), a league it knows less (+1.5%) or one with a single bookmaker's line (+3%), and each line step away from the main one (+0.6%), at most +8%. With no extra risk it's the measured cut, so MLB prices exactly as before.
 - **Recommendations** (`public/lib/recommend.mjs`), shown on each pick instead of a separate list: every pick is judged by its average back per NT$100 against the others. The day's top 10% get 划算; picks of 65%+ that return at least the median get 穩; picks of 30% or less in the top quarter get 值博. Locked picks, picks over 85% or under 5%, and lots of under 10 picks get none. The simulator's value hunters bet exactly these picks.
@@ -114,26 +116,26 @@ The crowd lives in `public/lib/sim.mjs`.
   - pace: 天天買 every day (15%, about 4 a week), 偶爾玩 now and then (20%, one every 3 weeks); the rest about one a week;
   - reactions: 越輸越大 tilts, 追輸族 chaser (doubles after a losing week up to the ticket limit, 4 weeks off when it breaks), 見好就收 cashes out, 手感派 streaky, 乘勝追擊 presses on, 報復型 revenge, 玻璃心 heartbroken, 不服輸 so close, 大獎夢 jackpot dreamer, 滾雪球 lets it ride, 守本派 guards the start, 停損 stop-loss, 小確幸 content, 看心情 moody, 三分鐘熱度 easily bored, 孤注一擲 Hail Mary (under the start, 2 more picks a ticket), 死忠 loyal (off-season off), 見異思遷 hopper (off-season always on); 8–20% each.
 - **Why these shares:** by law the lottery pays out at most 78% of sales in prizes, and it pays about that, so it keeps about 22% before tax. Every extra pick pays the cut again, so that can only hold if most money goes on singles and short parlays. The mix is set to match: the crowd as a whole gives the house 21–23% before tax (a test checks 17–27%), about 1.8 picks per ticket.
-- **The crowd:** 5 pick styles × 8 kinds of fan (baseball, football, basketball, hockey, soccer, tennis & co., F1, everything), about 100,000 people; each person's other traits drawn from their own random stream.
+- **The crowd:** 5 pick styles × 47 stacks of series, about 100,000 people; each person's other traits drawn from their own random stream. Everyone bets on a stack of series (the labels on each person): most on one series only (only the Premier League, only CPBL), some on every series of one sport (all baseball), some on a mix across sports (MLB + NBA), a few on everything. How many follow each is its popularity with Taiwan's lottery players (`pop` in `SIM_SPORTS`: MLB and the NBA the most, then CPBL, the Premier League, NPB …).
 - **Everything by your rules:** NT$10,000 to start, NT$5,000 a week, never money they don't have; the lottery's ticket limits, tax and payout cap; locked picks never, parlay-only picks only in parlays; the very markets and odds on this page (every market, not just the winners). A sport with nothing on today (the NBA before its season, say) gets a typical week of made-up games run through the very code that builds the real board (`public/lib/board.mjs`), so it gets the same markets, the house's cut for that league and its locks, and returns what a real board of that sport does (within about a point).
 - **One shared world:** each week every game has one real result for everyone. A game's markets agree: the winner and every handicap line share one draw (the away side's slice first), every total line another (under first), so over 8.5 winning means over 7.5 won.
-- **Every sport in one registry:** `SIM_SPORTS` lists each sport's kind, its kind of fan, whether its seasons show in the time-lapse and its games per week from the 2026/27 schedules (NPB ~36 a week, KBO ~30, CPBL ~15 from late March to October; tennis tours all year but December; badminton and table tennis event weeks; volleyball clubs and the Nations League). Adding a sport: a `LEAGUES` entry in `public/lib/teams.mjs` and a `SIM_SPORTS` entry; a test fails if either is missing.
+- **Every sport in one registry:** `SIM_SPORTS` lists each sport's kind, its sport (for people who bet on all of one sport), its popularity, whether its seasons show in the time-lapse and its games per week from the 2026/27 schedules (NPB ~36 a week, KBO ~30, CPBL ~15 from late March to October; tennis tours all year but December; badminton and table tennis event weeks; volleyball clubs and the Nations League). Adding a sport: a `LEAGUES` entry in `public/lib/teams.mjs` and a `SIM_SPORTS` entry; a test fails if either is missing.
 - **What it shows:**
   - how many in 10 are still ahead, the crowd's range over time, the time-lapse, and what the crowd's loss would buy;
   - the luckiest 10%, the middle person and the unluckiest 10%, with their traits;
-  - **哪種人虧最多？** one card, three tabs: 下注方式 (the how-they-bet traits against the usual way), 個性 (reactions against people with none), 賭什麼 (kinds of fan), ranked by average result;
-  - **你是哪種人？** pick a trait and a kind of fan: how many of them are ahead, their average result, back, tickets and stake;
+  - **哪種人虧最多？** one card, three tabs: 下注方式 (the how-they-bet traits against the usual way), 個性 (reactions against people with none), 賭什麼 (each series: everyone who bets on it, whatever else they bet on), ranked by average result;
+  - **你是哪種人？** pick a trait and a series: how many of them are ahead, their average result, back, tickets and stake;
   - **Look up anyone** (1 to about 100,000): their season replayed on the device, every ticket, with the same profile card as your own history, "贏過 N%", and for a winner their share of all winnings;
   - stories from the record holders: the biggest ticket, the biggest winner and loser, **the comeback** (furthest behind, ended ahead), the roller coaster, streaks, the longest shot, **the most near misses**, the worst week, the most tickets and the most tax;
   - **who holds the winnings**, and **leaderboards**: the top 10 on 15 records (up most, biggest ticket, longest shot, comeback, best week, longest parlay won, win streak, most tickets, most tax, near misses, down most, roller coaster, worst week, drought, went broke);
   - the brutal truths and facts (singles against parlay lovers, chasers against people without the trait, the ticket mix, near misses …), and where the money went (losers' losses = winners' winnings + the lottery's take + tax, exactly).
-- **Fairness audit** (`public/lib/audit.mjs`): no sport or kind of fan may do better or worse only because of how it's modelled. Each sport's pool is scored by what the crowd's usual pick returns per NT$100; one more than 6 points from the rest is flagged, and so is a kind of fan more than 5 points from the whole crowd (F1 is exempt: the lottery really takes more on it). The tests run it on every sport's typical week, against a real board, on a deliberately inflated pool (which it must catch) and on a simulated crowd; the page runs it on the live board and each simulation and warns in the console. It exists because a basketball stand-in once paid NT$86 per NT$100 against 76-83 on real boards and put basketball fans on top of the leaderboards.
+- **Fairness audit** (`public/lib/audit.mjs`): no sport, or series' followers, may do better or worse only because of how it's modelled. Each sport's pool is scored by what the crowd's usual pick returns per NT$100; one more than 6 points from the rest is flagged, and so are a series' followers more than 5 points from the whole crowd (series followed by too few people to tell are skipped) (F1 is exempt: the lottery really takes more on it). The tests run it on every sport's typical week, against a real board, on a deliberately inflated pool (which it must catch) and on a simulated crowd; the page runs it on the live board and each simulation and warns in the console. It exists because a basketball stand-in once paid NT$86 per NT$100 against 76-83 on real boards and put basketball fans on top of the leaderboards.
 - **Periods:** 1 month to 5 years; one run records every period along the way, and longer periods carry everyone on from where they stopped (tests check it matches a straight run).
 - **How it runs:** in a Web Worker, streaming weeks into histograms instead of keeping 100,000 paths; about 8 seconds for a year on a laptop. Tests prove it equals replaying everyone in full.
 
 ### 說明 Guide
 
-Folding cards explain: reading the numbers; the odds math; the traits; the kinds of fan; every kind of bet; the lottery's rules (locks, parlay only, the cut by risk, tickets and tax, the practice account); recommendations; how the simulator works; data and margins.
+Folding cards explain: reading the numbers; the odds math; the traits; what people bet on (series stacks); every kind of bet; the lottery's rules (locks, parlay only, the cut by risk, tickets and tax, the practice account); recommendations; how the simulator works; data and margins.
 
 ## The math
 
@@ -165,7 +167,7 @@ The calibration data is the real lottery prices in `tests/fixtures/lottery-mlb-2
 
 ## How it works
 
-A static site with no build step and no dependencies. The browser fetches odds live through the `sports-proxy` Cloudflare Worker from [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy) (`PROXY_URL` in `public/lib/sources.mjs`). The Worker adds the CORS headers Polymarket doesn't send, and caches responses. A failed request is retried once. Team logos load straight from ESPN's image server.
+A static site with no build step and no dependencies. The browser fetches odds live through the `sports-proxy` Cloudflare Worker from [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy) (`PROXY_URL` in `public/lib/sources.mjs`). The Worker adds the CORS headers Polymarket doesn't send, and caches responses. A failed request is retried once. Team logos load straight from ESPN's image server; for the leagues ESPN doesn't cover (NPB, KBO, CPBL, B.League, EuroLeague, and the badminton, table tennis, snooker and WTA tours) they come from TheSportsDB's free badges, matched by the words the club names share. Players (tennis and the like) show initials.
 
 The page depends on that Worker:
 
@@ -180,7 +182,7 @@ The practice account's sync uses Shared-Proxy's other Worker, `orbit-workers-pro
 | --- | --- |
 | `public/lib/odds.mjs` | The math: devig, estimated odds, F1 phases, bet slip rules and analysis |
 | `public/lib/board.mjs` | Every priced option of a game, for the page and the crowd alike, and the crowd's pool |
-| `public/lib/audit.mjs` | The fairness audit of sports and kinds of fan |
+| `public/lib/audit.mjs` | The fairness audit of sports and series |
 | `public/lib/rules.mjs` | House rules (locks, parlay only) and the house cut by risk |
 | `public/lib/recommend.mjs` | Recommendations on single picks |
 | `public/lib/sim.mjs` | The simulated crowd: traits, calendar, the shared world, leaderboards |
@@ -188,7 +190,7 @@ The practice account's sync uses Shared-Proxy's other Worker, `orbit-workers-pro
 | `public/lib/kambi.mjs` | Kambi's odds and live scores |
 | `public/lib/markets.mjs` | Every sport's side markets, the new plays and matches in sets |
 | `public/lib/sources.mjs` | Fetching and parsing ESPN, Polymarket and Kambi; results; what the lottery would list |
-| `public/lib/teams.mjs` | Chinese team and driver names, ESPN logo ids, the F1 grid's team colours |
+| `public/lib/teams.mjs` | Leagues, Chinese team and driver names, ESPN logo ids, TheSportsDB badges, the F1 grid's team colours |
 | `public/lib/i18n.mjs` | Traditional Chinese and English text (follows the browser's language) |
 | `public/lib/account.mjs` | The practice account: ledger, weekly grant, placing and settling slips, merging two copies |
 | `public/lib/sync.mjs` | The account's sync through Shared-Proxy's `/odds-sync` |

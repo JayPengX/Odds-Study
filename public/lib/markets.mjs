@@ -113,6 +113,35 @@ export function pointsMarkets(m, { spreadLine, totalLine }) {
     }
     out.push({ kind: 'oddeven', market: 'oddeven', cut: CUT.twoWay, picks: [{ side: 'odd', fair: 0.5 }, { side: 'even', fair: 0.5 }] });
   }
+  if (m.total != null) {
+    // 單隊總分: each team's points, the total split by the margin; a team's
+    // spread is half the combined one.
+    const teamSd = Math.sqrt(m.totalSd ** 2 + m.marginSd ** 2) / 2;
+    for (const team of ['away', 'home']) {
+      const mean = (m.total + (team === 'home' ? m.margin : -m.margin)) / 2;
+      for (const d of [-1, 0, 1]) {
+        const line = round2(half(mean) + d * step);
+        const over = 1 - normalCdf((line - mean) / teamSd);
+        if (over < 0.04 || over > 0.96) continue;
+        out.push({ kind: 'teamtotal', market: `tt|${team}|${line}`, team, line, posted: d === 0, steps: Math.abs(d), cut: CUT.twoWay, picks: [
+          { side: 'over', fair: over, team },
+          { side: 'under', fair: 1 - over, team }
+        ] });
+      }
+    }
+    // 上半場大小: half the total, its spread shrunk by the square root of two.
+    const hMean = m.total / 2;
+    const hSd = m.totalSd / Math.SQRT2;
+    for (const d of [-1, 0, 1]) {
+      const line = round2(half(hMean) + d * step);
+      const over = 1 - normalCdf((line - hMean) / hSd);
+      if (over < 0.04 || over > 0.96) continue;
+      out.push({ kind: 'htotal', market: `htotal|${line}`, line, posted: d === 0, steps: Math.abs(d), cut: CUT.twoWay, picks: [
+        { side: 'over', fair: over },
+        { side: 'under', fair: 1 - over }
+      ] });
+    }
+  }
   // Winning margin: each team by each band.
   const bands = [];
   for (const team of ['home', 'away']) {
@@ -204,6 +233,17 @@ export function goalMarkets(means, { family, totalLine }) {
       ] });
     }
   }
+  // 單隊大小: each team's goals.
+  for (const team of ['away', 'home']) {
+    for (const line of family === 'hockey' ? [1.5, 2.5, 3.5] : [0.5, 1.5, 2.5]) {
+      const over = chance(grid, (a, h) => (team === 'home' ? h : a) > line);
+      if (over < 0.04 || over > 0.96) continue;
+      out.push({ kind: 'teamtotal', market: `tt|${team}|${line}`, team, line, posted: line === (family === 'hockey' ? 2.5 : 1.5), cut: CUT.twoWay, picks: [
+        { side: 'over', fair: over, team },
+        { side: 'under', fair: 1 - over, team }
+      ] });
+    }
+  }
   if (family === 'hockey') {
     // Totals around DraftKings' line, and the 60-minute (regulation) result.
     const main = totalLine != null ? (totalLine % 1 ? totalLine : totalLine + 0.5) : 5.5;
@@ -236,6 +276,22 @@ export function goalMarkets(means, { family, totalLine }) {
       { side: 'home', fair: chance(first, (a, h) => h > a) },
       { side: 'draw', fair: chance(first, (a, h) => a === h) },
       { side: 'away', fair: chance(first, (a, h) => a > h) }
+    ] });
+    // 上半場大小: first-half goals.
+    for (const line of [0.5, 1.5, 2.5]) {
+      const over = chance(first, (a, h) => a + h > line);
+      if (over < 0.04 || over > 0.96) continue;
+      out.push({ kind: 'htotal', market: `htotal|${line}`, line, posted: line === 1.5, cut: CUT.twoWay, picks: [
+        { side: 'over', fair: over },
+        { side: 'under', fair: 1 - over }
+      ] });
+    }
+    // 雙重機會: two of the three results in one pick.
+    const win = { home: chance(grid, (a, h) => h > a), draw: chance(grid, (a, h) => a === h), away: chance(grid, (a, h) => a > h) };
+    out.push({ kind: 'dc', market: 'dc', cut: CUT.twoWay, picks: [
+      { side: 'home|draw', fair: win.home + win.draw },
+      { side: 'home|away', fair: win.home + win.away },
+      { side: 'draw|away', fair: win.draw + win.away }
     ] });
     // 半全場: the half-time and full-time results together (9 outcomes), the
     // second half's goals on their own.
@@ -382,4 +438,172 @@ export function setsMarkets({ homeWin, bestOf }) {
     }
   }
   return out;
+}
+
+// ---- Games, points and frames across a match ------------------------------------
+//
+// The bookmaker lists one handicap and one total in games (tennis), points
+// (badminton, table tennis, volleyball) or frames (snooker), when it lists
+// them at all. For more lines, and for matches it lists none on, a small
+// model: every game or point is won by the home side with the same chance r
+// (the one that gives its chance of winning a set), a set goes to `target`
+// won by 2 (tennis: a tiebreak at 6-6; badminton: 30 wins at 29-29), and
+// sets are played until one side has won the match. A frame is a set of one.
+
+// One set's final scores [{ h, a, p }] for unit chance r.
+function setUnits(r, { unit, target, cap }) {
+  if (unit === 'frames') return [{ h: 1, a: 0, p: r }, { h: 0, a: 1, p: 1 - r }];
+  const T = target;
+  // Sudden death: tennis's tiebreak at 6-6 (7-6), badminton's point at 29-29.
+  const sudden = unit === 'games' ? T : cap ? cap - 1 : Infinity;
+  const out = [];
+  for (let k = 0; k <= T - 2; k++) {
+    const c = choose(T - 1 + k, k);
+    out.push({ h: T, a: k, p: c * r ** T * (1 - r) ** k });
+    out.push({ h: k, a: T, p: c * (1 - r) ** T * r ** k });
+  }
+  // Level at T-1 all, then two clear (or the next unit at `sudden`).
+  let mass = choose(2 * T - 2, T - 1) * (r * (1 - r)) ** (T - 1);
+  for (let n = T - 1; mass > 1e-9 && n < T + 40; n++) {
+    if (n === sudden) {
+      out.push({ h: n + 1, a: n, p: mass * r }, { h: n, a: n + 1, p: mass * (1 - r) });
+      break;
+    }
+    out.push({ h: n + 2, a: n, p: mass * r * r }, { h: n, a: n + 2, p: mass * (1 - r) * (1 - r) });
+    mass *= 2 * r * (1 - r);
+  }
+  return out;
+}
+
+const setWin = scores => scores.reduce((s, x) => (x.h > x.a ? s + x.p : s), 0);
+
+// Distributions of the match's total units and the home side's margin in
+// units, for a best-of-`bestOf` match the home side wins with chance homeWin.
+// Returns { total: [p by count], diff: [p by margin + off], off }.
+export function unitModel({ homeWin, bestOf, spec }) {
+  if (!bestOf || !spec?.unit || !(homeWin > 0 && homeWin < 1)) return null;
+  const q = setChance(homeWin, bestOf);
+  // The unit chance that wins a set with chance q.
+  let lo = 0.01;
+  let hi = 0.99;
+  for (let i = 0; i < 40 && spec.unit !== 'frames'; i++) {
+    const mid = (lo + hi) / 2;
+    if (setWin(setUnits(mid, spec)) < q) lo = mid;
+    else hi = mid;
+  }
+  const r = spec.unit === 'frames' ? q : (lo + hi) / 2;
+  const sets = setUnits(r, spec);
+  const lastSets = spec.last ? setUnits(r, { ...spec, target: spec.last }) : sets;
+  const need = Math.ceil(bestOf / 2);
+  const size = bestOf * ((spec.target ?? 1) + 45);
+  const off = size;
+  const total = new Float64Array(size + 1);
+  const diff = new Float64Array(2 * size + 1);
+  // States (home sets, away sets) -> their total and margin distributions.
+  let states = new Map([['0|0', { hs: 0, as: 0, t: new Map([[0, 1]]), d: new Map([[0, 1]]) }]]);
+  while (states.size) {
+    const next = new Map();
+    for (const st of states.values()) {
+      const list = st.hs + st.as === bestOf - 1 ? lastSets : sets;
+      for (const x of list) {
+        const hs = st.hs + (x.h > x.a ? 1 : 0);
+        const as = st.as + (x.h > x.a ? 0 : 1);
+        const done = hs === need || as === need;
+        const key = `${hs}|${as}`;
+        const to = done ? null : next.get(key) ?? next.set(key, { hs, as, t: new Map(), d: new Map() }).get(key);
+        for (const [v, p] of st.t) {
+          const u = v + x.h + x.a;
+          if (done) total[Math.min(size, u)] += p * x.p;
+          else to.t.set(u, (to.t.get(u) ?? 0) + p * x.p);
+        }
+        for (const [v, p] of st.d) {
+          const u = v + x.h - x.a;
+          if (done) diff[Math.max(0, Math.min(2 * size, u + off))] += p * x.p;
+          else to.d.set(u, (to.d.get(u) ?? 0) + p * x.p);
+        }
+      }
+    }
+    states = next;
+  }
+  return { total, diff, off };
+}
+
+// P(total > line) and P(home margin > line), for a half line.
+const overAt = (model, line) => model.total.reduce((s, p, u) => (u > line ? s + p : s), 0);
+const marginOver = (model, line) => model.diff.reduce((s, p, i) => (i - model.off > line ? s + p : s), 0);
+
+// Units per line step: games and frames 1, points by the sport's scale.
+const UNIT_STEP = { games: [1, 1], frames: [1, 1], points: [2, 2] };
+
+// Handicap and total lines in units around the bookmaker's own (its line is
+// left to the bookmaker's price; the model's lines are shifted so it agrees
+// with that price), or around the model's middle when it lists none.
+export function unitLineMarkets(model, { spread, total, spec }) {
+  if (!model) return [];
+  const [hStep, tStep] = spec.unit === 'points' ? [Math.max(2, Math.round(spec.target / 8)), Math.max(2, Math.round(spec.target / 5))] : UNIT_STEP[spec.unit];
+  const out = [];
+  // Where the model's own over chance at `line` matches `fair`: the line
+  // shift that puts the model on the bookmaker's price.
+  const shiftFor = (at, line, fair) => {
+    let best = 0;
+    let err = Infinity;
+    for (let s = -12; s <= 12; s++) {
+      const e = Math.abs(at(line - s) - fair);
+      if (e < err) [best, err] = [s, e];
+    }
+    return best;
+  };
+  const middle = at => {
+    for (let line = -200.5; line < 400; line += 1) if (at(line) < 0.5) return line;
+    return 0.5;
+  };
+  // Totals.
+  {
+    const at = line => overAt(model, line);
+    const main = total ? total.line : middle(at);
+    const shift = total ? shiftFor(at, total.line, total.overFair) : 0;
+    for (const d of [-2, -1, 0, 1, 2].filter(d => d || !total)) {
+      const line = round2(main + d * tStep);
+      if (line <= 0) continue;
+      const over = at(line - shift);
+      if (over < 0.05 || over > 0.95) continue;
+      out.push({ kind: 'gametotal', market: `gt|${line}`, line, posted: false, steps: Math.abs(d), cut: CUT.twoWay, picks: [{ side: 'over', fair: over }, { side: 'under', fair: 1 - over }] });
+    }
+  }
+  // Handicaps: away covers when home margin < awayLine.
+  {
+    const at = line => 1 - marginOver(model, line);
+    const main = spread ? spread.awayLine : middle(line => 1 - at(line));
+    const shift = spread ? shiftFor(at, spread.awayLine, spread.awayFair) : 0;
+    for (const d of [-2, -1, 0, 1, 2].filter(d => d || !spread)) {
+      const awayLine = round2(main + d * hStep);
+      if (Math.abs(awayLine) < 0.5) continue;
+      const awayCover = at(awayLine - shift);
+      if (awayCover < 0.05 || awayCover > 0.95) continue;
+      out.push({ kind: 'gamehcap', market: `gh|${awayLine}`, awayLine, giver: awayLine < 0 ? 'away' : 'home', posted: false, steps: Math.abs(d), cut: CUT.twoWay, picks: [
+        { side: 'away', fair: awayCover, line: awayLine },
+        { side: 'home', fair: 1 - awayCover, line: -awayLine }
+      ] });
+    }
+  }
+  return out;
+}
+
+// Snooker matches run to different lengths (best of 7 to 35 frames) and the
+// feed doesn't say which: the length whose frame total agrees best with the
+// bookmaker's total line.
+const SNOOKER_LENGTHS = [7, 9, 11, 13, 17, 19, 25, 33, 35];
+export function guessBestOf({ homeWin, total }) {
+  if (!total || !(homeWin > 0 && homeWin < 1)) return null;
+  let best = null;
+  let err = Infinity;
+  for (const bestOf of SNOOKER_LENGTHS) {
+    const need = Math.ceil(bestOf / 2);
+    if (total.line < need || total.line > bestOf) continue;
+    const scores = setScores(setChance(homeWin, bestOf), bestOf);
+    const over = scores.filter(x => x.home + x.away > total.line).reduce((s, x) => s + x.p, 0);
+    const e = Math.abs(over - total.overFair);
+    if (e < err) [best, err] = [bestOf, e];
+  }
+  return best;
 }

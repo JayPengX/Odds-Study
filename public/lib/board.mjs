@@ -30,7 +30,7 @@ import {
   K_DRAFTKINGS,
   TOP_INNING_ODDS
 } from './odds.mjs';
-import { pointsModel, pointsMarkets, goalMarkets, fitHockey, baseballMarkets, setsMarkets, marketOdds } from './markets.mjs';
+import { pointsModel, pointsMarkets, goalMarkets, fitHockey, baseballMarkets, setsMarkets, marketOdds, unitModel, unitLineMarkets, guessBestOf } from './markets.mjs';
 import { fitGoals } from './live.mjs';
 import { houseCut, houseRule } from './rules.mjs';
 import { LEAGUES, familyOf, isSoccer, isSets } from './teams.mjs';
@@ -202,7 +202,16 @@ function sideOptions(game, base, probs) {
     const model = pointsModel(game.sport, { homeWin, spread: game.spread, total: game.total });
     if (model) markets = pointsMarkets(model, { spreadLine: game.spread?.awayLine ?? null, totalLine: game.total?.line ?? null });
   } else if (family === 'hockey') markets = goalMarkets(fitHockey(homeWin, game.total), { family, totalLine: game.total?.line ?? null });
-  else if (family === 'sets') markets = setsMarkets({ homeWin, bestOf: LEAGUES[game.sport]?.sets?.bestOf });
+  else if (family === 'sets') {
+    const spec = LEAGUES[game.sport]?.sets ?? {};
+    // Snooker's length isn't in the feed: guessed from the frame total. Its
+    // frame lines are the bookmaker's (below), so only the frame score and
+    // the first frame come from the set markets.
+    const frames = spec.unit === 'frames';
+    const bestOf = spec.bestOf ?? (frames ? guessBestOf({ homeWin, total: game.total }) : null);
+    markets = setsMarkets({ homeWin, bestOf }).filter(m => !frames || m.kind === 'sets' || m.kind === 'firstset');
+    markets.push(...unitLineMarkets(unitModel({ homeWin, bestOf, spec }), { spread: game.spread, total: game.total, spec }));
+  }
   else if (family === 'soccer' && probs.draw != null) {
     // Totals come from lineOptions; the rest from each team's mean goals.
     markets = goalMarkets(fitGoals(probs.home, probs.away), { family }).filter(m => m.kind !== 'total');
@@ -228,6 +237,11 @@ function sideOptions(game, base, probs) {
         settle: { lo: pick.lo, hi: pick.hi, score: pick.score, listed: m.listed, team: pick.team, ht: pick.ht, ft: pick.ft, ...(m.line != null && m.kind !== 'total' ? { line: m.line } : {}), ...(pick.line != null && m.kind === 'sethcap' ? { line: pick.line } : {}) }
       };
       if (m.kind === 'runline') Object.assign(o, { runLine: pick.line, awayLine: m.awayLine, giver: m.giver });
+      if (m.kind === 'gamehcap') Object.assign(o, { line: pick.line, awayLine: m.awayLine, giver: m.giver, errKey: errKeyOf(game.sport), settle: { line: pick.line } });
+      if (m.kind === 'gametotal') Object.assign(o, { line: m.line, errKey: errKeyOf(game.sport) });
+      if (m.kind === 'teamtotal') Object.assign(o, { team: m.team, teamLine: m.line });
+      if (m.kind === 'htotal' || m.kind === 'totalsets') Object.assign(o, { line: m.line });
+      if (m.kind === 'sethcap') Object.assign(o, { line: pick.line, awayLine: m.awayLine, giver: m.giver });
       if (m.kind === 'total') Object.assign(o, { totalLine: m.line, mainLine: m.main });
       out.push(o);
     }
@@ -286,8 +300,9 @@ export function gameOptions(game) {
   if (family === 'sets') out.push(...unitLineOptions(game, base));
   if (family === 'baseball' || family === 'soccer') out.push(...lineOptions(game, base));
   out.push(...sideOptions(game, base, blend.probs));
-  // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed.
-  if (game.sport === 'mlb') {
+  // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed;
+  // every baseball league (the table barely moves from game to game).
+  if (family === 'baseball') {
     const book = TOP_INNING_ODDS.reduce((sum, o) => sum + 1 / o, 0);
     TOP_INNING_ODDS.forEach((odds, i) => out.push({ ...base, id: `${game.id}|inning|${i}`, kind: 'inning', market: 'inning', inning: i, fairMargin: null, errKey: 'topInning', fairChance: 1 / odds / book, estOdds: odds }));
   }
@@ -311,7 +326,17 @@ function resultSlice(o, probs) {
     const away = o.side === 'away' ? o.fairChance : 1 - o.fairChance;
     return { key: `${game}|${o.kind === 'runline' ? 'side' : o.kind}`, outLo: o.side === 'away' ? 0 : away, outHi: o.side === 'away' ? away : 1 };
   }
-  if (o.kind === 'total' || o.kind === 'teamtotal' || o.kind === 'totalsets' || o.kind === 'gametotal') {
+  // A podium finish: its own yes-or-no draw, not stacked with the others.
+  if (o.kind === 'f1podium') return { key: `${game}|${o.market}`, outLo: 0, outHi: o.fairChance };
+  if (o.kind === 'dc') {
+    // Two results of three on the winner's line (away, draw, home); away or
+    // home wraps round it (from home's start, past 1, to away's end).
+    const a = probs.away ?? 0;
+    const d = probs.draw ?? 0;
+    const slice = { 'draw|away': [0, a + d], 'home|draw': [a, 1], 'home|away': [a + d, a] }[o.side];
+    return { key: `${game}|side`, outLo: slice[0], outHi: slice[1] };
+  }
+  if (o.kind === 'total' || o.kind === 'teamtotal' || o.kind === 'totalsets' || o.kind === 'gametotal' || o.kind === 'htotal') {
     const over = o.side === 'over' ? o.fairChance : 1 - o.fairChance;
     return { key: `${game}|${o.kind}${o.kind === 'teamtotal' ? `|${o.team}` : ''}`, outLo: o.side === 'under' ? 0 : 1 - over, outHi: o.side === 'under' ? 1 - over : 1 };
   }
@@ -326,4 +351,36 @@ export function crowdPool(options, oddsOf = o => o.estOdds) {
   return options
     .filter(o => !o.lock && !o.live && o.fairChance > 0)
     .map(o => ({ gameId: o.gameId, kind: o.kind, market: o.market ?? o.kind, fairChance: o.fairChance, odds: oddsOf(o), minLegs: o.minLegs ?? 1, ...resultSlice(o, winners.get(o.gameId) ?? {}) }));
+}
+
+// ---- F1: 前三名 (podium) --------------------------------------------------------
+
+// Each driver's chance of a top-three finish from the win chances (Harville:
+// second place goes as the win chances of the rest, and so on), priced to
+// return what the race's winner board does on average (the lottery takes
+// the same on both), at most the lottery's 500.
+export function f1Podium(drivers) {
+  const p = drivers.map(d => d.fair);
+  const n = p.length;
+  const podium = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    podium[i] += p[i];
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      const second = (p[j] * p[i]) / (1 - p[j]);
+      podium[i] += second;
+      for (let k = 0; k < n; k++) {
+        if (k === i || k === j) continue;
+        podium[i] += (p[j] * p[k] * p[i]) / ((1 - p[j]) * (1 - p[j] - p[k]));
+      }
+    }
+  }
+  // The winner board's return, weighted as people pick (by chance).
+  const sum = p.reduce((a, b) => a + b, 0) || 1;
+  const back = drivers.reduce((s, d) => s + (d.fair / sum) * d.fair * d.odds, 0);
+  return drivers.map((d, i) => {
+    const fair = Math.min(0.995, podium[i]);
+    const odds = Math.min(500, Math.max(1.01, Math.round((back / fair) * 100) / 100));
+    return { fair, odds, ...houseRule('f1podium', odds) };
+  });
 }

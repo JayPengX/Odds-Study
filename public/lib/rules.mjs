@@ -24,7 +24,7 @@ export const HOUSE_RULES = {
 };
 
 // Markets whose outcomes are many and long by design.
-const EXOTIC = new Set(['score', 'margin', 'inning', 'nextrun', 'htft', 'goalbands', 'sets']);
+const EXOTIC = new Set(['score', 'margin', 'inning', 'nextrun', 'htft', 'goalbands', 'sets', 'f1podium']);
 // Priced one by one by the lottery, never locked or limited here.
 const UNRULED = new Set(['f1', 'future']);
 

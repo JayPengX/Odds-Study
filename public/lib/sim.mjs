@@ -10,7 +10,7 @@
 // share, one at most from each group of how-they-bet traits.
 import { SLIP_RULES, afterTax, seededRandom, estimateF1LotteryOdds } from './odds.mjs';
 import { houseRule } from './rules.mjs';
-import { gameOptions, crowdPool } from './board.mjs';
+import { gameOptions, crowdPool, f1Podium } from './board.mjs';
 import { recommend } from './recommend.mjs';
 
 // ---- Money --------------------------------------------------------------------
@@ -485,7 +485,8 @@ function playSeason(style, weekPicker, weeks, random, path, fallback = null, leg
         odds *= c.odds[j];
         chance += c.fair[j];
         const result = worldDraw(w, c.market[j], copy);
-        if (result < c.lo[j] || result >= c.hi[j]) {
+        // A slice with lo > hi wraps round (double chance's away or home).
+        if (c.lo[j] <= c.hi[j] ? result < c.lo[j] || result >= c.hi[j] : result < c.lo[j] && result >= c.hi[j]) {
           won = false;
           missed++;
         }
@@ -723,8 +724,10 @@ export const MONTH_WEEKS = PERIOD_MONTHS.map(monthWeeks);
 // - `family`: its kind (baseball, football, basketball, hockey, soccer,
 //   racing, sets), which picks its typical-game template for weeks without
 //   real odds;
-// - `fan`: the kind of fan who bets on it (fans of one kind bet on all its
-//   sports; null: only people who bet on everything);
+// - `kind`: its sport, for people who bet on every series of one sport;
+// - `pop`: how popular it is with Taiwan's lottery players (a relative
+//   weight: MLB and the NBA the most, then CPBL, the Premier League, NPB …),
+//   which sets how many people follow it;
 // - `headline`: its seasons starting and ending show in the time-lapse feed;
 // - `games(w)`: its games in week w of the year (0 = 1-7 January), from the
 //   published 2026/27 schedules. Weeks with 0 games are its off-season.
@@ -744,69 +747,85 @@ const eventWeeks = perWeek => w => (between(w, 1, 49) && w % 5 !== 2 && w % 5 !=
 export const SIM_SPORTS = {
   // MLB: 2,430 games from Opening Day (25 March 2027, week 11) to 26 September
   // (week 38), then the postseason to the end of October (~40 games).
-  mlb: { family: 'baseball', fan: 'baseball', headline: true, games: w => (between(w, 11, 38) ? 87 : between(w, 39, 43) ? 8 : 0) },
+  mlb: { family: 'baseball', kind: 'baseball', pop: 10, headline: true, games: w => (between(w, 11, 38) ? 87 : between(w, 39, 43) ? 8 : 0) },
   // NPB (12 clubs, ~36 games a week), KBO (10 clubs, ~30) and CPBL (6 clubs,
   // ~15): late March to early October, then short postseasons.
-  npb: { family: 'baseball', fan: 'baseball', games: w => (between(w, 12, 39) ? 36 : between(w, 40, 44) ? 4 : 0) },
-  kbo: { family: 'baseball', fan: 'baseball', games: w => (between(w, 12, 39) ? 30 : between(w, 40, 44) ? 4 : 0) },
-  cpbl: { family: 'baseball', fan: 'baseball', headline: true, games: w => (between(w, 12, 41) ? 15 : between(w, 42, 45) ? 3 : 0) },
+  npb: { family: 'baseball', kind: 'baseball', pop: 5, games: w => (between(w, 12, 39) ? 36 : between(w, 40, 44) ? 4 : 0) },
+  kbo: { family: 'baseball', kind: 'baseball', pop: 3, games: w => (between(w, 12, 39) ? 30 : between(w, 40, 44) ? 4 : 0) },
+  cpbl: { family: 'baseball', kind: 'baseball', pop: 7, headline: true, games: w => (between(w, 12, 41) ? 15 : between(w, 42, 45) ? 3 : 0) },
   // NFL: 272 games from 10 September (week 36) to 10 January (week 1), then
   // the playoffs and the Super Bowl (14 February, week 6).
-  nfl: { family: 'football', fan: 'football', headline: true, games: w => (between(w, 36, 1) ? 16 : { 2: 6, 3: 4, 4: 2, 6: 1 }[w] ?? 0) },
+  nfl: { family: 'football', kind: 'football', pop: 2, headline: true, games: w => (between(w, 36, 1) ? 16 : { 2: 6, 3: 4, 4: 2, 6: 1 }[w] ?? 0) },
   // College football: late August (week 34) to early December, then bowls.
-  ncaaf: { family: 'football', fan: 'football', games: w => (between(w, 34, 49) ? 45 : between(w, 50, 1) ? 10 : 0) },
+  ncaaf: { family: 'football', kind: 'football', pop: 0.5, games: w => (between(w, 34, 49) ? 45 : between(w, 50, 1) ? 10 : 0) },
   // NBA: 1,230 games, opening night 20 October (week 41) to 11 April (week
   // 14), then the play-in and playoffs to mid-June (~90 games).
-  nba: { family: 'basketball', fan: 'basketball', headline: true, games: w => (w === 41 ? 15 : w === 14 ? 39 : between(w, 42, 13) ? 49 : between(w, 15, 24) ? 9 : 0) },
+  nba: { family: 'basketball', kind: 'basketball', pop: 10, headline: true, games: w => (w === 41 ? 15 : w === 14 ? 39 : between(w, 42, 13) ? 49 : between(w, 15, 24) ? 9 : 0) },
   // WNBA: mid-May (week 19) to mid-September, then the playoffs.
-  wnba: { family: 'basketball', fan: 'basketball', games: w => (between(w, 19, 37) ? 10 : between(w, 38, 41) ? 4 : 0) },
+  wnba: { family: 'basketball', kind: 'basketball', pop: 1, games: w => (between(w, 19, 37) ? 10 : between(w, 38, 41) ? 4 : 0) },
   // EuroLeague (20 clubs, double rounds some weeks) and Japan's B1 League:
   // October to May.
-  euroleague: { family: 'basketball', fan: 'basketball', games: w => (between(w, 40, 20) ? 14 : 0) },
-  bleague: { family: 'basketball', fan: 'basketball', games: w => (between(w, 40, 18) ? 26 : 0) },
+  euroleague: { family: 'basketball', kind: 'basketball', pop: 1, games: w => (between(w, 40, 20) ? 14 : 0) },
+  bleague: { family: 'basketball', kind: 'basketball', pop: 1.5, games: w => (between(w, 40, 18) ? 26 : 0) },
   // NHL: 1,312 games, 7 October (week 40) to mid-April (week 15), then the playoffs.
-  nhl: { family: 'hockey', fan: 'hockey', headline: true, games: w => (between(w, 40, 15) ? 47 : between(w, 16, 24) ? 10 : 0) },
+  nhl: { family: 'hockey', kind: 'hockey', pop: 1, headline: true, games: w => (between(w, 40, 15) ? 47 : between(w, 16, 24) ? 10 : 0) },
   // Premier League: 380 games, 22 August 2026 (week 33) to 30 May 2027 (week
   // 21), no games in the international breaks, Boxing Day week doubled.
-  epl: { family: 'soccer', fan: 'soccer', headline: true, games: w => (w === 51 ? 20 : euroLeague(10)(w)) },
-  laliga: { family: 'soccer', fan: 'soccer', games: euroLeague(10) },
-  seriea: { family: 'soccer', fan: 'soccer', games: euroLeague(10) },
-  bundesliga: { family: 'soccer', fan: 'soccer', games: w => (between(w, 52, 1) ? 0 : euroLeague(9)(w)) },
-  ligue1: { family: 'soccer', fan: 'soccer', games: euroLeague(9) },
-  eredivisie: { family: 'soccer', fan: 'soccer', games: euroLeague(9) },
-  primeira: { family: 'soccer', fan: 'soccer', games: euroLeague(9) },
-  championship: { family: 'soccer', fan: 'soccer', games: w => (between(w, 31, 18) && !EURO_BREAKS.has(w) ? 12 : 0) },
-  ucl: { family: 'soccer', fan: 'soccer', headline: true, games: w => UEFA_WEEKS[w] ?? 0 },
-  uel: { family: 'soccer', fan: 'soccer', games: w => UEFA_WEEKS[w] ?? 0 },
+  epl: { family: 'soccer', kind: 'soccer', pop: 6, headline: true, games: w => (w === 51 ? 20 : euroLeague(10)(w)) },
+  laliga: { family: 'soccer', kind: 'soccer', pop: 2.5, games: euroLeague(10) },
+  seriea: { family: 'soccer', kind: 'soccer', pop: 1.5, games: euroLeague(10) },
+  bundesliga: { family: 'soccer', kind: 'soccer', pop: 1.5, games: w => (between(w, 52, 1) ? 0 : euroLeague(9)(w)) },
+  ligue1: { family: 'soccer', kind: 'soccer', pop: 1, games: euroLeague(9) },
+  eredivisie: { family: 'soccer', kind: 'soccer', pop: 0.3, games: euroLeague(9) },
+  primeira: { family: 'soccer', kind: 'soccer', pop: 0.3, games: euroLeague(9) },
+  championship: { family: 'soccer', kind: 'soccer', pop: 0.3, games: w => (between(w, 31, 18) && !EURO_BREAKS.has(w) ? 12 : 0) },
+  ucl: { family: 'soccer', kind: 'soccer', pop: 3, headline: true, games: w => UEFA_WEEKS[w] ?? 0 },
+  uel: { family: 'soccer', kind: 'soccer', pop: 1, games: w => UEFA_WEEKS[w] ?? 0 },
   // MLS: late February (week 8) to October, then the playoffs.
-  mls: { family: 'soccer', fan: 'soccer', games: w => (between(w, 8, 42) ? 14 : between(w, 43, 48) ? 4 : 0) },
+  mls: { family: 'soccer', kind: 'soccer', pop: 0.5, games: w => (between(w, 8, 42) ? 14 : between(w, 43, 48) ? 4 : 0) },
   // Liga MX: Clausura January-May, Apertura July-December.
-  ligamx: { family: 'soccer', fan: 'soccer', games: w => (between(w, 1, 21) || between(w, 28, 50) ? 9 : 0) },
+  ligamx: { family: 'soccer', kind: 'soccer', pop: 0.3, games: w => (between(w, 1, 21) || between(w, 28, 50) ? 9 : 0) },
   // J1 League (autumn-spring from August 2026, a winter break December-February).
-  jleague: { family: 'soccer', fan: 'soccer', games: w => (between(w, 31, 50) || between(w, 7, 21) ? 10 : 0) },
+  jleague: { family: 'soccer', kind: 'soccer', pop: 0.8, games: w => (between(w, 31, 50) || between(w, 7, 21) ? 10 : 0) },
   // Tennis: ATP and WTA main-draw singles, about 60 and 50 matches a week.
-  tennis: { family: 'sets', fan: 'racket', headline: true, games: tourWeek(60) },
-  wta: { family: 'sets', fan: 'racket', games: tourWeek(50) },
+  tennis: { family: 'sets', kind: 'tennis', pop: 2, headline: true, games: tourWeek(60) },
+  wta: { family: 'sets', kind: 'tennis', pop: 1, games: tourWeek(50) },
   // Badminton (BWF World Tour) and table tennis (WTT): event weeks.
-  badminton: { family: 'sets', fan: 'racket', games: eventWeeks(40) },
-  tabletennis: { family: 'sets', fan: 'racket', games: eventWeeks(30) },
+  badminton: { family: 'sets', kind: 'badminton', pop: 1.5, games: eventWeeks(40) },
+  tabletennis: { family: 'sets', kind: 'tabletennis', pop: 1, games: eventWeeks(30) },
   // Volleyball: the club leagues October-April, the Nations League May-July.
-  volleyball: { family: 'sets', fan: 'racket', games: w => (between(w, 40, 16) ? 20 : between(w, 21, 30) ? 30 : 0) },
+  volleyball: { family: 'sets', kind: 'volleyball', pop: 0.7, games: w => (between(w, 40, 16) ? 20 : between(w, 21, 30) ? 30 : 0) },
   // Snooker: ranking events most weeks from July to April.
-  snooker: { family: 'sets', fan: null, games: w => (between(w, 27, 17) ? 16 : 0) },
+  snooker: { family: 'sets', kind: 'snooker', pop: 0.3, games: w => (between(w, 27, 17) ? 16 : 0) },
   // F1: the 24 races of the 2027 calendar, Bahrain 14 March to Abu Dhabi 12 December.
-  f1: { family: 'racing', fan: 'f1', headline: true, games: w => (F1_RACE_WEEKS.has(w) ? 1 : 0) }
+  f1: { family: 'racing', kind: 'f1', pop: 1.2, headline: true, games: w => (F1_RACE_WEEKS.has(w) ? 1 : 0) }
 };
 export const SPORTS = Object.keys(SIM_SPORTS);
-// Who bets on what: one kind of fan per `fan` above (fans of a kind bet on
-// all its sports while any is in season), plus people who bet on everything.
-// In their off-season, fans bet on whatever else is on that week in
-// OFFSEASON_SWITCH of the weeks (never, if loyal; always, if hoppers). F1 is
-// one race at a time, so F1 fans' tickets are single picks.
-export const FANS = [
-  ...[...new Set(SPORTS.map(sp => SIM_SPORTS[sp].fan).filter(Boolean))].map(key => ({ key, sports: SPORTS.filter(sp => SIM_SPORTS[sp].fan === key), ...(key === 'f1' ? { legs: [1, 1] } : {}) })),
-  { key: 'all', sports: SPORTS }
-];
+// Who bets on what. Everyone follows a stack of series: most one series
+// only (only the Premier League, only CPBL), some every series of one sport
+// (all baseball), some a mix across sports (MLB and the NBA), and a few
+// everything. How many follow each is its popularity (`pop`). They bet on
+// their series while any is in season; in their off-season, on whatever else
+// is on that week in OFFSEASON_SWITCH of the weeks (never, if loyal; always,
+// if hoppers). F1 is one race at a time, so F1-only people bet single picks.
+const MIXES = [['mlb', 'nba'], ['cpbl', 'mlb'], ['cpbl', 'npb'], ['nba', 'epl'], ['epl', 'ucl'], ['mlb', 'epl'], ['nba', 'nfl'], ['cpbl', 'bleague'], ['tennis', 'badminton'], ['nba', 'f1']];
+const SHARE_OF = { one: 0.55, kind: 0.3, mix: 0.25, all: 0.12 };
+const pop = sports => sports.reduce((s, sp) => s + SIM_SPORTS[sp].pop, 0);
+const KINDS = [...new Set(SPORTS.map(sp => SIM_SPORTS[sp].kind))];
+export const FANS = (() => {
+  const list = [
+    ...SPORTS.map(sp => ({ key: sp, type: 'one', sports: [sp], w: SHARE_OF.one * SIM_SPORTS[sp].pop, ...(sp === 'f1' ? { legs: [1, 1] } : {}) })),
+    ...KINDS.map(kind => SPORTS.filter(sp => SIM_SPORTS[sp].kind === kind))
+      .filter(sports => sports.length > 1)
+      .map(sports => ({ key: `kind:${SIM_SPORTS[sports[0]].kind}`, type: 'kind', kind: SIM_SPORTS[sports[0]].kind, sports, w: SHARE_OF.kind * pop(sports) })),
+    ...MIXES.map(sports => ({ key: sports.join('+'), type: 'mix', sports, w: (SHARE_OF.mix * pop(sports)) / sports.length })),
+    { key: 'all', type: 'all', sports: SPORTS, w: SHARE_OF.all * pop(SPORTS) }
+  ];
+  const sum = list.reduce((s, f) => s + f.w, 0);
+  return list.map(({ w, ...f }) => ({ ...f, share: w / sum }));
+})();
+// The series a person follows, as labels: every one of them (everything: none).
+export const fanSeries = fan => (fan?.type === 'all' ? [] : fan?.sports ?? []);
 export const OFFSEASON_SWITCH = 0.3;
 
 // Games a sport has in a week of the year.
@@ -852,6 +871,7 @@ function buildTemplate(sport, seed) {
   if (family === 'racing') {
     const sum = F1_FIELD.reduce((a, b) => a + b, 0);
     const options = F1_FIELD.map((p, i) => ({ id: `f1|t${i}`, gameId: 'f1t', sport, kind: 'f1', market: 'f1', fairChance: p / sum, estOdds: estimateF1LotteryOdds(p / sum), ...houseRule('f1', 2) }));
+    f1Podium(options.map(o => ({ fair: o.fairChance, odds: o.estOdds }))).forEach((p, i) => options.push({ id: `f1pod|t${i}`, gameId: 'f1t', sport, kind: 'f1podium', market: `f1podium|${i}`, fairChance: p.fair, estOdds: p.odds, lock: p.lock, minLegs: p.minLegs }));
     return crowdPool(options).map(b => ({ ...b, gameKey: `${sport}|f1t` }));
   }
   const options = [];
@@ -900,7 +920,7 @@ function crowdGroups(sportPools, startWeek, weeks) {
     for (const fan of FANS) {
       const own = Array.from({ length: weeks }, (_, w) => pickerFor(fan.sports, style.key, w));
       const other = Array.from({ length: weeks }, (_, w) => pickerFor(SPORTS, style.key, w));
-      groups.push({ style: style.key, share: style.share, fan, weekPicker: w => own[w], fallback: fan.key === 'all' ? null : w => other[w], legs: fan.legs ?? null });
+      groups.push({ style: style.key, share: style.share * fan.share * FANS.length, fan, weekPicker: w => own[w], fallback: fan.key === 'all' ? null : w => other[w], legs: fan.legs ?? null });
     }
   return groups;
 }
@@ -910,7 +930,7 @@ function crowdGroups(sportPools, startWeek, weeks) {
 export function groupSize(share, per) {
   return Math.max(1, Math.round(per * STYLES.length * share));
 }
-export const crowdSize = per => FANS.length * STYLES.reduce((n, s) => n + groupSize(s.share, per), 0);
+export const crowdSize = per => FANS.reduce((n, f) => n + STYLES.reduce((m, s) => m + groupSize(s.share * f.share * FANS.length, per), 0), 0);
 
 // Where each group starts in the crowd's numbering, and the crowd's size.
 function layout(groups, per) {
@@ -936,6 +956,12 @@ function layout(groups, per) {
 }
 
 const emptySum = () => ({ n: 0, staked: 0, net: 0, tickets: 0, ahead: 0, everAhead: 0, quit: 0, rr: 0, rs: 0, ss: 0 });
+// Several groups' running sums as one.
+function mergeSums(list) {
+  const out = emptySum();
+  for (const sum of list) for (const key in out) out[key] += sum[key];
+  return out;
+}
 
 function addSum(sum, story) {
   const back = story.staked + story.final;
@@ -1138,8 +1164,13 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     const traitRows = TRAIT_ROWS;
     const traitSummaries = traitRows.map((trait, k) => ({ trait, share: tally.traitSums[k].n / total, ...summarize(tally.traitSums[k]) }));
     const fanSummaries = fans.map((fan, f) => ({ fan, ...summarize(tally.fanSums[f]) }));
-    // For "people like you": every fan x trait.
-    const groupStats = fans.flatMap((fan, f) => traitRows.map((trait, k) => ({ fan: fan.key, trait: trait.key, ...summarize(tally.fanTraitSums[f][k]) })));
+    // Per series: everyone who bets on it (alone or among others).
+    const following = sp => fans.flatMap((fan, f) => (fan.sports.includes(sp) ? [f] : []));
+    const seriesSummaries = sportPools
+      ? SPORTS.filter(sp => sportPools[sp]).map(sp => ({ series: sp, only: summarize(mergeSums(following(sp).filter(f => fans[f].type === 'one').map(f => tally.fanSums[f]))), ...summarize(mergeSums(following(sp).map(f => tally.fanSums[f]))) }))
+      : [];
+    // For "people like you": every series x trait.
+    const groupStats = seriesSummaries.flatMap(({ series }) => traitRows.map((trait, k) => ({ series, trait: trait.key, ...summarize(mergeSums(following(series).map(f => tally.fanTraitSums[f][k]))) })));
     // Sorted results (a plain numeric sort, far quicker than sorting indexes).
     const sorted = finals.slice().sort();
     // Replays one person exactly up to this checkpoint, every ticket logged;
@@ -1168,6 +1199,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       bands: bands.slice(0, m),
       traitSummaries,
       fanSummaries,
+      seriesSummaries,
       groupStats,
       characters: { best: replay(0.9), median: replay(0.5), worst: replay(0.1) },
       totals: {

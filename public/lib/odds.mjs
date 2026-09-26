@@ -81,7 +81,8 @@ export function round2(x) {
 }
 
 export function estimateLotteryOdds(fairChance, k) {
-  return round2(1 / (fairChance * k));
+  // A near-certain winner can't pay back less than the stake: 1.01 at least.
+  return Math.max(1.01, round2(1 / (fairChance * k)));
 }
 
 // Championship (futures) markets, fitted on 2026-09-25 against the lottery's

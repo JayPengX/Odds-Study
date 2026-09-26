@@ -9,7 +9,7 @@
 // F1 is left out: the lottery really does take far more on it.
 import { crowdPools } from './sim.mjs';
 
-// How far (in NT$ per NT$100) a sport or kind of fan may be from the rest.
+// How far (in NT$ per NT$100) a sport, or a series' followers, may be from the rest.
 export const AUDIT_TOLERANCE = { pool: 6, fan: 5 };
 const EXEMPT = new Set(['f1']);
 
@@ -41,10 +41,13 @@ export function auditPools(sportPools, tolerance = AUDIT_TOLERANCE.pool) {
   return backs.filter(x => Math.abs(x.back - mid) > tolerance).map(x => ({ ...x, median: mid }));
 }
 
-// Kinds of fan whose money back is out of line with the whole crowd's:
-// [{ fan, back, crowd }].
+// Series whose followers' money back is out of line with the whole crowd's:
+// [{ series, back, crowd }]. Series followed by too few to tell (a sampling
+// margin over the tolerance) are left out.
 export function auditCrowd(stats, tolerance = AUDIT_TOLERANCE.fan) {
   const crowd = stats.totals.staked ? ((stats.totals.staked + stats.totals.net) / stats.totals.staked) * 100 : null;
   if (crowd == null) return [];
-  return stats.fanSummaries.filter(f => !EXEMPT.has(f.fan.key) && Math.abs(f.back - crowd) > tolerance).map(f => ({ fan: f.fan.key, back: f.back, crowd }));
+  return (stats.seriesSummaries ?? [])
+    .filter(f => !EXEMPT.has(f.series) && f.backMargin < tolerance && Math.abs(f.back - crowd) > tolerance)
+    .map(f => ({ series: f.series, back: f.back, crowd }));
 }

@@ -237,7 +237,8 @@ footer { padding: 10px 0 0; text-align: center; }
 .game.open { grid-column: 1 / -1; }
 .game-top { display: flex; align-items: center; gap: 8px; padding: 10px 14px 4px; font-size: 0.74rem; color: var(--text-muted); }
 .sport-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-sunken); color: var(--text-secondary); border-radius: 999px; padding: 2px 9px; font-weight: 600; }
-.game-time { font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.game-series { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.game-time { flex: none; font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .team-rows { display: grid; padding: 4px 14px 10px; }
 .team-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; min-width: 0; }
 .team-row + .team-row { border-top: 1px dashed var(--grid); }
@@ -1037,3 +1038,11 @@ details.market[open] > summary { margin-bottom: 6px; }
 .profile { display: grid; gap: 8px; margin-top: 8px; }
 .profile .player-tags small { margin-right: 2px; }
 .crowd-like-list li { display: flex; gap: 8px; align-items: baseline; }
+
+/* The series a simulated person bets on: a stack of small league labels. */
+.series-stack { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.series-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 600; color: var(--text-secondary); background: var(--surface-sunken); border-radius: 999px; padding: 1px 8px 1px 2px; white-space: nowrap; }
+.series-tag.more { padding: 1px 8px; }
+.league-badge.logo-xxs { --s: 16px; }
+/* TheSportsDB badges come in their own shapes: shown whole. */
+img[src*='thesportsdb'] { object-fit: contain; }

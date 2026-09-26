@@ -82,11 +82,17 @@ test('people are combinations of traits, drawn at their shares, one per group at
     for (const group of ['pick', 'legs', 'stake', 'pace']) assert.ok(keys.filter(k => TRAITS.find(t => t.key === k).group === group).length <= 1);
     assert.equal(keys.includes(p.style), p.style !== 'any');
   }
-  // Baselines and fan x trait groups add up.
+  // Series x trait groups: within each series, a trait's people are at most
+  // everyone there; some bet on it alone, others with more series.
   assert.equal(stats.traitSummaries.length, TRAIT_ROWS.length);
-  assert.equal(stats.groupStats.length, FANS.length * TRAIT_ROWS.length);
-  const all = stats.groupStats.filter(g => g.trait === 'plainReact').reduce((n, g) => n + g.players, 0);
-  assert.equal(all, stats.traitSummaries.find(x => x.trait.key === 'plainReact').players);
+  assert.equal(stats.groupStats.length, stats.seriesSummaries.length * TRAIT_ROWS.length);
+  for (const { series, players, only } of stats.seriesSummaries) {
+    const rows = stats.groupStats.filter(g => g.series === series);
+    assert.ok(rows.every(g => g.players <= players), series);
+    assert.ok(only.players > 0 && only.players < players, series);
+  }
+  // Every series has people who bet on it alone, and the shares add up.
+  close(FANS.reduce((s, f) => s + f.share, 0), 1, 1e-9);
 });
 
 test('traits change how people bet', () => {
@@ -167,7 +173,7 @@ test('the sport calendar has a realistic number of games per year, and every lea
   for (const [key, sport] of Object.entries(SIM_SPORTS)) {
     assert.equal(familyOf(key), sport.family, key);
     assert.ok(FANS.find(f => f.key === 'all').sports.includes(key));
-    if (sport.fan) assert.ok(FANS.some(f => f.key === sport.fan && f.sports.includes(key)), key);
+    assert.ok(FANS.some(f => f.type === 'one' && f.sports[0] === key), key);
   }
   // Every sport has a typical week to bet on.
   for (const key of SPORTS) assert.ok(sportTemplate(key).length > 0, key);
@@ -248,7 +254,6 @@ test('every text the page builds from a key exists in both languages', async () 
   const keys = [
     ...TRAIT_ROWS.flatMap(r => [`trait_${r.key}`, `traitDesc_${r.key}`]),
     ...Object.keys(LEADERBOARDS).flatMap(k => [`lb_${k}`, `lbNote_${k}`]),
-    ...FANS.flatMap(f => [`fan_${f.key}`, `fanDesc_${f.key}`]),
     ...[...Object.keys(LEAGUES), 'f1', 'all'].map(k => `sport_${k}`),
     ...[...FUTURES, ...EXTRA_FUTURES].flatMap(f => [`future_${f.key}`, `futureSettle_${f.key}`]),
     ...['games', 'points', 'frames'].map(u => `unit_${u}`),
@@ -256,8 +261,9 @@ test('every text the page builds from a key exists in both languages', async () 
     ...['low', 'high'].map(l => `lock_${l}`),
     ...['locked', 'minLegs'].map(e => `slipError_${e}`),
     ...['style', 'react', 'fan'].flatMap(g => [`groupTab_${g}`, `groupNote_${g}`]),
-    ...['baseball', 'basketball', 'soccer', 'football', 'hockey', 'tennis', 'net', 'snooker', 'f1'].map(g => `group_${g}`),
-    ...['secHtft', 'secGoalBands', 'secQ1', 'secFirstSet', 'secSets', 'secTotalSets', 'secSetHcap', 'secGameHcap', 'secGameTotal']
+    ...['baseball', 'basketball', 'soccer', 'football', 'hockey', 'tennis', 'badminton', 'tabletennis', 'volleyball', 'snooker', 'f1'].map(g => `group_${g}`),
+    ...['secHtft', 'secGoalBands', 'secQ1', 'secFirstSet', 'secSets', 'secTotalSets', 'secSetHcap', 'secGameHcap', 'secGameTotal', 'secHalfTotal', 'secDoubleChance'],
+    ...['fanEverything', 'seriesDesc', 'givePoints', 'f1Podium', 'f1PodiumShort', 'f1PodiumSub', 'f1PodiumNote']
   ];
   for (const locale of ['zh', 'en']) {
     const t = makeT(locale);
