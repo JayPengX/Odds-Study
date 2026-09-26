@@ -442,6 +442,13 @@ const RIDE_EXTRA_TICKETS = 30;
 // end of the week (this week's results are decided together).
 export const SIM_START_BALANCE = 10_000;
 export const SIM_WEEKLY_GRANT = 5_000;
+// 大手筆 (big bets, the default): for fun, each habit stakes a share of its
+// balance (never less than its usual stake), and chasing and hot-hand boosts
+// go up to the lottery's NT$100,000 per ticket. As weekly claims pile up,
+// tickets grow. `false` keeps the survey-based stakes (真實).
+export const BIG_BET_SHARE = { casual: 0.02, fan: 0.05, underdog: 0.04, dreamer: 0.02, chaser: 0.03, careful: 0.015 };
+let bigBets = true;
+const unitRound = x => Math.floor(x / SLIP_RULES.unit) * SLIP_RULES.unit;
 const BOOST_MAX = 3000;
 // `share`: how much of the crowd bets this way. Most bettors are casual:
 // in the University of Hong Kong's 2021 study the median football bettor
@@ -614,7 +621,14 @@ function freshState(habit) {
     // and the lowest the balance went.
     cash: SIM_START_BALANCE,
     shortWeeks: 0,
-    lowestCash: SIM_START_BALANCE
+    lowestCash: SIM_START_BALANCE,
+    // Where the money went: stakes lost on losing tickets, payouts (after
+    // tax) on winning ones, and this week's stakes, payouts before tax and tax.
+    lostStakes: 0,
+    wonPaid: 0,
+    weekStaked: 0,
+    weekGross: 0,
+    weekTax: 0
   };
 }
 
@@ -648,7 +662,9 @@ function storyOf(st) {
     firstWon: st.firstWon === true,
     cash: st.cash,
     shortWeeks: st.shortWeeks,
-    lowestCash: st.lowestCash
+    lowestCash: st.lowestCash,
+    lostStakes: st.lostStakes,
+    wonPaid: st.wonPaid
   };
 }
 
@@ -665,6 +681,9 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
   const base = habit.stakes[0];
   for (let w = from; w < weeks; w++) {
     if (w > 0) st.cash += SIM_WEEKLY_GRANT;
+    st.weekStaked = 0;
+    st.weekGross = 0;
+    st.weekTax = 0;
     let spent = 0;
     let short = false;
     let pick = weekPicker(w);
@@ -725,10 +744,16 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
             : random() < habit.big
               ? BIG_STAKES[Math.floor(random() * BIG_STAKES.length)]
               : habit.stakes[Math.floor(random() * habit.stakes.length)];
+      // Big bets: a share of the balance (a big ticket three times that).
+      if (bigBets && stake > 0 && !habit.chaseCap) {
+        const share = unitRound(st.cash * (BIG_BET_SHARE[habit.key] ?? 0.02));
+        stake = Math.max(stake, stake >= BIG_STAKES[0] ? share * 3 : share);
+      }
       if (stake > 0 && st.boost > 1) {
-        stake = Math.max(stake, Math.min(BOOST_MAX, stake * st.boost));
+        stake = Math.max(stake, Math.min(bigBets ? SLIP_RULES.maxTicket : BOOST_MAX, stake * st.boost));
         st.boost = 1;
       }
+      stake = Math.min(stake, SLIP_RULES.maxTicket);
       // Only what's left this week can be bet.
       const afford = Math.floor((st.cash - spent) / SLIP_RULES.unit) * SLIP_RULES.unit;
       if (stake > afford) {
@@ -747,6 +772,12 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       spent += stake;
       const gross = stake * odds;
       const result = won ? afterTax(gross) - stake : -stake;
+      st.weekStaked += stake;
+      if (won) {
+        st.weekGross += gross;
+        st.weekTax += gross - afterTax(gross);
+        st.wonPaid += afterTax(gross);
+      } else st.lostStakes += stake;
       st.firstWon ??= won;
       st.tickets++;
       st.staked += stake;
@@ -789,10 +820,13 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       st.worstWeekAt = w;
     }
     if (habit.chaseCap && count > 0) {
-      if (week < 0 && st.chaseStake >= habit.chaseCap && habit.burnout) {
-        st.chaseStake = base;
+      // Big bets: start from a share of the balance, chase up to the ticket limit.
+      const start = bigBets ? Math.max(base, unitRound(st.cash * BIG_BET_SHARE.chaser)) : base;
+      const cap = bigBets ? SLIP_RULES.maxTicket : habit.chaseCap;
+      if (week < 0 && (st.chaseStake >= cap || short) && habit.burnout) {
+        st.chaseStake = start;
         st.rest = habit.burnout;
-      } else st.chaseStake = week < 0 ? Math.min(st.chaseStake * 2, habit.chaseCap) : base;
+      } else st.chaseStake = week < 0 ? Math.min(st.chaseStake * 2, cap) : start;
     }
     if (habit.stopLoss && week <= -habit.stopLoss[0]) st.rest = Math.max(st.rest, habit.stopLoss[1]);
     st.profit += week;
@@ -808,8 +842,9 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
 }
 
 // One player's season with their full week-by-week path.
-export function simulateHabit({ habit, pools, weeks, random = Math.random, seed = 1 }) {
+export function simulateHabit({ habit, pools, weeks, random = Math.random, seed = 1, big = true }) {
   worldSeed = seed;
+  bigBets = big;
   const path = new Float64Array(weeks);
   const pick = picker([pools[habit.pick]]);
   return { path, ...playSeason(habit, () => pick, weeks, random, path) };
@@ -880,48 +915,77 @@ export const monthWeeks = months => Math.round((months * 52) / 12);
 // Month by month up to a year, then every 3 months (fewer checkpoints keep long runs quick).
 export const PERIOD_MONTHS = Array.from({ length: MAX_MONTHS }, (_, i) => i + 1).filter(m => m <= 12 || m % 3 === 0);
 export const MONTH_WEEKS = PERIOD_MONTHS.map(monthWeeks);
-export const SPORTS = ['mlb', 'epl', 'nba', 'f1'];
-// Who bets on what. A fan of one sport bets on it while it's in season; in
-// its off-season, OFFSEASON_SWITCH of them bet on whatever else is on that
-// week and the rest take the week off. F1 is one race at a time, so F1 fans'
-// tickets are single picks.
+// ---- Sports in the simulation --------------------------------------------------
+//
+// Every sport the crowd bets on, in one place. Adding a sport is one entry:
+// - `family`: its kind (baseball, football, basketball, hockey, soccer,
+//   racing), which picks its typical-game template for weeks without real odds;
+// - `fan`: the kind of fan who bets on it (fans of one kind bet on all its sports);
+// - `headline`: its seasons starting and ending show in the time-lapse feed;
+// - `games(w)`: its games in week w of the year (0 = 1-7 January), from the
+//   published 2026/27 schedules. Weeks with 0 games are its off-season.
+// A sport with no bets at all (no real games and no template) is never on.
+const between = (w, a, b) => (a <= b ? w >= a && w <= b : w >= a || w <= b);
+// European soccer: mid-August to late May, off in the international breaks.
+const EURO_BREAKS = new Set([12, 38, 39, 45]);
+const euroLeague = perWeek => w => (between(w, 33, 21) && !EURO_BREAKS.has(w) ? perWeek : 0);
+const F1_RACE_WEEKS = new Set([10, 11, 13, 14, 15, 17, 20, 22, 24, 26, 27, 29, 30, 35, 36, 38, 39, 40, 42, 43, 44, 46, 48, 49]);
+// UEFA club competitions: league-phase matchdays (18 games), then knockouts.
+const UEFA_WEEKS = { 37: 18, 39: 18, 42: 18, 44: 18, 47: 18, 49: 18, 3: 18, 4: 18, 7: 8, 8: 8, 10: 8, 11: 8, 14: 4, 15: 4, 17: 2, 18: 2, 22: 1 };
+
+export const SIM_SPORTS = {
+  // MLB: 2,430 games from Opening Day (25 March 2027, week 11) to 26 September
+  // (week 38), then the postseason to the end of October (~40 games).
+  mlb: { family: 'baseball', fan: 'mlb', headline: true, games: w => (between(w, 11, 38) ? 87 : between(w, 39, 43) ? 8 : 0) },
+  // NFL: 272 games from 10 September (week 36) to 10 January (week 1), then
+  // the playoffs and the Super Bowl (14 February, week 6).
+  nfl: { family: 'football', fan: 'football', headline: true, games: w => (between(w, 36, 1) ? 16 : { 2: 6, 3: 4, 4: 2, 6: 1 }[w] ?? 0) },
+  // College football: late August (week 34) to early December, then bowls.
+  ncaaf: { family: 'football', fan: 'football', games: w => (between(w, 34, 49) ? 45 : between(w, 50, 1) ? 10 : 0) },
+  // NBA: 1,230 games, opening night 20 October (week 41) to 11 April (week
+  // 14), then the play-in and playoffs to mid-June (~90 games).
+  nba: { family: 'basketball', fan: 'basketball', headline: true, games: w => (w === 41 ? 15 : w === 14 ? 39 : between(w, 42, 13) ? 49 : between(w, 15, 24) ? 9 : 0) },
+  // WNBA: mid-May (week 19) to mid-September, then the playoffs.
+  wnba: { family: 'basketball', fan: 'basketball', games: w => (between(w, 19, 37) ? 10 : between(w, 38, 41) ? 4 : 0) },
+  // NHL: 1,312 games, 7 October (week 40) to mid-April (week 15), then the playoffs.
+  nhl: { family: 'hockey', fan: 'hockey', headline: true, games: w => (between(w, 40, 15) ? 47 : between(w, 16, 24) ? 10 : 0) },
+  // Premier League: 380 games, 22 August 2026 (week 33) to 30 May 2027 (week
+  // 21), no games in the international breaks, Boxing Day week doubled.
+  epl: { family: 'soccer', fan: 'soccer', headline: true, games: w => (w === 51 ? 20 : euroLeague(10)(w)) },
+  laliga: { family: 'soccer', fan: 'soccer', games: euroLeague(10) },
+  seriea: { family: 'soccer', fan: 'soccer', games: euroLeague(10) },
+  bundesliga: { family: 'soccer', fan: 'soccer', games: w => (between(w, 52, 1) ? 0 : euroLeague(9)(w)) },
+  ligue1: { family: 'soccer', fan: 'soccer', games: euroLeague(9) },
+  eredivisie: { family: 'soccer', fan: 'soccer', games: euroLeague(9) },
+  primeira: { family: 'soccer', fan: 'soccer', games: euroLeague(9) },
+  championship: { family: 'soccer', fan: 'soccer', games: w => (between(w, 31, 18) && !EURO_BREAKS.has(w) ? 12 : 0) },
+  ucl: { family: 'soccer', fan: 'soccer', headline: true, games: w => UEFA_WEEKS[w] ?? 0 },
+  uel: { family: 'soccer', fan: 'soccer', games: w => UEFA_WEEKS[w] ?? 0 },
+  // MLS: late February (week 8) to October, then the playoffs.
+  mls: { family: 'soccer', fan: 'soccer', games: w => (between(w, 8, 42) ? 14 : between(w, 43, 48) ? 4 : 0) },
+  // Liga MX: Clausura January-May, Apertura July-December.
+  ligamx: { family: 'soccer', fan: 'soccer', games: w => (between(w, 1, 21) || between(w, 28, 50) ? 9 : 0) },
+  // J1 League (autumn-spring from August 2026, a winter break December-February).
+  jleague: { family: 'soccer', fan: 'soccer', games: w => (between(w, 31, 50) || between(w, 7, 21) ? 10 : 0) },
+  // F1: the 24 races of the 2027 calendar, Bahrain 14 March to Abu Dhabi 12 December.
+  f1: { family: 'racing', fan: 'f1', headline: true, games: w => (F1_RACE_WEEKS.has(w) ? 1 : 0) }
+};
+export const SPORTS = Object.keys(SIM_SPORTS);
+// Who bets on what: one kind of fan per `fan` above (fans of a kind bet on
+// all its sports while any is in season), plus people who bet on everything.
+// In their off-season, OFFSEASON_SWITCH of fans bet on whatever else is on
+// that week and the rest take the week off. F1 is one race at a time, so F1
+// fans' tickets are single picks.
 export const FANS = [
-  { key: 'mlb', sports: ['mlb'] },
-  { key: 'epl', sports: ['epl'] },
-  { key: 'nba', sports: ['nba'] },
-  { key: 'f1', sports: ['f1'], legs: [1, 1] },
+  ...[...new Set(SPORTS.map(sp => SIM_SPORTS[sp].fan))].map(key => ({ key, sports: SPORTS.filter(sp => SIM_SPORTS[sp].fan === key), ...(key === 'f1' ? { legs: [1, 1] } : {}) })),
   { key: 'all', sports: SPORTS }
 ];
 export const OFFSEASON_SWITCH = 0.3;
-// From the published 2026/27 schedules (week 0 = 1-7 January):
-// - MLB: 2,430 games from Opening Day (25 March 2027, week 11) to 26
-//   September (week 38), then the postseason to the end of October (~40 games).
-// - Premier League: 380 games, 22 August 2026 (week 33) to 30 May 2027
-//   (week 21), with no games in the merged September-October international
-//   break (weeks 38-39), mid-November (45) or late March (12), and Boxing Day
-//   plus 30 December in the same week (51).
-// - NBA: 1,230 games, opening night 20 October (week 41) to 11 April (week
-//   14), then the play-in and playoffs to mid-June (~90 games).
-// - F1: the 24 races of the 2027 calendar, Bahrain 14 March to Abu Dhabi 12 December.
-const F1_RACE_WEEKS = new Set([10, 11, 13, 14, 15, 17, 20, 22, 24, 26, 27, 29, 30, 35, 36, 38, 39, 40, 42, 43, 44, 46, 48, 49]);
-const EPL_BREAKS = new Set([12, 38, 39, 45]);
 
 // Games a sport has in a week of the year.
 export function gamesInWeek(sport, week) {
   const w = ((week % 52) + 52) % 52;
-  if (sport === 'mlb') return w >= 11 && w <= 38 ? 87 : w >= 39 && w <= 43 ? 8 : 0;
-  if (sport === 'epl') {
-    if (!(w >= 33 || w <= 21) || EPL_BREAKS.has(w)) return 0;
-    return w === 51 ? 20 : 10;
-  }
-  if (sport === 'nba') {
-    if (w === 41) return 15;
-    if (w === 14) return 39;
-    if (w >= 42 || w <= 13) return 49;
-    return w >= 15 && w <= 24 ? 9 : 0;
-  }
-  if (sport === 'f1') return F1_RACE_WEEKS.has(w) ? 1 : 0;
-  return 0;
+  return SIM_SPORTS[sport]?.games(w) ?? 0;
 }
 
 // Week of the year (0-51) for a date.
@@ -996,8 +1060,9 @@ function layout(groups, per) {
 // year). `resume` (from an earlier run's `resume`) carries every player on
 // from where that run stopped instead of starting over, so 3 years is the
 // 1-year run plus 2 more years. Returns { results: {weeks: stats}, resume }.
-export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpoints = [weeks], perHabit, perGroup, seed = 1, onProgress, resume = null }) {
+export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpoints = [weeks], perHabit, perGroup, seed = 1, onProgress, resume = null, big = true }) {
   worldSeed = seed;
+  bigBets = big;
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {
@@ -1014,6 +1079,10 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
   const hist = new Uint32Array(span * bins);
   const aheadByWeek = new Uint32Array(span);
   const netByWeek = new Float64Array(span);
+  // The whole crowd's money each week: stakes, payouts before tax, tax.
+  const stakedByWeek = new Float64Array(span);
+  const grossByWeek = new Float64Array(span);
+  const taxByWeek = new Float64Array(span);
   const path = new Float64Array(weeks);
   const states = new Array(total);
   const rngs = new Uint32Array(total);
@@ -1028,7 +1097,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         sums: groups.map(emptySum),
         // Each record per habit: [player index, value].
         records: Object.fromEntries(Object.entries(RECORD_START).map(([key, start]) => [key, HABITS.map(() => [-1, start])])),
-        crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0, short: 0, broke: 0 }
+        crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0, short: 0, broke: 0, winners: 0, winnersPaid: 0, winnersLost: 0, winnersStaked: 0 }
       }
     ])
   );
@@ -1052,6 +1121,11 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     if (story.final > 0) {
       sum.ahead++;
       c.winnings += story.final;
+      // What winners won on their winning tickets, and lost on the rest.
+      c.winners++;
+      c.winnersPaid += story.wonPaid;
+      c.winnersLost += story.lostStakes;
+      c.winnersStaked += story.staked;
     } else c.losses -= story.final;
     if (story.everAhead) sum.everAhead++;
     if (groups[g].habit.chaseCap && story.maxStake >= groups[g].habit.chaseCap) sum.capHits++;
@@ -1095,6 +1169,9 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
           hist[(w - 1 - from) * bins + bin]++;
           if (v > 0) aheadByWeek[w - 1 - from]++;
           netByWeek[w - 1 - from] += v;
+          stakedByWeek[w - 1 - from] += now.weekStaked;
+          grossByWeek[w - 1 - from] += now.weekGross;
+          taxByWeek[w - 1 - from] += now.weekTax;
           const tally = tallies.get(w);
           if (tally) count(tally, g, index, storyOf(now));
         }
@@ -1154,6 +1231,11 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       players: n
     };
   };
+  // Every week's money from the start, earlier weeks from `resume`.
+  const flowWeeks = [
+    ...(resume?.flowWeeks ?? []),
+    ...Array.from({ length: span }, (_, w) => ({ staked: stakedByWeek[w], gross: grossByWeek[w], tax: taxByWeek[w] }))
+  ];
   const results = {};
   for (const [m, tally] of tallies) {
     const { finals, sums, records, crowd } = tally;
@@ -1235,15 +1317,47 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         // out altogether (under the NT$100 minimum).
         shortShare: crowd.short / total,
         brokeShare: crowd.broke / total
-      }
+      },
+      flow: moneyFlow(flowWeeks.slice(0, m), crowd, sumOf('staked'), sumOf('net'))
     };
   }
-  return { results, resume: { weeks, states, rngs, bands } };
+  return { results, resume: { weeks, states, rngs, bands, flowWeeks } };
 }
 
 // Any one player of the crowd, replayed exactly: `index` is their serial - 1.
-export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup, perHabit, seed = 1, index }) {
+// Where the crowd's money went. Every NT$ a winner takes home comes out of
+// what losers lost: losers' losses = winners' winnings + the lottery's take +
+// tax, exactly. The lottery's own take is stakes minus payouts before tax, so
+// in a week when winners are paid more than everyone staked, it loses money
+// (unlikely, but it happens), and the losers' money of other weeks covers it.
+export function moneyFlow(weeks, crowd, staked, net) {
+  const house = weeks.map(w => w.staked - w.gross);
+  const tax = weeks.reduce((s, w) => s + w.tax, 0);
+  const take = house.reduce((s, x) => s + x, 0);
+  const lossWeeks = house.map((v, w) => ({ w, v })).filter(x => x.v < 0);
+  const worst = lossWeeks.reduce((a, b) => (!a || b.v < a.v ? b : a), null);
+  return {
+    staked,
+    paid: staked + net,
+    tax,
+    take,
+    winnersWon: crowd.winnings,
+    losersLost: crowd.losses,
+    // Losers' losses less winners' winnings, take and tax: zero up to rounding.
+    balance: crowd.losses - crowd.winnings - take - tax,
+    winners: crowd.winners,
+    winnersPaid: crowd.winnersPaid,
+    winnersLost: crowd.winnersLost,
+    winnersStaked: crowd.winnersStaked,
+    houseLossWeeks: lossWeeks.length,
+    houseWorstWeek: worst ? { week: worst.w, loss: -worst.v } : null,
+    weeks: weeks.length
+  };
+}
+
+export function replayPlayer({ pools, sportPools, startWeek = 0, weeks, perGroup, perHabit, seed = 1, index, big = true }) {
   worldSeed = seed;
+  bigBets = big;
   const groups = sportPools
     ? multiSportGroups(sportPools, startWeek, weeks)
     : HABITS.map(habit => {
@@ -1525,16 +1639,18 @@ export function sportTemplate(sport, seed = 7) {
   const between = (lo, hi) => lo + random() * (hi - lo);
   const bets = [];
   const two = (gameId, p) => [p, 1 - p].forEach(q => bets.push({ gameId, fairChance: q, odds: estimateLotteryOdds(q, 1.15) }));
-  if (sport === 'mlb') for (let g = 0; g < 15; g++) (two(g, between(0.35, 0.65)), two(g + 100, between(0.45, 0.55)));
-  if (sport === 'nba') for (let g = 0; g < 10; g++) (two(g, between(0.15, 0.85)), two(g + 100, between(0.47, 0.53)));
-  if (sport === 'epl')
+  const family = SIM_SPORTS[sport]?.family;
+  // Win chances and a near-50/50 total per game, as wide as the sport's usual favourites.
+  const spread = { baseball: [0.35, 0.65], basketball: [0.15, 0.85], football: [0.2, 0.8], hockey: [0.35, 0.65] }[family];
+  if (spread) for (let g = 0; g < 12; g++) (two(g, between(...spread)), two(g + 100, between(0.45, 0.55)));
+  if (family === 'soccer')
     for (let g = 0; g < 10; g++) {
       const home = between(0.3, 0.6);
       const draw = between(0.22, 0.3);
       [home, draw, 1 - home - draw].forEach(q => bets.push({ gameId: g, fairChance: q, odds: estimateLotteryOdds(q, 1.15) }));
       two(g + 100, between(0.45, 0.55));
     }
-  if (sport === 'f1') [0.35, 0.2, 0.14, 0.1, 0.06, 0.05, 0.04, 0.03, 0.01, 0.01, 0.005, 0.005].forEach(p => bets.push({ gameId: 0, fairChance: p, odds: estimateF1LotteryOdds(p) }));
+  if (family === 'racing') [0.35, 0.2, 0.14, 0.1, 0.06, 0.05, 0.04, 0.03, 0.01, 0.01, 0.005, 0.005].forEach(p => bets.push({ gameId: 0, fairChance: p, odds: estimateF1LotteryOdds(p) }));
   // Keys per sport, so template games of different sports get their own results.
   return bets.map(b => ({ ...b, key: `${sport}|${b.gameId}`, gameKey: `${sport}|${b.gameId % 100}` }));
 }

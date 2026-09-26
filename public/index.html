@@ -200,6 +200,8 @@
           <label class="period-head" for="sim-months"><span data-t="periodLabel"></span><strong id="period-value"></strong></label>
           <input id="sim-months" type="range" min="1" max="60" step="1" value="12" />
           <div id="sim-periods" class="period-presets" role="group"></div>
+          <div id="sim-stake" class="segmented sim-stake" role="group"></div>
+          <p id="sim-stake-note" class="note"></p>
         </div>
         <input id="sim-weeks" type="hidden" value="52" />
       </div>
@@ -259,6 +261,10 @@
           <h3 class="card-title" data-t="factsTitle"></h3>
           <ul id="sim-facts" class="facts"></ul>
         </div>
+      </div>
+      <div class="card">
+        <h3 class="card-title" data-t="flowTitle"></h3>
+        <div id="sim-flow"></div>
       </div>
       <details class="card fold table-view">
         <summary><span data-t="simTable"></span></summary>

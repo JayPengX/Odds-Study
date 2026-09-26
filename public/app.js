@@ -3,6 +3,7 @@ import {
   HABITS,
   groupSize,
   SPORTS,
+  SIM_SPORTS,
   sportTemplate,
   weekOfYear,
   K_DRAFTKINGS,
@@ -139,6 +140,8 @@ const state = {
   checking: false,
   checkedAt: 0,
   showAllSaved: false,
+  // 大手筆 (bets grow with the balance) or 真實 (survey-based stakes) in the simulator.
+  simBig: loadSimBig(),
   historyFilter: 'all',
   // 紀錄 shows the slips or the stats.
   historyView: 'slips'
@@ -171,6 +174,14 @@ function loadUserOdds() {
     return JSON.parse(localStorage.getItem(USER_ODDS_KEY)) || {};
   } catch {
     return {};
+  }
+}
+
+function loadSimBig() {
+  try {
+    return localStorage.getItem('oddsStudy.simBig') !== '0';
+  } catch {
+    return true;
   }
 }
 
@@ -793,6 +804,7 @@ function renderStatic() {
   for (const tab of TABS) $(`tab-${tab}`).querySelector('.tab-label').textContent = t(`tab_${tab}`);
   renderLegend();
   renderPeriods();
+  renderStakeMode();
   renderDetailToggle();
   // The guide: the odds math, then every habit, kind of fan, kind of bet, how
   // the simulators work, the rules and the data, each group folded.
@@ -2797,9 +2809,9 @@ function simSportBets() {
       .map(b => ({ gameId: b.gameId, key: `${sport}|${b.gameId}|${b.kind === 'total' ? 'total' : 'win'}`, fairChance: b.fairChance, odds: effectiveOdds(b) }));
   return Object.fromEntries(
     SPORTS.map(sport => {
-      const bets = sport === 'nba' ? [] : real(sport);
+      const bets = real(sport);
       const games = new Set(bets.map(b => b.gameId)).size;
-      return [sport, games >= (sport === 'f1' ? 1 : 2) ? bets : sportTemplate(sport)];
+      return [sport, games >= (SIM_SPORTS[sport].family === 'racing' ? 1 : 2) ? bets : sportTemplate(sport)];
     })
   );
 }
@@ -2839,7 +2851,7 @@ let crowdJob = null;
 let worker = null;
 
 function crowdKey(sportBets, weeks) {
-  return JSON.stringify([weeks, sportBets]);
+  return JSON.stringify([weeks, state.simBig, sportBets]);
 }
 
 // Loading screen progress. At start-up it spans both stages, odds (first 35%)
@@ -2904,7 +2916,7 @@ function crowdStats(sportBets, weeks, { quiet = false } = {}) {
       worker = null;
       runHere();
     };
-    worker.postMessage({ id: key, sportBets, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED });
+    worker.postMessage({ id: key, sportBets, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED, big: state.simBig });
   } catch {
     runHere();
   }
@@ -2912,7 +2924,7 @@ function crowdStats(sportBets, weeks, { quiet = false } = {}) {
   function runHere() {
     const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
     const checkpoints = [...MONTH_WEEKS.filter(w => w <= weeks), weeks];
-    setTimeout(() => done(simulateCrowd({ sportPools, startWeek, weeks, checkpoints, perGroup: PER_GROUP, seed: SIM_SEED }).results), 30);
+    setTimeout(() => done(simulateCrowd({ sportPools, startWeek, weeks, checkpoints, perGroup: PER_GROUP, seed: SIM_SEED, big: state.simBig }).results), 30);
   }
   return promise;
 }
@@ -2972,6 +2984,7 @@ function drawSim(stats, weeks) {
   renderHabits(summaries);
   renderFans(stats.fanSummaries);
   renderFacts(stats, totals, characters, summaries, period);
+  renderFlow(stats, period);
   renderStories(stats, period);
   state.simStats = stats;
   renderYou();
@@ -3085,7 +3098,7 @@ function renderFans(fans) {
   $('sim-fans').replaceChildren(
     ...sorted.map(f =>
       barItem({
-        icon: f.fan.key === 'all' ? badge('🌐', 'var(--accent)', 'emoji') : leagueImg(f.fan.key, 'logo-sm'),
+        icon: f.fan.key === 'all' ? badge('🌐', 'var(--accent)', 'emoji') : leagueImg(f.fan.sports[0], 'logo-sm'),
         name: t(`fan_${f.fan.key}`),
         desc: t(`fanDesc_${f.fan.key}`),
         back: f.back,
@@ -3106,6 +3119,45 @@ function factItem(sentence, nums = {}, why = null) {
     else line.append(el('strong', { class: 'fact-num', text: nums[part] ?? `{${part}}` }));
   }
   return el('li', { class: 'fact' }, [line, why ? el('p', { class: 'fact-why', text: why }) : null]);
+}
+
+// Where the crowd's money went: every NT$ a winner took home came out of what
+// losers lost; the lottery kept its take and the government the tax. Weeks
+// the lottery paid out more than it took in are counted too.
+function renderFlow(stats, period) {
+  const t = state.t;
+  const f = stats.flow;
+  if (!f) return;
+  const money = v => fmtMoney(v, { sign: false });
+  const n = v => fmtCount(v);
+  const bar = [
+    { key: 'winners', v: f.winnersWon, color: 'var(--good)' },
+    { key: 'house', v: Math.max(0, f.take), color: 'var(--bad)' },
+    { key: 'tax', v: f.tax, color: 'var(--gold)' }
+  ];
+  const total = bar.reduce((s, x) => s + x.v, 0) || 1;
+  $('sim-flow').replaceChildren(
+    el('p', { class: 'flow-equation' }, [
+      el('span', { text: t('flowLosers') }),
+      el('strong', { class: 'back-low', text: money(f.losersLost) }),
+      el('span', { text: '=' }),
+      el('span', { text: t('flowWinners') }),
+      el('strong', { class: 'back-high', text: money(f.winnersWon) }),
+      el('span', { text: '+' }),
+      el('span', { text: t('flowHouse') }),
+      el('strong', { text: money(f.take) }),
+      el('span', { text: '+' }),
+      el('span', { text: t('flowTax') }),
+      el('strong', { text: money(f.tax) })
+    ]),
+    el('div', { class: 'flow-bar', role: 'img', 'aria-label': t('flowTitle') }, bar.map(x => el('span', { style: `width:${((x.v / total) * 100).toFixed(2)}%;background:${x.color}`, title: t(`flowPart_${x.key}`) }))),
+    el('p', { class: 'legend' }, bar.map(x => el('span', {}, [el('span', { class: 'legend-key dot', style: `background:${x.color}` }), document.createTextNode(`${t(`flowPart_${x.key}`)} ${fmtShare(x.v / total)}`)]))),
+    el('ul', { class: 'facts' }, [
+      el('li', { text: t('flowWinnersDetail', { n: n(f.winners * (SIM_PLAYERS_SHOWN / stats.players)), period, paid: money(f.winnersPaid), lost: money(f.winnersLost), net: money(f.winnersWon) }) }),
+      el('li', { text: f.houseLossWeeks ? t('flowHouseLost', { k: f.houseLossWeeks, weeks: f.weeks, worst: money(f.houseWorstWeek.loss) }) : t('flowHouseNever', { weeks: f.weeks }) }),
+      el('li', { text: t('flowStaked', { staked: money(f.staked), paid: money(f.paid), back: fmtInt(Math.round((f.paid / f.staked) * 100)) }) })
+    ])
+  );
 }
 
 function renderFacts(stats, totals, characters, summaries, period) {
@@ -3185,12 +3237,12 @@ function lapseEvents(bands, weeks, startWeek) {
     return true;
   };
   for (let w = 1; w <= weeks; w++) {
-    for (const sport of ['mlb', 'epl', 'nba', 'f1']) {
+    for (const sport of SPORTS.filter(sp => SIM_SPORTS[sp].headline)) {
       const now = games(sport, w);
       const before = games(sport, w - 1);
       const name = t(`sport_${sport}`);
       // F1 has a championship (賽季), not a league season (球季).
-      const f1 = sport === 'f1' ? 'F1' : '';
+      const f1 = SIM_SPORTS[sport].family === 'racing' ? 'F1' : '';
       if (now > 0 && quiet(sport, w - 5, w - 1)) events.push({ w, sport, text: t(`lapseSeasonStart${f1}`, { sport: name }) });
       else if (before > 0 && now > 0 && before >= 3 * now) events.push({ w, sport, text: t('lapsePlayoffs', { sport: name }) });
       if (now > 0 && w < weeks && quiet(sport, w + 1, w + 5)) events.push({ w, sport, text: t(`lapseSeasonEnd${f1}`, { sport: name }) });
@@ -3442,7 +3494,7 @@ function renderLookup(serial) {
   $('lookup-number').max = String(total);
   const sportBets = simSportBets();
   const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
-  const p = replayPlayer({ sportPools, startWeek: weekOfYear(new Date()), weeks: stats.weeks, perGroup: PER_GROUP, seed: SIM_SEED, index: n - 1 });
+  const p = replayPlayer({ sportPools, startWeek: weekOfYear(new Date()), weeks: stats.weeks, perGroup: PER_GROUP, seed: SIM_SEED, index: n - 1, big: state.simBig });
   if (!p) return;
   let tale;
   if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
@@ -3866,6 +3918,30 @@ const PERIOD_PRESETS = [1, 6, 12, 24, 36, 60];
 
 // The period: a slider by the month up to 5 years, and a few quick picks.
 // The label follows the slider as it moves; the simulation runs on release.
+// 大手筆 / 真實: how big the simulated people bet.
+function renderStakeMode() {
+  const t = state.t;
+  $('sim-stake').replaceChildren(
+    ...[true, false].map(big =>
+      el('button', {
+        type: 'button',
+        'aria-pressed': String(state.simBig === big),
+        text: t(big ? 'simStakeBig' : 'simStakeReal'),
+        onclick: () => {
+          if (state.simBig === big) return;
+          state.simBig = big;
+          try {
+            localStorage.setItem('oddsStudy.simBig', big ? '1' : '0');
+          } catch {}
+          renderStakeMode();
+          renderSim();
+        }
+      })
+    )
+  );
+  $('sim-stake-note').textContent = t(state.simBig ? 'simStakeBigNote' : 'simStakeRealNote');
+}
+
 function renderPeriods() {
   const weeks = Number($('sim-weeks').value);
   const months = PERIOD_MONTHS[MONTH_WEEKS.indexOf(weeks)];

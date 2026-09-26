@@ -1015,3 +1015,10 @@ details.market[open] > summary { margin-bottom: 6px; }
 .crowd-like-icon { font-size: 1.4rem; line-height: 1; }
 .crowd-wait { display: flex; align-items: center; gap: 10px; }
 .spinner.small { width: 18px; height: 18px; border-width: 2px; flex: none; }
+
+/* Simulator: stake mode and money flow */
+.sim-stake { margin-top: 10px; }
+.flow-equation { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+.flow-equation strong { font-size: 1.05rem; }
+.flow-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: 12px 0 6px; background: var(--surface-sunken); }
+.flow-bar span { display: block; height: 100%; }

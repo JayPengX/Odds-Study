@@ -11,8 +11,8 @@ const YEAR = 52;
 let base = null;
 
 self.onmessage = ({ data }) => {
-  const { id, sportBets, startWeek, weeks, perGroup, seed } = data;
-  const key = JSON.stringify([sportBets, startWeek, perGroup, seed]);
+  const { id, sportBets, startWeek, weeks, perGroup, seed, big } = data;
+  const key = JSON.stringify([sportBets, startWeek, perGroup, seed, big]);
   if (base?.key !== key) base = null;
   const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
   // Carry on from the furthest week played; the first run plays at least a year.
@@ -25,6 +25,7 @@ self.onmessage = ({ data }) => {
     startWeek,
     perGroup,
     seed,
+    big,
     weeks: to,
     checkpoints,
     resume,

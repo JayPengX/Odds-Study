@@ -130,7 +130,7 @@ test('habit pools pick favorites, underdogs and the least costly bets', () => {
 
 test('a season is reproducible and its path adds up', () => {
   const pools = habitPools(examplePool());
-  const run = () => simulateHabit({ habit: habit('casual'), pools, weeks: 52, random: seededRandom(5) });
+  const run = () => simulateHabit({ habit: habit('casual'), pools, weeks: 52, random: seededRandom(5), big: false });
   assert.deepEqual(run(), run());
   const a = run();
   assert.equal(a.path.length, 52);
@@ -141,7 +141,7 @@ test('a season is reproducible and its path adds up', () => {
 
 test('the chaser doubles after a losing week and stays under the cap', () => {
   const pools = habitPools(examplePool());
-  const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2) });
+  const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2), big: false });
   assert.ok(run.maxStake > 200 && run.maxStake <= 3000);
   assert.ok([400, 800, 1600, 3000].includes(run.maxStake));
 });
@@ -160,7 +160,7 @@ test('riders keep betting their winnings, within the ticket limit', () => {
 
 test('the habits\' quirks: breaks, hot hands and burnout', () => {
   const pools = habitPools(examplePool());
-  const run = (key, change = {}) => simulateHabit({ habit: { ...habit(key), ...change }, pools, weeks: 156, random: seededRandom(7) });
+  const run = (key, change = {}) => simulateHabit({ habit: { ...habit(key), ...change }, pools, weeks: 156, random: seededRandom(7), big: false });
   // Casual, chaser and careful take weeks off; the others never do.
   for (const key of ['casual', 'chaser', 'careful']) assert.ok(run(key).restWeeks > 0, key);
   for (const key of ['fan', 'underdog', 'dreamer']) assert.equal(run(key).restWeeks, 0, key);
@@ -172,7 +172,7 @@ test('the habits\' quirks: breaks, hot hands and burnout', () => {
 
 test('each extra parlay leg takes the cut again, and a big crowd is stable', () => {
   const pools = habitPools(examplePool());
-  const crowd = seed => simulateCrowdStats({ pools, weeks: 52, perHabit: 2000, seed });
+  const crowd = seed => simulateCrowdStats({ pools, weeks: 52, perHabit: 2000, seed, big: false });
   const a = crowd(1);
   const back = key => a.summaries.find(h => h.habit.key === key).back;
   // 2 legs: (1 / 1.15)^2 = 75.6 before tax; the occasional big ticket paying
@@ -447,6 +447,21 @@ test('the sport calendar has a realistic number of games per year', async () => 
   assert.equal(gamesInWeek('mlb', 2), 0);
   assert.equal(gamesInWeek('epl', 28), 0);
   assert.equal(gamesInWeek('nba', 28), 0);
+  // The newer sports: NFL 272 + playoffs, NHL 1,312 + playoffs, MLS ~500.
+  assert.ok(perYear.nfl > 270 && perYear.nfl < 320, `${perYear.nfl}`);
+  assert.ok(perYear.nhl > 1250 && perYear.nhl < 1450, `${perYear.nhl}`);
+  assert.ok(perYear.mls > 450 && perYear.mls < 560, `${perYear.mls}`);
+  assert.equal(gamesInWeek('nfl', 25), 0);
+});
+
+test('every listed league is in the simulation, and every simulated sport is listed', async () => {
+  const { SIM_SPORTS, FANS } = await import('../public/lib/odds.mjs');
+  const { LEAGUES, familyOf } = await import('../public/lib/teams.mjs');
+  for (const key of Object.keys(LEAGUES)) assert.ok(SIM_SPORTS[key], `${key} missing from SIM_SPORTS`);
+  for (const [key, sport] of Object.entries(SIM_SPORTS)) {
+    assert.equal(familyOf(key), sport.family, key);
+    assert.ok(FANS.some(f => f.sports.includes(key) && f.key !== 'all'), key);
+  }
 });
 
 test('the multi-sport crowd splits by fan type and replays players exactly', async () => {
@@ -515,7 +530,7 @@ test('every guide entry is a [title, text] pair in both languages', async () => 
 });
 
 test('any player can be replayed on their own, and groups add up', async () => {
-  const { simulateCrowdStats, replayPlayer, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
+  const { simulateCrowdStats, replayPlayer, sportTemplate, SPORTS, FANS } = await import('../public/lib/odds.mjs');
   const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
   const opts = { sportPools, startWeek: 20, weeks: 26, perGroup: 30, seed: 5 };
   const stats = simulateCrowdStats(opts);
@@ -529,7 +544,7 @@ test('any player can be replayed on their own, and groups add up', async () => {
   const habitsTelling = new Set(Object.values(stats.notable).map(who => who.habit.key));
   assert.equal(habitsTelling.size, HABITS.length);
   for (const key of ['best', 'worst']) assert.ok(stats.notable[key].overall, key);
-  assert.equal(stats.groupStats.length, 30);
+  assert.equal(stats.groupStats.length, HABITS.length * FANS.length);
   assert.equal(stats.groupStats.reduce((n, g) => n + g.players, 0), stats.players);
   for (const g of stats.groupStats) assert.ok(g.worst <= g.q10 && g.q10 <= g.median && g.median <= g.q90 && g.q90 <= g.best);
 });
@@ -582,4 +597,23 @@ test('simulated players play by the practice account rules: NT$10,000, NT$5,000 
   // A person who can afford every ticket bets exactly as before.
   const casual = simulateHabit({ habit: HABITS[0], pools, weeks: 20, seed: 3 });
   assert.equal(casual.shortWeeks, 0);
+});
+
+test('big bets (the default): stakes grow with the balance, and every winner\'s NT$ comes from a loser', async () => {
+  const { simulateCrowdStats, habitPools, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
+  const big = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed: 2 });
+  const real = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed: 2, big: false });
+  assert.ok(big.totals.staked > 3 * real.totals.staked, `${big.totals.staked} vs ${real.totals.staked}`);
+  for (const stats of [big, real]) {
+    const f = stats.flow;
+    // Losers' losses = winners' winnings + the lottery's take + tax.
+    assert.ok(Math.abs(f.balance) < 1e-3 * f.staked, `${f.balance}`);
+    assert.ok(Math.abs(f.losersLost - (f.winnersWon + f.take + f.tax)) < 1e-3 * f.staked);
+    // Winners won on their winning tickets and lost on others: net = paid - staked.
+    assert.ok(Math.abs(f.winnersPaid - f.winnersStaked - f.winnersWon) < 1e-3 * f.staked);
+    assert.ok(f.winnersLost > 0);
+    assert.ok(f.take > 0);
+    assert.equal(f.weeks, 52);
+  }
 });
