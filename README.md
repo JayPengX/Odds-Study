@@ -79,6 +79,8 @@ The page stays simple: odds, colours and the amounts that matter. What the numbe
 
 ### 紀錄 History: practice account, saved slips and stats
 
+- **錢從哪裡來、到哪裡去 (where the money came from and went)** at the top of 統計分析 (`moneySources` in `history.mjs`): a bar of all money in (the start, weekly grants, mini games, payouts) and one of all stakes, each with amounts and shares; then betting's net result on settled slips, what the lottery kept (stakes minus payouts before tax) and the tax withheld, what work earned and how many minutes of a minimum-wage job it equals, how many mini-game rounds betting's losses would take to earn back, and money still out on open slips. Below it, mini games by game (rounds, total, average and best round, about how long played and the hourly rate), and each week's grants, mini games, betting and change. Shown as soon as there's a grant or a round, before any slip; the balance chart marks mini-game money too.
+
 - **Play money only:** a new account has NT$10,000. From the next week on, NT$5,000 can be claimed once a week, from Monday 00:00 Taiwan time; unclaimed weeks don't add up.
 - **模擬下注 (place with play money)** on the slip buys it at the odds shown: the cost comes off the balance at once, and the page opens the 紀錄 (history) tab with the slip in **我的投注單 (my slips)**. A slip costing more than the balance can't be placed.
 - **Settling:** opening the 紀錄 tab (or coming back to it) checks every open slip whose games have started, at most every 90 seconds, or at once with 檢查結果:

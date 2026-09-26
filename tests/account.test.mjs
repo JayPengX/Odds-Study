@@ -268,3 +268,39 @@ test('slip history keeps itself: final scores with each pick, compact picks, bac
   assert.equal(mergeAccounts(newAccount(now), backup).slips.length, 1);
   assert.deepEqual(compactAccount(backup).slips[0].legs[0].final, { away: 4, home: 6 });
 });
+
+test('money sources: every NT$ in and out of the account, by where it came from', async () => {
+  const { moneySources } = await import('../public/lib/history.mjs');
+  const t = '2026-09-21T02:00:00.000Z';
+  const account = {
+    v: 1, created: t, updated: t,
+    ledger: [
+      { id: 'start', t, kind: 'start', amount: 10000 },
+      { id: 'grant-2026-09-21', t, kind: 'grant', amount: 5000 },
+      { id: 'game-a', t, kind: 'game', game: 'typing', amount: 25 },
+      { id: 'game-b', t, kind: 'game', game: 'typing', amount: 20 },
+      { id: 'game-c', t, kind: 'game', game: 'derby', amount: 40 },
+      { id: 'stake-s1', t, kind: 'stake', amount: -1000, slipId: 's1' },
+      { id: 'payout-s1', t, kind: 'payout', amount: 1500, slipId: 's1' },
+      { id: 'stake-s2', t, kind: 'stake', amount: -500, slipId: 's2' },
+      { id: 'payout-s2', t, kind: 'payout', amount: 0, slipId: 's2' },
+      { id: 'stake-s3', t, kind: 'stake', amount: -200, slipId: 's3' }
+    ],
+    slips: [
+      { id: 's1', status: 'settled', cost: 1000, payout: 1500, gross: 1600, legs: [] },
+      { id: 's2', status: 'settled', cost: 500, payout: 0, gross: 0, legs: [] },
+      { id: 's3', status: 'open', cost: 200, legs: [] }
+    ]
+  };
+  const m = moneySources(account);
+  assert.equal(m.balance, 10000 + 5000 + 85 - 1700 + 1500);
+  assert.equal(m.start + m.grants.sum + m.games.sum + m.payouts.sum - m.stakes.sum, m.balance);
+  assert.deepEqual(m.games.byGame.typing, { rounds: 2, sum: 45, best: 25 });
+  assert.equal(m.payouts.n, 1);
+  assert.equal(m.bettingNet, 0);
+  assert.equal(m.houseKept, 1500 - 1600);
+  assert.equal(m.tax, 100);
+  assert.deepEqual(m.open, { n: 1, sum: 200 });
+  assert.equal(m.weeks.length, 1);
+  assert.equal(m.weeks[0].games, 85);
+});

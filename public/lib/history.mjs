@@ -295,3 +295,72 @@ export function crowdPercentile(quantiles, value) {
   const span = quantiles[hi] - quantiles[lo] || 1;
   return (lo + (value - quantiles[lo]) / span) / (quantiles.length - 1);
 }
+
+// ---- Where the money came from and went --------------------------------------------
+
+// Every source of money in and out of the account, from its ledger and
+// slips: the start, the weekly grants, mini games (by game: rounds, total,
+// best round), slips' payouts and stakes, the tax withheld and what the
+// lottery kept (stakes minus payouts before tax, settled slips), money still
+// out on open slips, and each Taiwan week's grants, work and betting.
+export function moneySources(account) {
+  const out = {
+    start: 0,
+    grants: { n: 0, sum: 0 },
+    games: { rounds: 0, sum: 0, byGame: {} },
+    payouts: { n: 0, sum: 0 },
+    stakes: { n: 0, sum: 0 },
+    settled: { staked: 0, paid: 0, gross: 0 },
+    open: { n: 0, sum: 0 },
+    tax: 0,
+    balance: 0,
+    weeks: []
+  };
+  const weeks = new Map();
+  const week = iso => {
+    const key = weekOf(iso);
+    if (!weeks.has(key)) weeks.set(key, { week: key, grants: 0, games: 0, staked: 0, paid: 0 });
+    return weeks.get(key);
+  };
+  for (const e of account.ledger) {
+    out.balance += e.amount;
+    if (e.kind === 'start') out.start += e.amount;
+    else if (e.kind === 'grant') {
+      out.grants.n++;
+      out.grants.sum += e.amount;
+      week(e.t).grants += e.amount;
+    } else if (e.kind === 'game') {
+      const g = (out.games.byGame[e.game] ??= { rounds: 0, sum: 0, best: 0 });
+      g.rounds++;
+      g.sum += e.amount;
+      g.best = Math.max(g.best, e.amount);
+      out.games.rounds++;
+      out.games.sum += e.amount;
+      week(e.t).games += e.amount;
+    } else if (e.kind === 'stake') {
+      out.stakes.n++;
+      out.stakes.sum -= e.amount;
+      week(e.t).staked -= e.amount;
+    } else if (e.kind === 'payout') {
+      if (e.amount > 0) out.payouts.n++;
+      out.payouts.sum += e.amount;
+      week(e.t).paid += e.amount;
+    }
+  }
+  for (const slip of account.slips) {
+    if (slip.status === 'settled') {
+      out.settled.staked += slip.cost;
+      out.settled.paid += slip.payout;
+      out.settled.gross += slip.gross ?? slip.payout;
+      out.tax += Math.max(0, (slip.gross ?? slip.payout) - slip.payout);
+    } else {
+      out.open.n++;
+      out.open.sum += slip.cost;
+    }
+  }
+  // Betting's result on settled slips, and what the lottery kept of them.
+  out.bettingNet = out.settled.paid - out.settled.staked;
+  out.houseKept = out.settled.staked - out.settled.gross;
+  out.weeks = [...weeks.values()].sort((a, b) => b.week.localeCompare(a.week));
+  return out;
+}

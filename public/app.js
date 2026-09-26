@@ -63,7 +63,7 @@ import {
 } from './lib/account.mjs';
 import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
 import { pack, unpack } from './lib/codec.mjs';
-import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile } from './lib/history.mjs';
+import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile, moneySources } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
@@ -2436,6 +2436,7 @@ function balanceChart(timeline) {
   timeline.forEach((p, i) => {
     if (p.kind === 'payout' && p.amount > 0) svg.append(svgEl('circle', { class: 'balance-win', cx: x(i), cy: y(p.balance), r: 3.5 }));
     if (p.kind === 'grant') svg.append(svgEl('circle', { class: 'balance-grant', cx: x(i), cy: y(p.balance), r: 3 }));
+    if (p.kind === 'game' && p.amount > 0) svg.append(svgEl('circle', { class: 'balance-game', cx: x(i), cy: y(p.balance), r: 2.5 }));
   });
   const first = new Date(timeline[0].t);
   const last = new Date(timeline.at(-1).t);
@@ -2449,8 +2450,88 @@ function balanceChart(timeline) {
     svg,
     el('p', { class: 'legend' }, [
       el('span', {}, [el('span', { class: 'legend-key dot win' }), document.createTextNode(t('chartPayout'))]),
-      el('span', {}, [el('span', { class: 'legend-key dot grant' }), document.createTextNode(t('chartGrant'))])
+      el('span', {}, [el('span', { class: 'legend-key dot grant' }), document.createTextNode(t('chartGrant'))]),
+      el('span', {}, [el('span', { class: 'legend-key dot game' }), document.createTextNode(t('chartGame'))])
     ])
+  ]);
+}
+
+// Where the account's money came from and went: one bar for money in (the
+// start, weekly grants, mini games, slips' payouts) and one for money out
+// (stakes), then what that means: betting's result, work's pay against the
+// minimum wage, what the lottery and the tax took, and how many rounds of
+// work betting's losses cost.
+const MONEY_IN = [['start', 'var(--axis)'], ['grants', 'var(--series-1)'], ['games', 'var(--good)'], ['payouts', '#f9a825']];
+function moneyCard(m) {
+  const t = state.t;
+  const money = v => fmtMoney(v, { sign: false });
+  const ins = { start: m.start, grants: m.grants.sum, games: m.games.sum, payouts: m.payouts.sum };
+  const totalIn = Object.values(ins).reduce((a, b) => a + b, 0) || 1;
+  const bar = (parts, total) =>
+    el('div', { class: 'flow-bar', role: 'img' }, parts.filter(([, v]) => v > 0).map(([key, v, color]) => el('span', { class: `flow-seg seg-${key}`, style: `width:${(v / total) * 100}%;background:${color}`, title: `${t(`moneyIn_${key}`)} ${money(v)}` })));
+  const legend = parts =>
+    el('ul', { class: 'flow-legend' }, parts.filter(([, v]) => v > 0).map(([key, v, color, note]) => el('li', {}, [
+      el('span', { class: 'legend-key', style: `background:${color}` }),
+      el('span', { text: t(`moneyIn_${key}`) }),
+      el('strong', { text: money(v) }),
+      el('small', { class: 'muted', text: note ?? fmtPctShort(v / totalIn) })
+    ])));
+  const inParts = MONEY_IN.map(([key, color]) => [key, ins[key], color, key === 'grants' ? t('moneyGrantsNote', { n: fmtInt(m.grants.n) }) : key === 'games' ? t('moneyGamesNote', { n: fmtInt(m.games.rounds) }) : key === 'payouts' ? t('moneyPayoutsNote', { n: fmtInt(m.payouts.n) }) : null]);
+  const outParts = [['stakes', m.stakes.sum, 'var(--bad)', t('moneyStakesNote', { n: fmtInt(m.stakes.n) })]];
+  const facts = [];
+  if (m.settled.staked) {
+    facts.push([t('moneyBetting'), netCell(m.bettingNet), t('moneyBettingNote', { staked: money(m.settled.staked), paid: money(m.settled.paid) })]);
+    facts.push([t('moneyHouse'), money(Math.max(0, m.houseKept)), t('moneyHouseNote', { v: fmtPctShort(Math.max(0, m.houseKept) / m.settled.staked) })]);
+    if (m.tax > 0) facts.push([t('moneyTax'), money(m.tax), t('moneyTaxNote')]);
+  }
+  if (m.games.sum > 0) facts.push([t('moneyWork'), money(m.games.sum), t('moneyWorkNote', { m: fmtWorkMinutes(wageMinutes(m.games.sum)), wage: money(ARCADE.minWage) })]);
+  // Betting's losses in rounds of work (at the usual pay a round).
+  if (m.bettingNet < 0) facts.push([t('moneyLossWork'), t('moneyRounds', { n: fmtInt(Math.ceil(-m.bettingNet / (ARCADE.perMinute * (ARCADE.roundSeconds / 60)))) }), t('moneyLossWorkNote', { v: money(-m.bettingNet), m: fmtWorkMinutes(wageMinutes(-m.bettingNet)) })]);
+  if (m.open.n) facts.push([t('moneyOpen'), money(m.open.sum), t('moneyOpenNote', { n: fmtInt(m.open.n) })]);
+  return el('div', { class: 'card money-card' }, [
+    el('h3', { class: 'card-title', text: t('moneyTitle') }),
+    el('p', { class: 'lede', text: t('moneyLede', { v: money(m.balance) }) }),
+    el('p', { class: 'flow-label', text: t('moneyInTitle', { v: money(totalIn) }) }),
+    bar(inParts, totalIn),
+    legend(inParts),
+    m.stakes.sum ? el('p', { class: 'flow-label', text: t('moneyOutTitle', { v: money(m.stakes.sum) }) }) : null,
+    m.stakes.sum ? bar(outParts, totalIn) : null,
+    m.stakes.sum ? legend(outParts) : null,
+    facts.length ? el('dl', { class: 'money-facts' }, facts.flatMap(([k, v, note]) => [el('dt', { text: k }), el('dd', {}, [typeof v === 'string' ? el('strong', { text: v }) : v, el('small', { class: 'muted', text: note })])])) : null
+  ]);
+}
+
+// Mini games: rounds, money, the average and best round of each; and each
+// week's money by source.
+function gamesCard(m) {
+  const t = state.t;
+  const money = v => fmtMoney(v, { sign: false });
+  const rows = ARCADE.games.filter(g => m.games.byGame[g]).map(g => {
+    const x = m.games.byGame[g];
+    return [`${ARCADE_ICON[g]} ${t(`arcade_${g}`)}`, fmtInt(x.rounds), money(x.sum), money(x.sum / x.rounds), money(x.best)];
+  });
+  if (!rows.length) return null;
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('gamesStatsTitle') }),
+    table([t('colGame'), t('colRounds'), t('colEarned'), t('colAvgRound'), t('colBestRound')], rows),
+    el('p', { class: 'note', text: t('gamesStatsNote', { m: fmtInt((m.games.rounds * ARCADE.roundSeconds) / 60), rate: money(m.games.sum / Math.max(1, (m.games.rounds * ARCADE.roundSeconds) / 3600)), wage: money(ARCADE.minWage) }) })
+  ]);
+}
+
+function weeksMoneyCard(m) {
+  const t = state.t;
+  if (m.weeks.length < 2) return null;
+  const money = v => fmtMoney(v, { sign: false });
+  // Short cells so it fits a phone: whole dollars, the week as its Monday.
+  const n = v => fmtInt(Math.round(v));
+  const rows = m.weeks.slice(0, 12).map(w => {
+    const [, mo, d] = w.week.split('-').map(Number);
+    return [`${mo}/${d}`, n(w.grants), n(w.games), netCell(w.paid - w.staked), netCell(w.grants + w.games + w.paid - w.staked)];
+  });
+  return el('div', { class: 'card' }, [
+    el('h3', { class: 'card-title', text: t('weeksMoneyTitle') }),
+    table([t('colWeek'), t('moneyIn_grants'), t('moneyIn_games'), t('moneyBetting'), t('colWeekNet')], rows),
+    el('p', { class: 'note', text: t('weeksMoneyNote') })
   ]);
 }
 
@@ -2642,8 +2723,13 @@ function renderStats() {
   if (!state.accountReady || state.tab !== 'history' || state.historyView !== 'stats') return;
   const t = state.t;
   const s = historyStats(state.account);
-  $('stats').hidden = s.placed === 0;
-  if (!s.placed) return;
+  const m = moneySources(state.account);
+  // Shown once there's anything to count: a slip, a grant or a mini game.
+  $('stats').hidden = s.placed === 0 && !m.grants.n && !m.games.rounds;
+  if (!s.placed) {
+    $('stats-body').replaceChildren(...[moneyCard(m), gamesCard(m), weeksMoneyCard(m)].filter(Boolean));
+    return;
+  }
   const kpis = el('div', { class: 'kpis' }, [
     statTile(t('kpiSettled'), `${fmtInt(s.settled)} / ${fmtInt(s.placed)}`),
     statTile(t('kpiStaked'), fmtMoney(s.staked, { sign: false })),
@@ -2653,8 +2739,9 @@ function renderStats() {
     statTile(t('kpiHit'), s.settled ? `${fmtRate(s.paidSlips / s.settled)} / ${fmtRate(s.expectedPaidSlips / s.settled)}` : '–'),
     statTile(t('kpiOpen'), `${fmtInt(s.open)} · ${fmtMoney(s.openStake, { sign: false })}`)
   ]);
-  const cards = [el('div', { class: 'card' }, [kpis, el('p', { class: 'note', text: t('kpiNote') })])];
+  const cards = [el('div', { class: 'card' }, [kpis, el('p', { class: 'note', text: t('kpiNote') })]), moneyCard(m)];
   if (s.timeline.length > 1) cards.push(balanceChart(s.timeline));
+  cards.push(gamesCard(m), weeksMoneyCard(m));
   cards.push(youCard(), crowdCard(s), funCard());
   if (s.settled) cards.push(el('div', { class: 'two-col' }, [luckCard(s), recordsCard(s)]), picksCard(s), breakdownCard(s), weeksCard(s));
   else cards.push(el('p', { class: 'muted', text: t('statsWait') }));
