@@ -30,17 +30,19 @@ export const ARCADE = {
 // with the wait and the replay) and how an ordinary player does ('ok' and
 // 'bad' for the work games). Better players earn more, up to about 4 times.
 
-// Streaks and penalties by how hard each game really is. Typing is easy
-// work: it punishes carelessness and pays little for keeping it up. The team
-// quiz takes knowing hundreds of teams and free throws a steady hand: in
-// between. The derby's 30 ms window is hard enough that a miss costs nothing
-// and a run of hits pays the most.
+// Risk by kind of game, none of it extreme, since this is work:
+// - typing is the safe earn: a typo costs nothing (retype it), a small bonus
+//   for keeping it up, and nearly the same pay every round;
+// - the team quiz is in between: a wrong box costs a little;
+// - the derby and free throws are high risk, high pay: misses cost money
+//   (the derby's less, it's the harder of the two), streaks pay more, so a
+//   bad round pays about nothing and a good one two to three times typical.
 // `every`: right in a row for a bonus of `bonus`; `penalty`: what a mistake costs.
 export const STREAK = {
-  typing: { every: 5, bonus: 2, penalty: 2 },
+  typing: { every: 5, bonus: 1, penalty: 0 },
   sort: { every: 4, bonus: 2, penalty: 1 },
-  freethrow: { every: 3, bonus: 2, penalty: 1 },
-  derby: { every: 3, bonus: 3, penalty: 0 }
+  freethrow: { every: 3, bonus: 2, penalty: 2 },
+  derby: { every: 3, bonus: 2, penalty: 1 }
 };
 
 // A round's running score: good(pay) for a success (returns the streak
@@ -144,7 +146,7 @@ export function payGame(account, game, amount, now = new Date()) {
 // Ten pitches a round, each faster than the last, some of them change-ups
 // that slow down halfway. Swing as the ball crosses the plate: within
 // DERBY.hr of its middle a home run, within DERBY.hit a base hit, else a miss.
-export const DERBY = { pitches: 10, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 6, hit: 1 } };
+export const DERBY = { pitches: 10, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 5, hit: 3 } };
 
 // How long pitch i (0-based) takes to reach the end of the track, in ms;
 // whether it's a change-up (from the third pitch); and how much it breaks
@@ -174,7 +176,7 @@ export const derbyPayout = results => scoreRound('derby', results).total;
 // Plain work: type each ticket number exactly as shown. Every one typed right
 // pays the same; a typo pays nothing and the number stays until it's right.
 // Nothing is left to chance: the more you type, the more you earn.
-export const TYPING = { codes: 20, digits: 10, pay: 3 };
+export const TYPING = { codes: 20, digits: 10, pay: 2.5 };
 
 // A ticket number: ten digits, shown in groups of four ("4829 1735 06").
 export function ticketCode(random = Math.random) {
@@ -184,11 +186,12 @@ export const groupCode = code => code.replace(/(\d{4})(?=\d)/g, '$1 ');
 // Typed right: the same digits, whatever spaces or dashes.
 export const typedRight = (typed, code) => typed.replace(/\D/g, '') === code;
 
-export const typingPayout = right => right * TYPING.pay;
+export const typingPayout = right => Math.round(right * TYPING.pay);
 
 // ---- 整理彩券 (the team quiz) ----------------------------------------------------------
 //
-// Work that takes knowing your teams, and a new question every ticket, so
+// Work that takes knowing your teams, and a new question every ticket (a
+// wrong answer moves on to the next one too), so
 // nothing can be learnt by rote:
 // - `group`: which of four easily confused leagues (MLB, NPB, KBO or CPBL?);
 // - `sport`: which sport, from the nickname alone ("Rangers": hockey or
@@ -277,7 +280,7 @@ export const sortPayout = right => Math.round(right * SORT.pay);
 // Ten shots. A marker sweeps back and forth across the aim bar, faster each
 // shot, while the green zone in the middle narrows: stop it in the zone's
 // middle half for a swish, anywhere in the zone for a make.
-export const FREE_THROW = { shots: 10, pay: { swish: 5, make: 3 } };
+export const FREE_THROW = { shots: 10, pay: { swish: 5, make: 4 } };
 
 export function shotPlan(i) {
   return { period: 1300 - i * 70, zone: 0.13 - i * 0.008 };

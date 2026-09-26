@@ -3915,7 +3915,7 @@ function gameHud() {
 function streakRule(game) {
   const r = STREAK[game];
   const v = x => fmtMoney(x, { sign: false });
-  return r.penalty ? state.t('streakRule', { every: r.every, bonus: v(r.bonus), penalty: v(r.penalty) }) : state.t('streakRuleFree', { every: r.every, bonus: v(r.bonus) });
+  return r.penalty ? state.t('streakRule', { every: r.every, bonus: v(r.bonus), penalty: v(r.penalty) }) : state.t('streakRuleSafe', { every: r.every, bonus: v(r.bonus) });
 }
 
 // A finished round: its winnings into the account (up to today's room), then
@@ -4468,7 +4468,9 @@ function sortView() {
       if (!began || right >= SORT.tickets) return startClock();
       wrong++;
       hud.flash(score.bad(), false);
-      next();
+      buttons[q.boxes.findIndex(b => b.key === q.answer)]?.classList.add('answer');
+      q = { ...q, done: true };
+      later(next, 700);
     }, SORT.seconds * 1000);
     gameTimers.push(deadline);
   };
@@ -4482,11 +4484,13 @@ function sortView() {
     startClock();
   };
   const place = (key, button) => {
-    if (!q || right >= SORT.tickets) return;
+    if (!q || q.done || right >= SORT.tickets) return;
     began ||= performance.now();
     const current = slot.firstChild;
     if (key === q.answer) {
       right++;
+      clearTimeout(deadline);
+      q = { ...q, done: true };
       hud.flash(score.good(SORT.pay), true);
       button.classList.add('flash');
       current?.classList.add('fly', `fly-${q.boxes.findIndex(b => b.key === key)}`);
@@ -4501,12 +4505,16 @@ function sortView() {
       }
       later(next, 160);
     } else {
+      // Wrong: it costs a little, the right box lights up, then the next question.
       wrong++;
       hud.flash(score.bad(), false);
-      current?.classList.remove('shake');
-      void current?.offsetWidth;
+      clearTimeout(deadline);
       current?.classList.add('shake');
+      buttons[q.boxes.findIndex(b => b.key === q.answer)]?.classList.add('answer');
+      button.classList.add('wrong');
+      q = { ...q, done: true };
       update();
+      later(next, 700);
     }
   };
   view.addEventListener('keydown', e => {

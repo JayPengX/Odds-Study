@@ -38,7 +38,7 @@ test('home run derby: timing decides, faster pitches, change-ups slow down', () 
   assert.ok(2 * DERBY.hr * pitchPlan(0, () => 1).ms < 70);
   // Ten home runs: their pay and a streak bonus every 3.
   assert.equal(derbyPayout(Array(10).fill('hr')), 10 * DERBY.pay.hr + 3 * STREAK.derby.bonus);
-  assert.equal(derbyPayout(['hit', 'miss']), DERBY.pay.hit);
+  assert.equal(derbyPayout(['hit', 'miss']), DERBY.pay.hit - STREAK.derby.penalty);
 });
 
 test('data entry: pure effort, the same pay for every number typed right', () => {
@@ -96,20 +96,28 @@ test('team quiz: a new mixed question every ticket, one right box, never a coin 
   assert.equal(sortPayout(SORT.tickets), Math.round(SORT.tickets * SORT.pay));
 });
 
-test('streaks and penalties follow how hard each game is', () => {
-  // The easy work punishes mistakes most; the hardest game not at all and pays streaks most.
-  assert.ok(STREAK.typing.penalty >= STREAK.sort.penalty && STREAK.sort.penalty >= STREAK.freethrow.penalty && STREAK.freethrow.penalty > STREAK.derby.penalty);
-  assert.equal(STREAK.derby.penalty, 0);
-  assert.ok(STREAK.derby.bonus / STREAK.derby.every > STREAK.typing.bonus / STREAK.typing.every);
+test('risk by kind of game: typing is the safe earn, the skill games high risk, high pay', () => {
+  // Typing: a typo costs nothing, and a round pays nearly the same however it goes.
+  assert.equal(STREAK.typing.penalty, 0);
+  assert.ok(bestRound('typing') <= 1.1 * scoreRound('typing', PACE.typing.events).total);
+  // The skill games: misses cost money, a bad round pays about nothing, a good one two to three times typical, a perfect one never more than about four and a half.
+  const bad = { derby: ['hit', 'miss', 'miss', 'hit', 'miss', 'miss', 'miss', 'miss', 'miss', 'miss'], freethrow: ['make', 'miss', 'miss', 'make', 'miss', 'miss', 'miss', 'miss', 'miss', 'miss'] };
+  const good = { derby: ['hr', 'hr', 'hit', 'hr', 'hit', 'hit', 'miss', 'hr', 'hit', 'hit'], freethrow: ['swish', 'make', 'swish', 'make', 'make', 'miss', 'swish', 'make', 'make', 'miss'] };
+  for (const game of ['derby', 'freethrow']) {
+    const typical = scoreRound(game, PACE[game].events).total;
+    assert.ok(STREAK[game].penalty > 0, game);
+    assert.ok(scoreRound(game, bad[game]).total <= 2, game);
+    assert.ok(scoreRound(game, good[game]).total >= 2 * typical, game);
+    assert.ok(bestRound(game) <= 4.5 * typical, game);
+  }
   // A streak pays its bonus on every `every`th in a row; a mistake resets it.
-  const score = scorer('typing');
-  for (let i = 0; i < 4; i++) assert.equal(score.good(3), 0);
-  assert.equal(score.good(3), STREAK.typing.bonus);
-  assert.equal(score.bad(), STREAK.typing.penalty);
+  const score = scorer('sort');
+  for (let i = 0; i < STREAK.sort.every - 1; i++) assert.equal(score.good(1), 0);
+  assert.equal(score.good(1), STREAK.sort.bonus);
+  assert.equal(score.bad(), STREAK.sort.penalty);
   assert.equal(score.run, 0);
-  assert.equal(score.total, 5 * 3 + STREAK.typing.bonus - STREAK.typing.penalty);
   // A round never pays under 0.
-  assert.equal(scoreRound('typing', ['bad', 'bad', 'bad']).total, 0);
+  assert.equal(scoreRound('freethrow', ['miss', 'miss', 'miss']).total, 0);
 });
 
 test('free throws: the arrow sweeps faster and the zone narrows; the middle swishes', () => {
@@ -142,6 +150,4 @@ test('the pay is balanced: every game pays about the same per minute of typical 
     const rate = typicalPerMinute(game);
     assert.ok(Math.abs(rate - ARCADE.perMinute) / ARCADE.perMinute < 0.15, `${game} ${rate}`);
   }
-  // A perfect round of a skill game pays at most about five times a typical one.
-  for (const game of ['derby', 'freethrow']) assert.ok(bestRound(game) <= 6 * scoreRound(game, PACE[game].events).total, game);
 });
