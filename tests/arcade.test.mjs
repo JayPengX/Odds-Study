@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCADE, PACE, STREAK, ADAPT, adapt, scorer, scoreRound, bestRound, typicalPerMinute, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_SETS, SORT_LEAGUES, SORT_SPORTS, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
+import { ARCADE, PACE, STREAK, ADAPT, adapt, payRound, scorer, scoreRound, bestRound, typicalPerMinute, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_SETS, SORT_LEAGUES, SORT_SPORTS, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
 import { leagueTeams, rememberTeams, normalizeTeamName, teamNick, familyOf } from '../public/lib/teams.mjs';
 import { newAccount, balance, mergeAccounts } from '../public/lib/account.mjs';
 
@@ -185,4 +185,24 @@ test('the skill games\' difficulty follows the player', () => {
   assert.equal(level, 1);
   // The hardest free throw still has a green to hit, the hardest pitch still a window.
   assert.ok(shotPlan(1).zone > 0.05 && pitchPlan(1, () => 0).ms > 390);
+});
+
+test('a round\'s money goes in as it\'s earned: one entry per round, kept up to date', () => {
+  const now = new Date('2026-09-26T04:00:00Z');
+  let account = newAccount(now);
+  const start = balance(account);
+  // Bonuses in, a penalty out, all in one entry.
+  for (const total of [1, 4, 10, 9, 15]) ({ account } = payRound(account, 'r1', 'derby', total, now));
+  assert.equal(account.ledger.filter(e => e.kind === 'game').length, 1);
+  assert.equal(balance(account), start + 15);
+  // Never under 0 for the round.
+  ({ account } = payRound(account, 'r1', 'derby', -5, now));
+  assert.equal(balance(account), start);
+  // Other rounds count towards the daily cap, this one's own money doesn't.
+  ({ account } = payRound(account, 'r2', 'typing', ARCADE.dailyCap - 10, now));
+  const { account: after, paid } = payRound(account, 'r1', 'derby', 50, now);
+  assert.equal(paid, 10);
+  assert.equal(balance(after), start + ARCADE.dailyCap);
+  // The same total again changes nothing.
+  assert.equal(payRound(after, 'r1', 'derby', 50, now).account, after);
 });

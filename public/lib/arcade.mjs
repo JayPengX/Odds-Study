@@ -147,6 +147,26 @@ function entryId(now) {
   return `game-${now.getTime().toString(36)}${Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
+// A round's pay so far, into the account as it's earned: one ledger entry
+// per round ('game-<round>'), set to the round's running total every time it
+// changes (streak bonuses in, penalties out, never under 0), as much as
+// today's room allows. Returns { account, paid }.
+export function payRound(account, round, game, amount, now = new Date()) {
+  const id = `game-${round}`;
+  const current = account.ledger.find(e => e.id === id);
+  const others = { ...account, ledger: account.ledger.filter(e => e.id !== id) };
+  const paid = Math.max(0, Math.min(Math.round(amount), roomToday(others, now)));
+  if (paid === (current?.amount ?? 0)) return { account, paid };
+  const t = current?.t ?? now.toISOString();
+  const entry = { id, t, kind: 'game', game, amount: paid };
+  return { account: { ...account, updated: now.toISOString(), ledger: current ? account.ledger.map(e => (e.id === id ? entry : e)) : [...account.ledger, entry] }, paid };
+}
+
+// A new round's id.
+export function roundId(now = new Date()) {
+  return entryId(now).slice('game-'.length);
+}
+
 // Pays a finished round's winnings, as much as today's room allows.
 // Returns { account, paid }.
 export function payGame(account, game, amount, now = new Date()) {

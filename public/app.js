@@ -68,7 +68,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
-import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_LEAGUES, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, ADAPT, adapt } from './lib/arcade.mjs';
+import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payRound, roundId, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_LEAGUES, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, ADAPT, adapt } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -3837,6 +3837,9 @@ const ARCADE_MAX = Object.fromEntries(ARCADE.games.map(game => [game, bestRound(
 function renderArcade() {
   if (!state.accountReady) return;
   const t = state.t;
+  // The game keeps the keyboard focus while money comes in mid-round.
+  const focused = state.arcadeView?.contains(document.activeElement) ? document.activeElement : null;
+  queueMicrotask(() => focused?.isConnected && document.activeElement !== focused && focused.focus({ preventScroll: true }));
   const earned = earnedToday(state.account);
   const room = roomToday(state.account);
   $('arcade-body').replaceChildren(
@@ -3890,8 +3893,17 @@ function animate(draw) {
 
 // The strip above a game: progress, the round's money so far, the streak,
 // and a moment's note of a streak bonus or a penalty.
-function gameHud() {
+function gameHud(game) {
   const t = state.t;
+  // This round's pay goes into the account as it changes (see payRound).
+  const round = roundId();
+  let banked = 0;
+  const bank = earned => {
+    if (earned === banked) return;
+    const next = payRound(state.account, round, game, earned);
+    banked = earned;
+    if (next.account !== state.account) commitAccount(next.account);
+  };
   const progress = el('div', { class: 'hud-bar', 'aria-hidden': 'true' }, el('div'));
   const count = el('span', { class: 'hud-count' });
   const money = el('strong', { class: 'hud-money' });
@@ -3901,6 +3913,7 @@ function gameHud() {
   const meter = el('span', { class: 'hud-level', hidden: '' });
   const node = el('div', { class: 'game-hud' }, [el('div', { class: 'hud-row' }, [count, meter, streak, note, money]), progress]);
   const set = ({ done, of, earned, run, level = null }) => {
+    bank(earned);
     if (level != null) {
       meter.hidden = false;
       const bars = 1 + Math.round(level * 4);
@@ -3920,7 +3933,7 @@ function gameHud() {
     void note.offsetWidth;
     note.classList.add('show');
   };
-  return { node, set, flash };
+  return { node, set, flash, round };
 }
 
 // Each game's streak and penalty, as one line under its rules.
@@ -3934,11 +3947,12 @@ function streakRule(game) {
 // A finished round: its winnings into the account (up to today's room), then
 // what the work came to an hour against the minimum wage, and how much
 // betting loses as much on average.
-function finishRound(game, amount, box, summary, ms, score = null) {
+function finishRound(game, amount, box, summary, ms, score = null, round = roundId()) {
   const t = state.t;
   stopGame();
-  const { account, paid } = payGame(state.account, game, amount);
-  if (paid > 0) commitAccount(account);
+  // The round's entry has been kept up to date as it went; this settles it.
+  const { account, paid } = payRound(state.account, round, game, amount);
+  if (account !== state.account) commitAccount(account);
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   box.replaceChildren(
@@ -4025,7 +4039,7 @@ function derbyView() {
   const W = 360;
   const H = 250;
   const { canvas, ctx } = gameCanvas(W, H);
-  const hud = gameHud();
+  const hud = gameHud('derby');
   const box = el('div', { class: 'arcade-actions' });
   const mound = { x: W / 2, y: 78 };
   const plate = { x: W / 2, y: 214 };
@@ -4176,7 +4190,7 @@ function derbyView() {
       phase = 'done';
       const hr = results.filter(r => r === 'hr').length;
       const hits = results.filter(r => r === 'hit').length;
-      later(() => finishRound('derby', score.total, box, t('derbyDone', { hr, hits }), performance.now() - began, score), 900);
+      later(() => finishRound('derby', score.total, box, t('derbyDone', { hr, hits }), performance.now() - began, score, hud.round), 900);
       return;
     }
     phase = 'wait';
@@ -4241,7 +4255,7 @@ function freeThrowView() {
   const W = 360;
   const H = 250;
   const { canvas, ctx } = gameCanvas(W, H);
-  const hud = gameHud();
+  const hud = gameHud('freethrow');
   const box = el('div', { class: 'arcade-actions' });
   const meter = { x: 22, y: 30, w: 16, h: 190 };
   const rim = { x: 286, y: 92, r: 18 };
@@ -4392,7 +4406,7 @@ function freeThrowView() {
       phase = 'done';
       const made = results.filter(r => r !== 'miss').length;
       const swish = results.filter(r => r === 'swish').length;
-      later(() => finishRound('freethrow', score.total, box, t('ftDone', { made, swish }), performance.now() - began, score), 900);
+      later(() => finishRound('freethrow', score.total, box, t('ftDone', { made, swish }), performance.now() - began, score, hud.round), 900);
       return;
     }
     shot = null;
@@ -4443,7 +4457,7 @@ function freeThrowView() {
 const SPORT_ICON = { baseball: '⚾', basketball: '🏀', football: '🏈', hockey: '🏒', soccer: '⚽' };
 function sortView() {
   const t = state.t;
-  const hud = gameHud();
+  const hud = gameHud('sort');
   const box = el('div', { class: 'arcade-actions' });
   const ask = el('p', { class: 'sort-ask' });
   const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' }, el('p', { class: 'muted', text: t('sortLoading') }));
@@ -4562,7 +4576,7 @@ function sortView() {
     clock.remove();
     ask.remove();
     slot.remove();
-    finishRound('sort', score.total, box, t('sortDone', { n: right, of: SORT.questions }), performance.now() - began, score);
+    finishRound('sort', score.total, box, t('sortDone', { n: right, of: SORT.questions }), performance.now() - began, score, hud.round);
   };
   const place = (key, button) => {
     if (!q || q.done || right + wrong >= SORT.questions) return;
@@ -4607,7 +4621,7 @@ function sortView() {
 // pays the same. The clock starts at the first key.
 function typingView() {
   const t = state.t;
-  const hud = gameHud();
+  const hud = gameHud('typing');
   const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' });
   const entry = el('p', { class: 'typing-entry', 'aria-live': 'polite' });
   const box = el('div', { class: 'arcade-actions' });
@@ -4643,7 +4657,7 @@ function typingView() {
         update();
         pad.remove();
         entry.remove();
-        finishRound('typing', score.total, box, t('typingDone', { n: right, typos }), performance.now() - began, score);
+        finishRound('typing', score.total, box, t('typingDone', { n: right, typos }), performance.now() - began, score, hud.round);
         return;
       }
       later(show, 140);
