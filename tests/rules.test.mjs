@@ -23,6 +23,10 @@ test('the house locks very short and very long prices, and sells short ones only
   assert.deepEqual(houseRule('score', 40), { lock: null, minLegs: 1 });
   assert.deepEqual(houseRule('score', 90), { lock: 'high', minLegs: 1 });
   assert.deepEqual(houseRule('f1', 500), { lock: null, minLegs: 1 });
+  // A runaway championship or race favourite is locked, never parlay-only.
+  assert.deepEqual(houseRule('future', 1.05), { lock: 'low', minLegs: 1 });
+  assert.deepEqual(houseRule('f1', 1.2), { lock: 'low', minLegs: 1 });
+  assert.deepEqual(houseRule('future', 1.3), { lock: null, minLegs: 1 });
   // Every combination on the ticket must be big enough for its legs.
   assert.equal(minLegsProblem([{ minLegs: 1 }, { minLegs: 2 }], [2]), 0);
   assert.equal(minLegsProblem([{ minLegs: 1 }, { minLegs: 3 }], [2]), 3);

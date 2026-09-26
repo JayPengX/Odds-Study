@@ -7,8 +7,10 @@
 // - a long price on an ordinary game market (a lopsided game's underdog, a far
 //   line) is locked: the house can't price it well and won't carry the risk.
 // Markets built around long prices (correct score, top inning, winning
-// margins) stay open further out; F1 and championships are priced one by one
-// up to the lottery's 500 and are never locked.
+// margins) stay open further out. F1 and championships are priced one by one
+// up to the lottery's 500 and have no long-price lock, but a runaway favourite
+// is locked: it can't be hidden in a parlay like a short game price, and a
+// championship all but decided would be a free bet if its price lags.
 //
 // These thresholds are the house's usual shape, not measured on the lottery's
 // board: the page marks them as an estimate.
@@ -20,18 +22,22 @@ export const HOUSE_RULES = {
   twoLegsUnder: 1.3,
   // At or over this, locked: ordinary game markets / many-outcome markets.
   lockHigh: 8,
-  lockHighExotic: 80
+  lockHighExotic: 80,
+  // F1 and championships: under this, locked (the price at which a game is
+  // only sold inside a parlay).
+  lockLowOutright: 1.3
 };
 
 // Markets whose outcomes are many and long by design.
 const EXOTIC = new Set(['score', 'margin', 'inning', 'nextrun', 'htft', 'goalbands', 'sets', 'f1podium']);
-// Priced one by one by the lottery, never locked or limited here.
-const UNRULED = new Set(['f1', 'future']);
+// Priced one by one by the lottery: only a runaway favourite is locked.
+const OUTRIGHT = new Set(['f1', 'future']);
 
 // { lock: 'low' | 'high' | null, minLegs } for an option at `odds`.
 export function houseRule(kind, odds) {
-  if (UNRULED.has(kind) || !(odds > 0)) return { lock: null, minLegs: 1 };
   const r = HOUSE_RULES;
+  if (!(odds > 0)) return { lock: null, minLegs: 1 };
+  if (OUTRIGHT.has(kind)) return { lock: odds < r.lockLowOutright ? 'low' : null, minLegs: 1 };
   if (odds <= r.lockLow) return { lock: 'low', minLegs: 1 };
   if (odds >= (EXOTIC.has(kind) ? r.lockHighExotic : r.lockHigh)) return { lock: 'high', minLegs: 1 };
   if (odds < r.threeLegsUnder) return { lock: null, minLegs: 3 };

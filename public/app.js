@@ -375,7 +375,7 @@ function futureName(market, team) {
 // One bet per team of every championship market.
 function buildFutures(data) {
   const t = state.t;
-  return (data.futures || []).flatMap(market => {
+  return withHouseRules((data.futures || []).flatMap(market => {
     const odds = estimateFuturesOdds(market.teams.map(team => team.fair), FUTURES_OVERROUND[market.key] ?? FUTURES_OVERROUND[market.sport] ?? FUTURES_OVERROUND.other);
     const title = t(`future_${market.key}`, { season: market.season });
     return market.teams.map((team, i) => ({
@@ -394,7 +394,7 @@ function buildFutures(data) {
       errKey: ODDS_ERROR[`future_${market.key}`] ? (team.fair < 0.004 && market.sport !== 'nba' ? 'futureLongshot' : `future_${market.key}`) : 'futureOther',
       estOdds: odds[i]
     }));
-  });
+  }));
 }
 
 function effectiveOdds(bet) {

@@ -514,7 +514,7 @@ const STRINGS = {
     guideWhenTitle: "什麼時候會出現",
     guideWhen: "每個聯賽只有在有比賽時才會出現在賽事頁：MLB 和英超看到明天，美式足球 5 天內，其他足球 3 天內，NBA、WNBA、NHL 到明天，Kambi 的聯賽有比賽就出現（桌球和排球最多 16 場）。冠軍盤只要還在進行就會出現。模擬的 10 萬人每個聯賽都押，季外用一般比賽代替。",
     historyView_games: "小遊戲",
-    arcadeClose: "收起",
+    arcadeClose: "取消",
     guideReadTitle: '怎麼看這些數字',
     guideRead: [
       ['賠率', '每個選項上的大數字是估計的運彩賠率。下 NT$100、中了拿回 NT$100 × 賠率。🔒 是運彩不開放的選項；「限2關」「限3關」只能串關。角落的「划算」「穩」「值博」是推薦（見下方「推薦」）。'],
@@ -551,7 +551,7 @@ const STRINGS = {
         ['F1 分站冠軍', '運彩在排位賽前後各開一次：排位賽前照 2026/9/25 早上的盤（公平機率^0.692，冷門 65、325、500），排位賽後照正賽前一晚的盤（1.17 × 公平機率^0.765，冷門 65、275、500）。排位賽時間來自 ESPN 的賽程。']
       ]],
       ['運彩的規則', [
-        ['鎖盤 🔒', '賠率太低（1.05 以下）或太高（一般玩法 8 倍以上、比分這類玩法 80 倍以上）的選項，運彩不開放，只顯示 🔒。F1 和冠軍盤不受限。'],
+        ['鎖盤 🔒', '賠率太低（1.05 以下）或太高（一般玩法 8 倍以上、比分這類玩法 80 倍以上）的選項，運彩不開放，只顯示 🔒。F1 和冠軍盤不設上限，但 1.30 以下的大熱門也鎖。'],
         ['限過關', '賠率偏低的選項只能串關：1.15 以下限 3 關以上，1.30 以下限 2 關以上。投注單的每個組合都要串夠場數。'],
         ['抽成看風險', '運彩在越沒把握的地方抽越多：從實測的抽成（MLB 兩項約 14%）開始，資料來源差距越大、聯賽越冷門、線離主線越遠，抽成越高，最多再多 8%。'],
         ['投注單與稅', '每張最多 12 場、同一場只能選一個結果、NT$100–100,000、彩金上限 NT$2,000 萬；每注獎金超過 NT$5,000 預扣 20.4%。'],
@@ -1511,7 +1511,7 @@ const STRINGS = {
     guideWhenTitle: "When they show up",
     guideWhen: "A league shows on the games tab only when it has games: MLB and the Premier League to the end of tomorrow, American football 5 days ahead, other soccer 3 days, the NBA, WNBA and NHL to the end of tomorrow, Kambi's leagues whenever they have matches (table tennis and volleyball the next 16). Championships show while they're running. The simulated 100,000 bet on every league, off-season ones on a typical week.",
     historyView_games: "Mini games",
-    arcadeClose: "Close",
+    arcadeClose: "Cancel",
     guideReadTitle: 'Reading the numbers',
     guideRead: [
       ['Odds', 'The big number on each pick is the estimated lottery odds. NT$100 on it pays NT$100 × the odds if it wins. 🔒 Locked picks aren\'t on sale; "2+ legs" and "3+ legs" ones only in parlays. The corner tags (Value, Steady, Worth a shot) are recommendations (see Recommendations below).'],
@@ -1548,7 +1548,7 @@ const STRINGS = {
         ['F1 race winner', 'The lottery prices each race twice. Before qualifying: its board the morning before qualifying on 25 Sep 2026 (fair ^ 0.692; long shots 65, 325, 500). After: its race-eve board (1.17 x fair ^ 0.765; 65, 275, 500). Qualifying times come from ESPN\'s schedule.']
       ]],
       ['The lottery\'s rules', [
-        ['Locked 🔒', 'Prices too short (1.05 or less) or too long (8+ on ordinary markets, 80+ on scores and the like): the lottery doesn\'t sell them. F1 and championships are never locked.'],
+        ['Locked 🔒', 'Prices too short (1.05 or less) or too long (8+ on ordinary markets, 80+ on scores and the like): the lottery doesn\'t sell them. F1 and championships have no upper limit, but a favourite under 1.30 is locked too.'],
         ['Parlay only', 'Short prices only in parlays: under 1.15 in 3+ games, under 1.30 in 2+. Every combination on the ticket must have enough games.'],
         ['A cut by risk', 'The lottery takes more where it knows less: from its measured cut (about 14% on MLB two-way markets), more when the sources disagree, the league is less known, or the line is far from the main one; at most 8% more.'],
         ['Tickets and tax', 'Up to 12 games, one pick per game, NT$100-100,000 a ticket, payouts capped at NT$20 million; 20.4% withheld from any combination paying over NT$5,000.'],
