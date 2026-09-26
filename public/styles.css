@@ -125,7 +125,10 @@ h1 { font-size: 1.1rem; letter-spacing: -0.01em; line-height: 1.2; }
 }
 .icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .icon-button:disabled svg { animation: spin 0.9s linear infinite; }
-.icon-button:hover { background: var(--accent-wash); }
+/* Hover colours only where there's a mouse: on a phone a tapped button
+   keeps :hover until the next tap, so it stayed in its hover colour (the
+   light blue of the dark theme). */
+@media (hover: hover) { .icon-button:hover { background: var(--accent-wash); } }
 
 .tabs { display: flex; gap: 2px; padding: 3px; border-radius: 14px; background: var(--surface-sunken); }
 .tab {
@@ -133,7 +136,7 @@ h1 { font-size: 1.1rem; letter-spacing: -0.01em; line-height: 1.2; }
   padding: 7px 14px; border-radius: 11px; font-size: 0.9rem; font-weight: 600; white-space: nowrap; transition: background 0.15s, color 0.15s;
 }
 .tab svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.tab:hover { color: var(--text-primary); }
+@media (hover: hover) { .tab:hover { color: var(--text-primary); } }
 .tab[aria-selected='true'] { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
 .tab-badge {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad-strong); color: #fff;
@@ -195,7 +198,7 @@ footer { padding: 10px 0 0; text-align: center; }
   border-radius: 999px; padding: 6px 13px; font-size: 0.86rem; font-weight: 500; box-shadow: var(--shadow-sm); white-space: nowrap;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.chip:hover { border-color: var(--accent); }
+@media (hover: hover) { .chip:hover { border-color: var(--accent); } }
 .chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .chip .chip-count { font-size: 0.72rem; opacity: 0.75; font-variant-numeric: tabular-nums; }
 .chip .chip-icon { font-size: 1rem; line-height: 1; }
@@ -206,13 +209,13 @@ footer { padding: 10px 0 0; text-align: center; }
   border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 6px 14px; font-size: 0.85rem;
   white-space: nowrap; box-shadow: var(--shadow-sm);
 }
-.ghost-button:hover { border-color: var(--accent); }
+@media (hover: hover) { .ghost-button:hover { border-color: var(--accent); } }
 .ghost-button[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .primary-button {
   font-weight: 700; font-size: 0.95rem; color: #fff; background: var(--accent); border: 0; border-radius: 999px; padding: 10px 22px;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); transition: background 0.15s, transform 0.1s;
 }
-.primary-button:hover { background: var(--accent-strong); }
+@media (hover: hover) { .primary-button:hover { background: var(--accent-strong); } }
 .primary-button:active { transform: translateY(1px); }
 .button-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -252,7 +255,7 @@ footer { padding: 10px 0 0; text-align: center; }
   min-width: 92px; padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: var(--surface-raised); transition: border-color 0.15s, background 0.15s, transform 0.1s; font-variant-numeric: tabular-nums;
 }
-button.pick:hover { border-color: var(--accent); }
+@media (hover: hover) { button.pick:hover { border-color: var(--accent); } }
 button.pick:active { transform: scale(0.98); }
 .pick-name { font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pick-odds { font-size: 1.18rem; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; }
@@ -321,7 +324,7 @@ button.pick:active { transform: scale(0.98); }
   flex: none; min-width: 66px; display: grid; justify-items: center; padding: 4px 10px; border-radius: 10px; border: 1px solid var(--border);
   background: var(--surface-raised); font-size: 1rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2;
 }
-.entry-odds:hover { border-color: var(--accent); }
+@media (hover: hover) { .entry-odds:hover { border-color: var(--accent); } }
 .entry-odds small { font-size: 0.66rem; font-weight: 600; color: var(--text-muted); }
 .entry-odds.in-slip { background: var(--accent); border-color: var(--accent); color: #fff; }
 .entry-odds.in-slip small { color: rgba(255, 255, 255, 0.85); }
@@ -352,7 +355,7 @@ button.pick:active { transform: scale(0.98); }
 .slip-leg-game { display: block; font-size: 0.72rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leg-odds { font-weight: 800; font-variant-numeric: tabular-nums; }
 .leg-remove { width: 26px; height: 26px; border-radius: 50%; border: 0; background: var(--surface-sunken); color: var(--text-muted); font-size: 1rem; line-height: 1; padding: 0; flex: none; }
-.leg-remove:hover { background: var(--bad-wash); color: var(--bad); }
+@media (hover: hover) { .leg-remove:hover { background: var(--bad-wash); color: var(--bad); } }
 .slip-field { display: grid; gap: 6px; margin-bottom: 12px; }
 .slip-field > span { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
 .slip-sizes { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -599,7 +602,7 @@ details.market[open] > summary { margin-bottom: 6px; }
 .sparkline .spark-good { stroke: var(--good); }
 .sparkline .spark-bad { stroke: var(--bad-strong); }
 .link-button { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-weight: 800; text-align: left; }
-.link-button:hover { text-decoration: underline; }
+@media (hover: hover) { .link-button:hover { text-decoration: underline; } }
 
 /* ---- Sport tiles and the day strip: compact, one row each (side by side on desktop) ---- */
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
@@ -612,7 +615,7 @@ details.market[open] > summary { margin-bottom: 6px; }
   border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-sm);
   transition: border-color 0.15s, background 0.15s, transform 0.1s; font-variant-numeric: tabular-nums;
 }
-.sport-tile:hover, .day-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+@media (hover: hover) { .sport-tile:hover, .day-tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); } }
 .sport-tile:active, .day-tile:active { transform: scale(0.97); }
 .sport-tile[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-wash); }
 .sport-tile[aria-pressed='true'] .tile-name { color: var(--accent); }
@@ -663,7 +666,7 @@ details.market[open] > summary { margin-bottom: 6px; }
 .podium-back small { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; }
 .podium-back strong { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; }
 .podium-odds { flex: none; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-weight: 800; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
-.podium-odds:hover { border-color: var(--accent); }
+@media (hover: hover) { .podium-odds:hover { border-color: var(--accent); } }
 .podium-odds.in-slip { background: var(--accent); border-color: var(--accent); color: #fff; }
 .podium-odds span { color: var(--accent); }
 .podium-odds.in-slip span { color: #fff; }

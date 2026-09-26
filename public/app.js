@@ -4645,7 +4645,22 @@ function sortView() {
       leagues = SORT_LEAGUES.filter((_, i) => ok[i]);
       return fill(SORT.questions + 4, (done, n) => slot.replaceChildren(el('p', { class: 'muted', text: t('sortPreparing', { n: done, of: n }) })));
     })
-    .then(next);
+    .then(() => {
+      // Ready: the round (and its clock) starts when the player says so.
+      slot.replaceChildren(el('p', { class: 'muted', text: t('sortReady') }));
+      box.replaceChildren(
+        el('button', {
+          class: 'primary-button game-big-button',
+          type: 'button',
+          text: t('arcadeStart'),
+          onclick: () => {
+            box.replaceChildren();
+            began = performance.now();
+            next();
+          }
+        })
+      );
+    });
   update();
   return view;
 }
@@ -4710,7 +4725,7 @@ function typingView() {
     }
   };
   const press = key => {
-    if (done) return;
+    if (done || pad.hidden) return;
     began ||= performance.now();
     if (key === 'back') typed = typed.slice(0, -1);
     else if (key === 'enter') return submit();
@@ -4732,7 +4747,25 @@ function typingView() {
       })
     )
   );
-  show();
+  // Nothing to type until the shift starts (the clock starts with it).
+  pad.hidden = true;
+  entry.hidden = true;
+  slot.replaceChildren(el('p', { class: 'muted', text: t('typingReady') }));
+  box.append(
+    el('button', {
+      class: 'primary-button game-big-button',
+      type: 'button',
+      text: t('arcadeStart'),
+      onclick: () => {
+        box.replaceChildren();
+        pad.hidden = false;
+        entry.hidden = false;
+        began = performance.now();
+        show();
+      }
+    })
+  );
+  update();
   return el('div', {
     class: 'arcade-game',
     tabindex: '0',

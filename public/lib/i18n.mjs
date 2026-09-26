@@ -465,6 +465,8 @@ const STRINGS = {
     sortPreparing: "準備題目 {n} / {of}…",
     hudLevel: "難度",
     streakRuleLadder: "靠連續賺錢：單次只拿一點，連續第 2 次多加 {a}、第 3 次起每次多加 {b}；失手扣 {penalty}，連續歸零。難度跟著你走：成功就變難、失手就變簡單。",
+    sortReady: "題目準備好了，按「開始」計時。",
+    typingReady: "按「開始」上班，開始計時。",
     guideReadTitle: '怎麼看這些數字',
     guideRead: [
       ['賠率', '每個選項上的大數字是估計的運彩賠率。下 NT$100、中了拿回 NT$100 × 賠率。🔒 是運彩不開放的選項；「限2關」「限3關」只能串關。角落的「划算」「穩」「值博」是推薦（見下方「推薦」）。'],
@@ -1412,6 +1414,8 @@ const STRINGS = {
     sortPreparing: "Preparing questions {n} / {of}…",
     hudLevel: "Level",
     streakRuleLadder: "Streaks pay: one alone pays a little, the 2nd in a row adds {a}, each from the 3rd on {b}; a miss costs {penalty} and ends the streak. The difficulty follows you: harder after a success, easier after a miss.",
+    sortReady: "Questions ready: press Start to begin the clock.",
+    typingReady: "Press Start to begin the shift and the clock.",
     guideReadTitle: 'Reading the numbers',
     guideRead: [
       ['Odds', 'The big number on each pick is the estimated lottery odds. NT$100 on it pays NT$100 × the odds if it wins. 🔒 Locked picks aren\'t on sale; "2+ legs" and "3+ legs" ones only in parlays. The corner tags (Value, Steady, Worth a shot) are recommendations (see Recommendations below).'],
