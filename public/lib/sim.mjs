@@ -8,8 +8,10 @@
 // rest are reactions to what happens to them (chasing losses, cashing out,
 // sulking after a near miss …). Each person draws every trait on its own
 // share, one at most from each group of how-they-bet traits.
-import { SLIP_RULES, afterTax, seededRandom, estimateLotteryOdds, estimateF1LotteryOdds } from './odds.mjs';
-import { houseRule } from './rules.mjs';
+import { SLIP_RULES, afterTax, seededRandom, estimateLotteryOdds, estimateF1LotteryOdds, estimateLineOdds, K_DRAFTKINGS } from './odds.mjs';
+import { houseRule, houseCut } from './rules.mjs';
+import { pointsModel, pointsMarkets, goalMarkets, fitHockey, baseballMarkets, setsMarkets, marketOdds } from './markets.mjs';
+import { fitGoals } from './live.mjs';
 import { recommend } from './recommend.mjs';
 
 // ---- Money --------------------------------------------------------------------
@@ -820,30 +822,81 @@ export function weekOfYear(date) {
   return Math.min(51, Math.floor((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / (7 * 86_400_000)));
 }
 
-// A typical week of games for a sport with nothing on the board today: win
-// chances spread as they usually are in that sport, priced at the lottery's
-// usual cut, a total per game. Seeded, so it's the same every time.
+// A typical week of games for a sport with nothing on the board today, built
+// and priced exactly like a real board, so a sport off the board is no
+// cheaper (or dearer) to bet on than one on it: win chances spread as they
+// usually are in that sport, a total near 50/50, the same side markets
+// (markets.mjs), the house's cut for that league (rules.mjs), and its locks
+// and parlay-only rules. Seeded, so it's the same every time.
+const TEMPLATE_SPREAD = { baseball: [0.35, 0.65], basketball: [0.15, 0.85], football: [0.2, 0.8], hockey: [0.35, 0.65], sets: [0.12, 0.88] };
+const TEMPLATE_TOTAL = { baseball: 8.5, basketball: null, football: null, hockey: 5.5, soccer: 2.5, sets: null };
 export function sportTemplate(sport, seed = 7) {
   const random = seededRandom(seed);
   const between = (lo, hi) => lo + random() * (hi - lo);
-  const bets = [];
-  const two = (gameId, p, kind, market) =>
-    [p, 1 - p].forEach((q, i) => bets.push({ gameId, kind, market, fairChance: q, odds: estimateLotteryOdds(q, 1.158), outLo: i === 0 ? 0 : p, outHi: i === 0 ? p : 1 }));
   const family = SIM_SPORTS[sport]?.family;
-  // Win chances and a near-50/50 total per game, as wide as the sport's usual favourites.
-  const spread = { baseball: [0.35, 0.65], basketball: [0.15, 0.85], football: [0.2, 0.8], hockey: [0.35, 0.65], sets: [0.12, 0.88] }[family];
-  if (spread) for (let g = 0; g < 12; g++) (two(g, between(...spread), 'ml', 'ml'), two(g, between(0.45, 0.55), 'total', 'total'));
-  if (family === 'soccer')
-    for (let g = 0; g < 10; g++) {
+  const bets = [];
+  const push = (gameId, kind, market, key, picks, cut, many = false) => {
+    let lo = 0;
+    for (const p of picks) {
+      const odds = many ? marketOdds({ cut: 2 }, p.fair, cut) : kind === 'ml' ? estimateLotteryOdds(p.fair, cut) : estimateLineOdds(p.fair, cut);
+      bets.push({ gameId, kind, market, key, fairChance: p.fair, odds, outLo: p.lo ?? lo, outHi: p.hi ?? lo + p.fair, ...houseRule(kind, odds) });
+      lo += p.fair;
+    }
+  };
+  if (family === 'racing') {
+    [0.35, 0.2, 0.14, 0.1, 0.06, 0.05, 0.04, 0.03, 0.01, 0.01, 0.005, 0.005].forEach(p => bets.push({ gameId: 0, kind: 'f1', market: 'f1', key: `${sport}|0|f1`, fairChance: p, odds: estimateF1LotteryOdds(p) }));
+    return bets.map(b => ({ ...b, gameKey: `${sport}|${b.gameId}` }));
+  }
+  const cutOf = (base, steps = 0) => houseCut({ base, sport, steps });
+  const games = family === 'soccer' ? 10 : 12;
+  for (let g = 0; g < games; g++) {
+    const game = `${sport}|${g}`;
+    let markets = [];
+    let homeWin;
+    if (family === 'soccer') {
       const home = between(0.3, 0.6);
       const draw = between(0.22, 0.3);
-      [home, draw, 1 - home - draw].forEach(q => bets.push({ gameId: g, kind: 'ml', market: 'ml', fairChance: q, odds: estimateLotteryOdds(q, 1.158) }));
-      two(g, between(0.45, 0.55), 'total', 'total');
+      const away = 1 - home - draw;
+      homeWin = home / (home + away);
+      push(g, 'ml', 'ml', `${game}|side`, [{ fair: away }, { fair: draw }, { fair: home }], cutOf(K_DRAFTKINGS));
+      markets = goalMarkets(fitGoals(home, away), { family });
+    } else {
+      homeWin = between(...TEMPLATE_SPREAD[family]);
+      push(g, 'ml', 'ml', `${game}|side`, [{ fair: 1 - homeWin }, { fair: homeWin }], cutOf(K_DRAFTKINGS));
+      if (family === 'baseball') markets = baseballMarkets({ homeWin, total: { line: 8.5, overFair: between(0.45, 0.55) } });
+      else if (family === 'football' || family === 'basketball') {
+        const model = pointsModel(SCORE_LEAGUE[sport] ?? sport, { homeWin, total: null });
+        if (model) markets = pointsMarkets({ ...model, total: TEMPLATE_POINTS[family] * between(0.95, 1.05) }, { spreadLine: null, totalLine: null });
+      } else if (family === 'hockey') markets = goalMarkets(fitHockey(homeWin, { line: 5.5, overFair: between(0.45, 0.55) }), { family, totalLine: 5.5 });
+      else if (family === 'sets') markets = setsMarkets({ homeWin, bestOf: SET_BEST_OF[sport] ?? 3 });
     }
-  if (family === 'racing') [0.35, 0.2, 0.14, 0.1, 0.06, 0.05, 0.04, 0.03, 0.01, 0.01, 0.005, 0.005].forEach(p => bets.push({ gameId: 0, kind: 'f1', market: 'f1', fairChance: p, odds: estimateF1LotteryOdds(p) }));
-  // Keys per sport, so template games of different sports get their own results.
-  return bets.map(b => ({ ...b, key: `${sport}|${b.gameId}|${b.market}`, gameKey: `${sport}|${b.gameId}` }));
+    // A total near 50/50 where the side markets don't bring one.
+    if (!markets.some(m => m.kind === 'total') && TEMPLATE_TOTAL[family] != null) {
+      const over = between(0.45, 0.55);
+      push(g, 'total', 'total', `${game}|total`, [{ fair: 1 - over, lo: 0, hi: 1 - over }, { fair: over, lo: 1 - over, hi: 1 }], cutOf(K_DRAFTKINGS));
+    }
+    for (const m of markets) {
+      const cut = cutOf(m.cut, m.steps ?? 0);
+      const many = m.cut >= 1.35;
+      // One game's handicaps share the winner's draw (away first), its totals one (under first).
+      if (m.kind === 'runline' || m.kind === 'sethcap') {
+        const away = m.picks.find(p => p.side === 'away').fair;
+        push(g, m.kind, m.market, `${game}|${m.kind === 'runline' ? 'side' : m.kind}`, [{ fair: away, lo: 0, hi: away }, { fair: 1 - away, lo: away, hi: 1 }], cut);
+      } else if (m.kind === 'total' || m.kind === 'totalsets') {
+        const over = m.picks.find(p => p.side === 'over').fair;
+        push(g, m.kind, m.market, `${game}|${m.kind}`, [{ fair: 1 - over, lo: 0, hi: 1 - over }, { fair: over, lo: 1 - over, hi: 1 }], cut);
+      } else push(g, m.kind, m.market, `${game}|${m.market}`, m.picks.map(p => ({ fair: p.fair })), cut, many);
+    }
+  }
+  // Locked picks are never on sale; keys per sport, so template games of
+  // different sports get their own results.
+  return bets.filter(b => !b.lock).map(b => ({ ...b, gameKey: `${sport}|${b.gameId}` }));
 }
+// The score model's league for sports without their own spread, typical
+// points totals, and best-of for matches in sets.
+const SCORE_LEAGUE = { euroleague: 'euroleague', bleague: 'bleague' };
+const TEMPLATE_POINTS = { football: 45, basketball: 220 };
+const SET_BEST_OF = { tennis: 3, wta: 3, badminton: 3, tabletennis: 5, volleyball: 5, snooker: 3 };
 
 // ---- The crowd ------------------------------------------------------------------
 

@@ -264,3 +264,23 @@ test('every text the page builds from a key exists in both languages', async () 
     assert.deepEqual(keys.filter(k => t(k) === k && k !== 'group_f1'), [], locale);
   }
 });
+
+test('a typical week is priced like a real board: no sport is cheaper just for being off the board', async () => {
+  const { houseCut } = await import('../public/lib/rules.mjs');
+  for (const sport of SPORTS.filter(sp => SIM_SPORTS[sp].family !== 'racing')) {
+    const bets = sportTemplate(sport);
+    const kinds = new Set(bets.map(b => b.kind));
+    // Side markets as on the real board, not only the winner and a total.
+    assert.ok(kinds.size >= 4, `${sport}: ${[...kinds]}`);
+    // Never a locked pick, and the winner at the house's cut for that league.
+    assert.ok(bets.every(b => !b.lock), sport);
+    // A game with every side on sale (a lopsided game's long side is locked).
+    const sides = SIM_SPORTS[sport].family === 'soccer' ? 3 : 2;
+    const game = [...new Set(bets.map(b => b.gameId))].find(g => bets.filter(b => b.kind === 'ml' && b.gameId === g).length === sides);
+    const ml = bets.filter(b => b.kind === 'ml' && b.gameId === game);
+    const implied = ml.reduce((s, b) => s + 1 / b.odds, 0);
+    assert.ok(implied >= houseCut({ base: 1.153, sport }) - 0.02, `${sport}: ${implied}`);
+    const back = bets.reduce((s, b) => s + b.fairChance * b.odds, 0) / bets.length;
+    assert.ok(back < 0.87, `${sport}: ${back}`);
+  }
+});

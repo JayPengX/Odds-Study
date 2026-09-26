@@ -28,7 +28,10 @@ export const SCORE_SPREAD = {
   nfl: { margin: 13.5, total: 10.5, bands: [[1, 6], [7, 12], [13, 18], [19, null]], step: 3 },
   ncaaf: { margin: 16, total: 14, bands: [[1, 7], [8, 14], [15, 21], [22, null]], step: 3.5 },
   nba: { margin: 12.5, total: 18, bands: [[1, 5], [6, 10], [11, 15], [16, 20], [21, null]], step: 4 },
-  wnba: { margin: 11, total: 14, bands: [[1, 5], [6, 10], [11, 15], [16, null]], step: 4 }
+  wnba: { margin: 11, total: 14, bands: [[1, 5], [6, 10], [11, 15], [16, null]], step: 4 },
+  // EuroLeague and B.League: shorter games (40 minutes), lower scoring than the NBA.
+  euroleague: { margin: 11, total: 15, bands: [[1, 5], [6, 10], [11, 15], [16, null]], step: 4 },
+  bleague: { margin: 11.5, total: 16, bands: [[1, 5], [6, 10], [11, 15], [16, null]], step: 4 }
 };
 
 export function normalCdf(z) {
