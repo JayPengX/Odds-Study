@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_BINS, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
+import { ARCADE, PACE, typicalPerMinute, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_BINS, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
 import { newAccount, balance, mergeAccounts } from '../public/lib/account.mjs';
 
 test('mini games pay into the ledger, at most the daily cap, and merge like any entry', () => {
@@ -90,4 +90,15 @@ test('no two leagues share a name, so every ticket (and board card) says which o
     const names = [...Object.keys(LEAGUES), 'f1'].map(k => t(`sport_${k}`));
     assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), [], locale);
   }
+});
+
+test('the pay is balanced: every game pays about the same per minute of typical play', () => {
+  for (const game of ARCADE.games) {
+    assert.ok(PACE[game], game);
+    const rate = typicalPerMinute(game);
+    assert.ok(Math.abs(rate - ARCADE.perMinute) / ARCADE.perMinute < 0.15, `${game} ${rate}`);
+  }
+  // A perfect round of a skill game pays at most about four times a typical one.
+  assert.ok(derbyPayout(Array(10).fill('hr')) <= 4.5 * derbyPayout(PACE.derby.results));
+  assert.ok(freeThrowPayout(Array(10).fill('swish')) <= 4.5 * freeThrowPayout(PACE.freethrow.results));
 });

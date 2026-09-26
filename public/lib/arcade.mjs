@@ -13,11 +13,26 @@ import { taipeiDayKey } from './sources.mjs';
 
 export const ARCADE = {
   dailyCap: 1500,
+  // What every game pays for a minute of typical play (NT$).
+  perMinute: 25,
   games: ['typing', 'sort', 'derby', 'freethrow'],
   // Taiwan's minimum hourly wage in 2026 (NT$).
   minWage: 196,
   // What the lottery keeps of every NT$100 staked, on average (it pays out at most 78%).
   take: 0.22
+};
+
+// Balanced pay: every game pays about ARCADE.perMinute for a minute of
+// typical play, so none is the one to farm. PACE is each game's typical
+// round: how long it takes (typing about 7 s a number on a phone, sorting
+// 1.5 s a ticket, a pitch or a shot about 3.5 s with the wait and the
+// replay) and how a practised but ordinary player does at the skill games.
+// Better players earn more at those, up to about 4 times as much.
+export const PACE = {
+  typing: { seconds: 140 },
+  sort: { seconds: 45 },
+  derby: { seconds: 35, results: ['hr', 'hr', 'hit', 'hit', 'hit', 'hit', 'miss', 'miss', 'miss', 'miss'] },
+  freethrow: { seconds: 32, results: ['swish', 'swish', 'make', 'make', 'make', 'make', 'miss', 'miss', 'miss', 'miss'] }
 };
 
 // What a round worked out to an hour, and how much betting loses as much on average.
@@ -53,7 +68,7 @@ export function payGame(account, game, amount, now = new Date()) {
 // Ten pitches a round, each faster than the last, some of them change-ups
 // that slow down halfway. Swing as the ball crosses the plate: within
 // DERBY.hr of its middle a home run, within DERBY.hit a base hit, else a miss.
-export const DERBY = { pitches: 10, plate: 0.83, hr: 0.025, hit: 0.07, pay: { hr: 15, hit: 4, miss: 0 }, allHrBonus: 50 };
+export const DERBY = { pitches: 10, plate: 0.83, hr: 0.025, hit: 0.07, pay: { hr: 4, hit: 2, miss: 0 }, allHrBonus: 20 };
 
 // How long pitch i (0-based) takes to reach the end of the track, in ms, and
 // whether it's a change-up.
@@ -101,7 +116,8 @@ export const typingPayout = right => right * TYPING.pay;
 //
 // Plain work: each ticket names a league; tap the box of its sport. Every one
 // sorted right pays the same; a wrong box pays nothing and the ticket stays.
-export const SORT = { tickets: 30, pay: 2 };
+// NT$0.6 a ticket, paid rounded at the end of the round (NT$18 for all 30).
+export const SORT = { tickets: 30, pay: 0.6 };
 // The four boxes and the leagues whose tickets go in each.
 export const SORT_BINS = {
   baseball: ['mlb', 'npb', 'kbo', 'cpbl'],
@@ -117,14 +133,14 @@ export function sortTicket(random = Math.random) {
   return { league: leagues[Math.floor(random() * leagues.length)], bin };
 }
 
-export const sortPayout = right => right * SORT.pay;
+export const sortPayout = right => Math.round(right * SORT.pay);
 
 // ---- 罰球 (free throws) ------------------------------------------------------------------
 //
 // Ten shots. A marker sweeps back and forth across the aim bar, faster each
 // shot, while the green zone in the middle narrows: stop it in the zone's
 // middle half for a swish, anywhere in the zone for a make.
-export const FREE_THROW = { shots: 10, pay: { swish: 8, make: 3, miss: 0 } };
+export const FREE_THROW = { shots: 10, pay: { swish: 3, make: 2, miss: 0 } };
 
 export function shotPlan(i) {
   return { period: 1500 - i * 80, zone: 0.16 - i * 0.009 };
@@ -142,3 +158,10 @@ export function shotResult(position, plan) {
 }
 
 export const freeThrowPayout = results => results.reduce((s, r) => s + FREE_THROW.pay[r], 0);
+
+// A game's typical pay per minute (PACE), to keep them level.
+export function typicalPerMinute(game) {
+  const pace = PACE[game];
+  const pay = { typing: typingPayout(TYPING.codes), sort: sortPayout(SORT.tickets), derby: derbyPayout(PACE.derby.results), freethrow: freeThrowPayout(PACE.freethrow.results) }[game];
+  return (pay / pace.seconds) * 60;
+}

@@ -434,7 +434,7 @@ const STRINGS = {
     ftDone: "投進 {made} 球，其中 {swish} 球空心。",
     ftRules: "10 球罰球。左邊的箭頭上下跑，一球比一球快，綠色也一球比一球窄：停在深綠色是空心 {swish}，淺綠色是進球 {make}，其他都不進。點畫面、按按鈕或空白鍵出手。",
     sortDone: "整理 {n} 張，放錯 {wrong} 次。",
-    sortRules: "收班整理：每張彩券寫著一個賽事，放進它那種運動的箱子（也可以按 1–4）。{n} 張，每張放對 {pay}；放錯不扣錢，但要重放。",
+    sortRules: "收班整理：每張彩券寫著一個賽事，放進它那種運動的箱子（也可以按 1–4）。{n} 張全部放對拿 {total}；放錯不扣錢，但要重放。",
     guideReadTitle: '怎麼看這些數字',
     guideRead: [
       ['賠率', '每個選項上的大數字是估計的運彩賠率。下 NT$100、中了拿回 NT$100 × 賠率。🔒 是運彩不開放的選項；「限2關」「限3關」只能串關。角落的「划算」「穩」「值博」是推薦（見下方「推薦」）。'],
@@ -476,7 +476,7 @@ const STRINGS = {
         ['抽成看風險', '運彩在越沒把握的地方抽越多：從實測的抽成（MLB 兩項約 14%）開始，資料來源差距越大、聯賽越冷門、線離主線越遠，抽成越高，最多再多 8%。'],
         ['投注單與稅', '每張最多 12 場、同一場只能選一個結果、NT$100–100,000、彩金上限 NT$2,000 萬；每注獎金超過 NT$5,000 預扣 20.4%。'],
         ['模擬帳戶', '開戶 NT$10,000，每週一可領 NT$5,000。下注時照當下賠率扣款，比賽結束自動對獎；網球看 ESPN 的比分，羽桌排等沒有公開賽果的運動在比分分出勝負時自動對獎，否則開賽 3 小時後可以自己對獎，3 天沒結果就退款。模擬的 10 萬人照一模一樣的規則。'],
-        ['小遊戲', '在「紀錄」靠努力賺模擬帳戶的錢，不靠運氣、不用算數學，四種任選：打工輸入號碼（每組 NT$3）、整理彩券（每張 NT$2）、全壘打大賽（要在約 0.04 秒內揮棒）、罰球（箭頭停在綠色）。一天最多 NT$1,500，每局都算給你看換算時薪（基本工資 NT$196）和在運彩多快會輸回去。不算在下注成績裡。'],
+        ['小遊戲', '在「紀錄」靠努力賺模擬帳戶的錢，不靠運氣、不用算數學，四種任選：打工輸入號碼、整理彩券、全壘打大賽（要在約 0.04 秒內揮棒）、罰球（箭頭停在綠色）。四種的工資一樣：一般玩法每分鐘約 NT$25（時薪約 NT$1,500），打擊和罰球練得越好賺越多。一天最多 NT$1,500，每局都算給你看換算時薪（基本工資 NT$196）和在運彩多快會輸回去。不算在下注成績裡。'],
         ['年齡與合法性', '購買運彩須年滿 18 歲；在海外網站（包含 Polymarket）下注在台灣屬於違法賭博。本站只是教學工具。']
       ]],
       ['推薦', [
@@ -1351,7 +1351,7 @@ const STRINGS = {
     ftDone: "{made} made, {swish} of them swishes.",
     ftRules: "10 free throws. The arrow on the left runs up and down, faster each shot, and the green gets narrower: stop it in the dark green for a swish, {swish}; the light green for a make, {make}; anywhere else misses. Tap the court, the button or press space.",
     sortDone: "{n} tickets sorted, {wrong} in the wrong box.",
-    sortRules: "Closing time: each ticket names a league; put it in its sport's box (keys 1-4 work too). {n} tickets, {pay} for each one right; a wrong box costs nothing but a retry.",
+    sortRules: "Closing time: each ticket names a league; put it in its sport's box (keys 1-4 work too). All {n} right pays {total}; a wrong box costs nothing but a retry.",
     guideReadTitle: 'Reading the numbers',
     guideRead: [
       ['Odds', 'The big number on each pick is the estimated lottery odds. NT$100 on it pays NT$100 × the odds if it wins. 🔒 Locked picks aren\'t on sale; "2+ legs" and "3+ legs" ones only in parlays. The corner tags (Value, Steady, Worth a shot) are recommendations (see Recommendations below).'],
@@ -1393,7 +1393,7 @@ const STRINGS = {
         ['A cut by risk', 'The lottery takes more where it knows less: from its measured cut (about 14% on MLB two-way markets), more when the sources disagree, the league is less known, or the line is far from the main one; at most 8% more.'],
         ['Tickets and tax', 'Up to 12 games, one pick per game, NT$100-100,000 a ticket, payouts capped at NT$20 million; 20.4% withheld from any combination paying over NT$5,000.'],
         ['Practice account', 'NT$10,000 to start, NT$5,000 to claim every Monday. Stakes come off at the odds of the moment and pay out automatically: tennis from ESPN\'s scores; badminton and the like have no public results, so they settle when the live score shows the match decided, or by hand 3 hours after the start, and are refunded after 3 days. The simulated 100,000 play by exactly the same rules.'],
-        ['Mini games', 'History has four games that earn play money by effort, with no luck and no math: data entry (NT$3 a number), ticket sorting (NT$2 a ticket), a home run derby (a swing within about 40 ms) and free throws (stop the arrow in the green). At most NT$1,500 a day; every round shows what it came to an hour (minimum wage NT$196) and how quickly betting loses it again. None of it counts towards your betting result.'],
+        ['Mini games', 'History has four games that earn play money by effort, with no luck and no math: data entry, ticket sorting, a home run derby (a swing within about 40 ms) and free throws (stop the arrow in the green). All four pay the same: about NT$25 a minute of ordinary play (about NT$1,500 an hour), more the better you get at batting and shooting. At most NT$1,500 a day; every round shows what it came to an hour (minimum wage NT$196) and how quickly betting loses it again. None of it counts towards your betting result.'],
         ['Age and the law', 'You must be 18 to buy lottery tickets; betting on overseas sites (Polymarket included) is illegal gambling in Taiwan. This site is a teaching tool only.']
       ]],
       ['Recommendations', [

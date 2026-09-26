@@ -4245,7 +4245,7 @@ function sortView() {
       const i = Number(e.key) - 1;
       if (i >= 0 && i < bins.length) place(bins[i], buttons[i]);
     }
-  }, [el('p', { class: 'note', text: t('sortRules', { n: SORT.tickets, pay: fmtMoney(SORT.pay, { sign: false }) }) }), hud.node, slot, binRow, box]);
+  }, [el('p', { class: 'note', text: t('sortRules', { n: SORT.tickets, total: fmtMoney(sortPayout(SORT.tickets), { sign: false }) }) }), hud.node, slot, binRow, box]);
 }
 
 // 打工：輸入彩券號碼: type each ticket number exactly; each one right pays the
