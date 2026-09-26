@@ -79,3 +79,36 @@ test('ESPN live games and pregame lines', () => {
   assert.ok(Math.abs(soccer.homeWin + soccer.draw + soccer.awayWin - 1) < 1e-9);
   assert.ok(soccer.draw > 0.2);
 });
+
+test('第N分: who scores the next runs, at the lottery\'s price', async () => {
+  const { nextRunChances, nextRunOdds, halvesLeft, runOrder } = await import('../public/lib/live.mjs');
+  const { legResult } = await import('../public/lib/account.mjs');
+  assert.deepEqual(halvesLeft({ inning: 9, half: 'mid' }).map(h => h.team), ['home']);
+  assert.equal(halvesLeft({ inning: 4, half: 'mid' }).length, 11);
+  const p = snap.pregame;
+  const [, home] = devigProportional([americanToProbability(p.awayMoneyline), americanToProbability(p.homeMoneyline)]);
+  const [over] = devigProportional([americanToProbability(p.overOdds), americanToProbability(p.underOdds)]);
+  const means = pregameRuns({ homeWin: home, totalLine: p.total, overFair: over });
+  const pairs = [];
+  for (const [ahead, real] of [[1, snap.lottery.nextRun8], [2, snap.lottery.nextRun9]]) {
+    const c = nextRunChances({ means, state: snap.state, runsAhead: ahead });
+    assert.ok(Math.abs(c.away + c.home + c.none - 1) < 1e-9);
+    // Toronto bats next, so it's likelier to score the 8th run.
+    if (ahead === 1) assert.ok(c.home > c.away);
+    for (const side of ['away', 'none', 'home']) pairs.push([nextRunOdds(c[side]), real[side]]);
+  }
+  const err = pairs.reduce((s, [est, real]) => s + Math.abs(est - real) / real, 0) / pairs.length;
+  assert.ok(err < 0.08, `average error ${err} ${JSON.stringify(pairs)}`);
+  // Settling: the order runs were scored in, from the scoring plays.
+  const order = runOrder([
+    { scoringPlay: true, awayScore: 0, homeScore: 1 },
+    { scoringPlay: false },
+    { scoringPlay: true, awayScore: 2, homeScore: 1 }
+  ]);
+  assert.deepEqual(order, ['home', 'away', 'away']);
+  const final = { status: 'final', awayScore: 2, homeScore: 1, runOrder: order };
+  assert.equal(legResult({ kind: 'nextrun', line: 2, side: 'away' }, final), 'won');
+  assert.equal(legResult({ kind: 'nextrun', line: 1, side: 'away' }, final), 'lost');
+  assert.equal(legResult({ kind: 'nextrun', line: 4, side: 'none' }, final), 'won');
+  assert.equal(legResult({ kind: 'nextrun', line: 4, side: 'none' }, { status: 'final', awayScore: 2, homeScore: 1 }), null);
+});

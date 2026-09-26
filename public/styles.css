@@ -1003,3 +1003,15 @@ details.market[open] > summary { margin-bottom: 6px; }
 .leg-live .leg-result { color: var(--bad-strong); }
 .leg-waiting .leg-result { font-size: 0.8rem; }
 .saved-legs li { padding: 6px 10px; }
+
+/* History: you against the crowd */
+.crowd-hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.crowd-hero strong { font-size: 2rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent); }
+.crowd-hero span { font-size: 0.86rem; color: var(--text-secondary); }
+.crowd-bar { position: relative; height: 10px; margin: 12px 0 4px; border-radius: 5px; background: linear-gradient(90deg, var(--bad) 0%, var(--axis) 50%, var(--good) 100%); opacity: 0.85; }
+.crowd-you { position: absolute; top: -5px; width: 4px; height: 20px; margin-left: -2px; border-radius: 2px; background: var(--text-primary); box-shadow: 0 0 0 2px var(--surface); }
+.crowd-scale { display: flex; justify-content: space-between; font-size: 0.72rem; }
+.crowd-like { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 8px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-raised); font-size: 0.88rem; }
+.crowd-like-icon { font-size: 1.4rem; line-height: 1; }
+.crowd-wait { display: flex; align-items: center; gap: 10px; }
+.spinner.small { width: 18px; height: 18px; border-width: 2px; flex: none; }

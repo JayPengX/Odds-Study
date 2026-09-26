@@ -108,6 +108,11 @@ export function legResult(leg, outcome) {
       const runs = leg.team === 'away' ? away : home;
       return push(leg.side === 'over' ? runs - leg.line : leg.line - runs);
     }
+    case 'nextrun': {
+      // The game's Nth run: whose it was, or no one's if the game ended first.
+      if (!outcome.runOrder) return null;
+      return win(leg.side === (outcome.runOrder[leg.line - 1] ?? 'none'));
+    }
     case 'inning':
       if (!outcome.awayInnings?.length) return null;
       return win(topInning(outcome.awayInnings, outcome.homeInnings || []) === leg.inning);

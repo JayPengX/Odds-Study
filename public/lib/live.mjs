@@ -222,4 +222,80 @@ export function pregameRuns({ homeWin, totalLine, overFair }) {
   return fitTeamRuns(homeWin, totalLine, overFair);
 }
 
+// 第N分: which team scores the game's Nth run (N past the current total), or
+// no one (the game ends first). Half-innings are played in order, each
+// team's runs in one half-inning negative binomial with a ninth of its game
+// mean; the half being played counts only its outs still to come. Extra
+// innings and a home team not batting in the 9th are left out.
+export function halvesLeft({ inning, half, outs = 0 }) {
+  const done = Math.min(3, outs) / 3;
+  const list = [];
+  let i = inning;
+  let top = half === 'top' || half === 'end';
+  if (half === 'end') i += 1;
+  if (half === 'mid') top = false;
+  let first = half === 'top' || half === 'bottom';
+  for (; i <= 9; i++, top = true) {
+    for (const isTop of top ? [true, false] : [false]) {
+      list.push({ team: isTop ? 'away' : 'home', share: first ? 1 - done : 1 });
+      first = false;
+    }
+  }
+  return list;
+}
+
+export function nextRunChances({ means, state, runsAhead, r = TEAM_RUNS_DISPERSION }) {
+  // P(c more runs so far), c < runsAhead, before each half-inning.
+  let before = new Float64Array(runsAhead);
+  before[0] = 1;
+  const out = { away: 0, home: 0, none: 0 };
+  for (const { team, share } of halvesLeft(state)) {
+    const pmf = nbPmf((means[team] / 9) * share, (r / 9) * share, runsAhead);
+    const after = new Float64Array(runsAhead);
+    for (let c = 0; c < runsAhead; c++) {
+      if (!before[c]) continue;
+      let below = 0;
+      for (let k = 0; k < runsAhead - c; k++) {
+        after[c + k] += before[c] * pmf[k];
+        below += pmf[k];
+      }
+      out[team] += before[c] * (1 - below);
+    }
+    before = after;
+  }
+  out.none = before.reduce((s, p) => s + p, 0);
+  return out;
+}
+
+// The lottery's 第N分 markets carry a much bigger cut than its others (1.30
+// and 1.33 in implied chance on the one snapshot) and lean toward an even
+// split: it paid 10.00 for 無 (no more runs) where the model's fair price is
+// about 24. Its chances ~= the model's moved NEXT_RUN_SHRINK of the way to a
+// third each: 6 prices, about 6% off on average.
+export const NEXT_RUN_OVERROUND = 1.31;
+export const NEXT_RUN_SHRINK = 0.14;
+
+// The lottery's price for one outcome of a 第N分 market, from its model chance.
+export function nextRunOdds(fair) {
+  const priced = (1 - NEXT_RUN_SHRINK) * fair + NEXT_RUN_SHRINK / 3;
+  return Math.max(1.01, round2(1 / (priced * NEXT_RUN_OVERROUND)));
+}
+
+// Who scored each run of a game, in order, from ESPN's scoring plays (each
+// carries the score after it): ['home', 'home', 'away', …].
+export function runOrder(plays) {
+  const order = [];
+  let away = 0;
+  let home = 0;
+  for (const play of plays || []) {
+    if (!play.scoringPlay) continue;
+    const a = Number(play.awayScore);
+    const h = Number(play.homeScore);
+    if (!Number.isFinite(a) || !Number.isFinite(h)) continue;
+    for (; away < a; away++) order.push('away');
+    for (; home < h; home++) order.push('home');
+  }
+  return order;
+}
+
 export { round2 };

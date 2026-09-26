@@ -4,6 +4,7 @@
 // Polymarket doesn't send.
 import { americanToProbability, devigProportional, devigPower } from './odds.mjs';
 import { normalizeTeamName, teamZh } from './teams.mjs';
+import { runOrder } from './live.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const ESPN = 'https://site.api.espn.com/apis/site/v2/sports';
@@ -427,6 +428,7 @@ export function parseEspnResults(data, sport) {
     const status = VOID_STATUS.test(type.name || '') ? 'void' : type.completed && type.state === 'post' ? 'final' : 'pending';
     games.push({
       sport,
+      espnId: event.id,
       startUtc: new Date(event.date).toISOString(),
       away: away.team.displayName,
       home: home.team.displayName,
@@ -507,6 +509,13 @@ export async function fetchOutcomes(legs, now = new Date()) {
         const data = await page(`${ESPN}/${path}/scoreboard?dates=${date}`);
         const game = data && parseEspnResults(data, leg.sport).find(g => sameGame(g, { sport: leg.sport, away: leg.away, home: leg.home, startUtc: leg.start }));
         if (game) {
+          // 第N分 needs the order the runs came in: the game's scoring plays.
+          if (leg.kind === 'nextrun' && game.status === 'final') {
+            const summary = await page(`${ESPN}/${path}/summary?event=${game.espnId}`);
+            if (!summary) return;
+            out.set(leg.id, { ...game, runOrder: runOrder(summary.plays) });
+            return;
+          }
           out.set(leg.id, game);
           return;
         }

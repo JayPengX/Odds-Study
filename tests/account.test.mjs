@@ -219,3 +219,30 @@ test('saves are gzip-compressed and read back; old plain saves still read', asyn
   assert.deepEqual(await unpack(json), account);
   assert.equal(await unpack('gz1:!!'), null);
 });
+
+test('fun facts and the closest simulated habit', async () => {
+  const { funFacts, bettingProfile, closestHabit, crowdPercentile } = await import('../public/lib/history.mjs');
+  const { HABITS } = await import('../public/lib/odds.mjs');
+  let account = newAccount(at('2026-09-01T00:00:00Z'));
+  const leg = (id, name, chance, odds, result) => ({ id, kind: 'ml', side: 'away', sport: 'mlb', shortLabel: name, matchup: 'A @ B', odds, fairChance: chance, result: null, final: result });
+  const add = (id, t, legs) => {
+    ({ account } = placeSlip(account, { id, mode: 'parlay', sizes: [legs.length], stake: 100, cost: 100, legs }, at(t)));
+    account = applyResults(account, id, legs.map(l => l.final), at(t));
+  };
+  add('a', '2026-09-05T10:00:00Z', [leg('1', '道奇', 0.3, 3.1, 'won'), leg('2', '洋基', 0.8, 1.2, 'lost')]);
+  add('b', '2026-09-12T10:00:00Z', [leg('3', '道奇', 0.5, 1.8, 'won'), leg('4', '水手', 0.5, 1.8, 'won')]);
+  add('c', '2026-09-19T10:00:00Z', [leg('5', '道奇', 0.5, 1.8, 'lost'), leg('6', '小熊', 0.5, 1.8, 'lost')]);
+  const f = funFacts(account);
+  assert.equal(f.upset.leg.shortLabel, '道奇');
+  assert.equal(f.heartbreak.leg.shortLabel, '洋基');
+  assert.equal(f.nearMiss.count, 1);
+  assert.ok(Math.abs(f.nearMiss.missed - 372) < 1e-9);
+  assert.deepEqual([f.team.name, f.team.picks, f.team.won], ['道奇', 3, 2]);
+  assert.equal(f.weekday.day, 6); // Saturdays
+  const profile = bettingProfile(account, at('2026-09-29T00:00:00Z'));
+  assert.equal(profile.legs, 2);
+  assert.equal(profile.cost, 100);
+  // Two picks, NT$100, about once a week: most like the casual bettor.
+  assert.equal(closestHabit(profile, HABITS).key, 'casual');
+  assert.equal(crowdPercentile([-3, -1, 0, 2, 10], 1), 0.625);
+});

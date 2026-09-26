@@ -215,3 +215,136 @@ export function normalCdf(z) {
   const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
   return z >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
 }
+
+// ---- Fun facts --------------------------------------------------------------
+
+// Small stories from the slips: the biggest upset picked, the most painful
+// miss, parlays one pick short, the team picked most, the market picked
+// most, the favourite day, and how much of it was live. Each is null when
+// there's nothing to tell yet.
+export function funFacts(account) {
+  const slips = [...account.slips].sort((a, b) => a.t.localeCompare(b.t));
+  const legs = slips.flatMap(slip => slip.legs.map(leg => ({ ...leg, slip })));
+  const decided = legs.filter(l => l.result === 'won' || l.result === 'lost');
+  const facts = {};
+  const upset = decided.filter(l => l.result === 'won').sort((a, b) => chanceOf(a) - chanceOf(b))[0];
+  if (upset && chanceOf(upset) < 0.45) facts.upset = { leg: upset, chance: chanceOf(upset) };
+  const heartbreak = decided.filter(l => l.result === 'lost').sort((a, b) => chanceOf(b) - chanceOf(a))[0];
+  if (heartbreak && chanceOf(heartbreak) > 0.55) facts.heartbreak = { leg: heartbreak, chance: chanceOf(heartbreak) };
+  // Parlays lost by exactly one pick, and what they'd have paid.
+  const near = slips.filter(s => s.status === 'settled' && s.mode === 'parlay' && s.legs.filter(l => l.result === 'lost').length === 1);
+  if (near.length) facts.nearMiss = { count: near.length, missed: near.reduce((sum, s) => sum + s.stake * s.legs.reduce((p, l) => p * (l.result === 'void' ? 1 : l.odds), 1), 0) };
+  // Team picked most (win picks), with how often it came in.
+  const teams = new Map();
+  for (const l of legs.filter(l => l.kind === 'ml' && l.side !== 'draw')) {
+    const name = l.shortLabel;
+    const entry = teams.get(name) ?? { name, picks: 0, won: 0, decided: 0 };
+    entry.picks++;
+    if (l.result === 'won' || l.result === 'lost') entry.decided++;
+    if (l.result === 'won') entry.won++;
+    teams.set(name, entry);
+  }
+  const team = [...teams.values()].sort((a, b) => b.picks - a.picks)[0];
+  if (team && team.picks >= 2) facts.team = team;
+  const kinds = new Map();
+  for (const l of legs) kinds.set(l.kind, (kinds.get(l.kind) ?? 0) + 1);
+  const kind = [...kinds].sort((a, b) => b[1] - a[1])[0];
+  if (kind) facts.market = { kind: kind[0], picks: kind[1], share: kind[1] / legs.length };
+  // Busiest weekday (Taiwan time).
+  const days = new Array(7).fill(0);
+  for (const s of slips) days[new Date(Date.parse(s.t) + 8 * 3_600_000).getUTCDay()]++;
+  const busiest = days.indexOf(Math.max(...days));
+  if (slips.length >= 3) facts.weekday = { day: busiest, slips: days[busiest] };
+  const live = legs.filter(l => l.live).length;
+  if (live) facts.live = { picks: live, share: live / legs.length };
+  // Biggest ticket bought, by what all correct would pay against its cost.
+  const dream = slips.map(s => ({ slip: s, times: outlookTop(s) / s.cost })).sort((a, b) => b.times - a.times)[0];
+  if (dream && dream.times >= 5) facts.dream = dream;
+  return facts;
+}
+
+// What all correct pays for a slip, before tax, as a multiple is enough here.
+function outlookTop(slip) {
+  const n = slip.legs.length;
+  let total = 0;
+  const sizes = new Set(slip.sizes);
+  for (let pick = 1; pick < 1 << n; pick++) {
+    let size = 0;
+    let product = 1;
+    for (let i = 0; i < n; i++) if (pick & (1 << i)) (size++, (product *= slip.legs[i].odds));
+    if (sizes.has(size)) total += slip.stake * product;
+  }
+  return total;
+}
+
+// ---- Against the 100,000 ------------------------------------------------------
+
+// The share of the simulated crowd a result beats, from its final quantiles
+// (1,001 of them, lowest first).
+export function crowdPercentile(quantiles, value) {
+  if (!quantiles?.length) return null;
+  let lo = 0;
+  let hi = quantiles.length - 1;
+  if (value <= quantiles[0]) return 0;
+  if (value >= quantiles[hi]) return 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (quantiles[mid] <= value) lo = mid;
+    else hi = mid;
+  }
+  const span = quantiles[hi] - quantiles[lo] || 1;
+  return (lo + (value - quantiles[lo]) / span) / (quantiles.length - 1);
+}
+
+// How the account bets, in the simulator's terms: picks per slip, cost per
+// slip, slips per week, how often picks are favourites or underdogs, and how
+// often a losing slip is followed by a bigger one (chasing).
+export function bettingProfile(account, now = new Date()) {
+  const slips = [...account.slips].sort((a, b) => a.t.localeCompare(b.t));
+  if (!slips.length) return null;
+  const first = Date.parse(slips[0].t);
+  const weeks = Math.max(1, (now.getTime() - first) / (7 * 86_400_000));
+  const legs = slips.flatMap(s => s.legs);
+  let losses = 0;
+  let raised = 0;
+  for (let i = 1; i < slips.length; i++) {
+    const prev = slips[i - 1];
+    if (prev.status !== 'settled' || prev.payout >= prev.cost) continue;
+    losses++;
+    if (slips[i].cost >= prev.cost * 1.5) raised++;
+  }
+  return {
+    weeks,
+    legs: legs.length / slips.length,
+    cost: slips.reduce((s, x) => s + x.cost, 0) / slips.length,
+    perWeek: slips.length / weeks,
+    favourites: legs.filter(l => chanceOf(l) >= 0.55).length / legs.length,
+    underdogs: legs.filter(l => chanceOf(l) <= 0.4).length / legs.length,
+    chase: losses ? raised / losses : 0
+  };
+}
+
+// What each way of picking looks like: share of favourites and underdogs.
+const PICK_STYLE = {
+  favorite: { favourites: 1, underdogs: 0 },
+  underdog: { favourites: 0, underdogs: 1 },
+  best: { favourites: 0.4, underdogs: 0.3 },
+  any: { favourites: 0.35, underdogs: 0.3 }
+};
+
+// The simulated habit that bets most like the account.
+export function closestHabit(profile, habits) {
+  const mid = list => list.reduce((s, x) => s + x, 0) / list.length;
+  const dist = habit => {
+    const style = PICK_STYLE[habit.pick] ?? PICK_STYLE.any;
+    return (
+      Math.abs(Math.log(profile.legs / mid(habit.legs))) +
+      Math.abs(Math.log(profile.cost / mid(habit.stakes))) +
+      Math.abs(Math.log(Math.max(0.05, profile.perWeek) / habit.perWeek)) +
+      Math.abs(profile.favourites - style.favourites) +
+      Math.abs(profile.underdogs - style.underdogs) +
+      2 * Math.abs(profile.chase - (habit.chaseCap ? 1 : 0))
+    );
+  };
+  return [...habits].sort((a, b) => dist(a) - dist(b))[0];
+}

@@ -119,6 +119,7 @@ export const ODDS_ERROR = {
   // Live (場中): one lottery snapshot, 6 prices (see tests/fixtures/lottery-live-2026-09-26.json).
   live: { rel: 0.08, checked: true },
   liveSoccer: { rel: 0.1, checked: false },
+  liveNextRun: { rel: 0.07, checked: true }, // 第N分: 6 prices, one snapshot
   topInning: { rel: 0.03, checked: true }, // the lottery's own table, 8 games
   epl: { rel: 0.1, checked: false }, // soccer never checked
   f1: { rel: 0.1, checked: true }, // 8 prices, race eve

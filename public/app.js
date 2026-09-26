@@ -51,7 +51,7 @@ import {
   slipSizes,
 } from './lib/odds.mjs';
 import { loadOdds, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
-import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
+import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, nextRunChances, nextRunOdds, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
   WEEKLY_GRANT,
@@ -70,7 +70,7 @@ import {
 } from './lib/account.mjs';
 import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
 import { pack, unpack } from './lib/codec.mjs';
-import { historyStats, outlookOf, chanceOf } from './lib/history.mjs';
+import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile, bettingProfile, closestHabit } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh } from './lib/teams.mjs';
 
@@ -1018,10 +1018,11 @@ function marketPanel(game, section, bets, editing) {
       })
       .filter(Boolean);
   } else {
-    body = [
-      el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: t(section.title) }), el('span', { class: 'detail-only market-take' }, takePill(bets))]),
-      el('div', { class: 'market-picks' }, bets.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)))
-    ];
+    // One block per market (最高單局 has one; 第N分 one per run).
+    body = [...groupBy(bets, b => b.market).values()].flatMap(list => [
+      el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: list[0].marketLabel ?? t(section.title) }), el('span', { class: 'detail-only market-take' }, takePill(list))]),
+      el('div', { class: 'market-picks' }, list.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)))
+    ]);
   }
   const extra = bets.some(b => b.posted === false);
   return el('div', { class: `market-panel ${section.kind}` }, [...body, extra ? el('p', { class: 'note', text: t('linesNote') }) : null]);
@@ -1050,7 +1051,8 @@ const SECTIONS = [
   { kind: 'total', title: 'secTotal' },
   { kind: 'runline', title: 'secRunLine' },
   { kind: 'teamtotal', title: 'secTeamTotal' },
-  { kind: 'inning', title: 'secTopInning', short: 'topInningShort' }
+  { kind: 'inning', title: 'secTopInning', short: 'topInningShort' },
+  { kind: 'nextrun', title: 'secNextRun' }
 ];
 
 function takePill(bets) {
@@ -1167,6 +1169,7 @@ function onUserOdds(bet, raw) {
 // "4局下 1出局", "中場", "67'".
 function liveStateText(live) {
   const t = state.t;
+  if (live.delayed) return `${live.detail} · ${t('livePaused')}`;
   if (live.sport !== 'mlb') return live.minute >= 45 && /half/i.test(live.detail) ? t('liveHalfTime') : `${live.minute}'`;
   const text = t(`liveHalf_${live.half}`, { n: live.inning });
   return live.half === 'top' || live.half === 'bottom' ? `${text} ${t('liveOuts', { n: live.outs })}` : text;
@@ -1191,6 +1194,7 @@ function buildLiveBets(data) {
     }
     const game = {
       id: `live|${g.sport}|${g.espnId}`,
+      espnId: g.espnId,
       sport: g.sport,
       startUtc: g.startUtc,
       away: { en: g.away, zh: teamZh(g.sport, g.away) },
@@ -1198,6 +1202,8 @@ function buildLiveBets(data) {
       live: { ...g, pmWin: g.pm?.awayWin ?? null }
     };
     games.push(game);
+    // Rain delay or suspended: no live odds until play resumes.
+    if (g.delayed) continue;
     const matchup = matchupText(game);
     const base = { gameId: game.id, game, sport: g.sport, matchup, start: g.startUtc, live: true, fairMargin: null, errKey: g.sport === 'mlb' ? 'live' : 'liveSoccer' };
     for (const m of liveMarkets(dist, { sport: g.sport, awayScore: g.awayScore, homeScore: g.homeScore, pm: g.pm })) {
@@ -1215,6 +1221,19 @@ function buildLiveBets(data) {
         bets.push({ ...common, id: `${game.id}|tt|${m.team}|${m.line}|${m.side}`, team: m.team, teamLine: m.line, chip: t(m.side), label: text, shortLabel: text });
       }
     }
+    // 第N分: the next two runs of the game.
+    if (g.sport === 'mlb') {
+      const means = pregameRuns({ homeWin: pre.homeWin, totalLine: pre.totalLine, overFair: pre.overFair });
+      for (const ahead of [1, 2]) {
+        const n = g.awayScore + g.homeScore + ahead;
+        const chances = nextRunChances({ means, state: g, runsAhead: ahead });
+        for (const side of ['away', 'none', 'home']) {
+          const name = side === 'none' ? t('nextRunNone') : teamName(game[side]);
+          const label = `${t('nextRunN', { n })} ${name}`;
+          bets.push({ ...base, id: `${game.id}|nr|${n}|${side}`, kind: 'nextrun', side, runN: n, market: `nr|${n}`, marketLabel: t('nextRunN', { n }), posted: true, fairChance: chances[side], estOdds: nextRunOdds(chances[side]), errKey: 'liveNextRun', chip: name, label: `${matchup} ${label}`, shortLabel: label });
+        }
+      }
+    }
   }
   return { games, bets };
 }
@@ -1226,7 +1245,7 @@ function renderLive() {
   if (!games.length) return;
   const byGame = groupBy(state.liveBets, b => b.gameId);
   $('live-updated').textContent = state.liveAt ? t('liveUpdated', { time: formatter('hms', locale => new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Taipei' })).format(new Date(state.liveAt)) }) : '';
-  $('live-list').replaceChildren(...games.filter(g => byGame.get(g.id)).map(g => gameCard(g, byGame.get(g.id))));
+  $('live-list').replaceChildren(...games.map(g => gameCard(g, byGame.get(g.id) ?? [])));
 }
 
 // Live games refresh every 30 seconds while the games tab is on screen.
@@ -1844,7 +1863,7 @@ function renderParlay() {
 
 // The market a pick is from, as a small tag: 不讓分, 大小分, 讓分 …
 function marketTag(kind) {
-  const key = { ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'topInningShort', f1: 'f1Short', future: 'futuresTitle' }[kind];
+  const key = { ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'topInningShort', nextrun: 'secNextRun', f1: 'f1Short', future: 'futuresTitle' }[kind];
   return key ? el('span', { class: `market-tag tag-${kind}`, text: state.t(key) }) : null;
 }
 
@@ -2048,7 +2067,7 @@ function legRecord(bet) {
     odds: effectiveOdds(bet),
     fairChance: bet.fairChance,
     side: bet.side ?? null,
-    line: bet.totalLine ?? bet.runLine ?? bet.teamLine ?? null,
+    line: bet.totalLine ?? bet.runLine ?? bet.teamLine ?? bet.runN ?? null,
     team: bet.kind === 'future' ? bet.teamEn : bet.team ?? null,
     inning: bet.inning ?? null,
     away: bet.game?.away.en ?? null,
@@ -2355,6 +2374,7 @@ function applyHistoryView() {
         onclick: () => {
           state.historyView = key;
           applyHistoryView();
+          renderStats();
         }
       })
     )
@@ -2560,8 +2580,80 @@ function weeksCard(s) {
   ]);
 }
 
+// Fun facts from the slips.
+function funCard() {
+  const t = state.t;
+  const f = funFacts(state.account);
+  const s = historyStats(state.account);
+  const items = [];
+  const leg = l => `${l.shortLabel}（${l.matchup}）`;
+  if (f.upset) items.push(t('funUpset', { pick: leg(f.upset.leg), p: fmtPctShort(f.upset.chance), odds: fmtOdds(f.upset.leg.odds) }));
+  if (f.heartbreak) items.push(t('funHeartbreak', { pick: leg(f.heartbreak.leg), p: fmtPctShort(f.heartbreak.chance) }));
+  if (f.nearMiss) items.push(t('funNearMiss', { n: f.nearMiss.count, v: fmtMoney(f.nearMiss.missed, { sign: false }) }));
+  if (f.team) items.push(t('funTeam', { team: f.team.name, n: f.team.picks, won: f.team.won, decided: f.team.decided }));
+  if (f.market) items.push(t('funMarket', { market: marketTag(f.market.kind)?.textContent ?? f.market.kind, share: fmtPctShort(f.market.share) }));
+  if (f.weekday) items.push(t('funWeekday', { day: formatter('weekdayLong', locale => new Intl.DateTimeFormat(locale, { weekday: 'long', timeZone: 'UTC' })).format(new Date(Date.UTC(2026, 0, 4 + f.weekday.day))), n: f.weekday.slips }));
+  if (f.live) items.push(t('funLive', { n: f.live.picks, share: fmtPctShort(f.live.share) }));
+  if (f.dream) items.push(t('funDream', { x: fmtInt(Math.round(f.dream.times)), cost: fmtMoney(f.dream.slip.cost, { sign: false }) }));
+  if (s.settled && s.expectedLoss >= BOBA_PRICE) items.push(t('funBoba', { v: fmtMoney(s.expectedLoss, { sign: false }), cups: fmtInt(Math.round(s.expectedLoss / BOBA_PRICE)) }));
+  if (!items.length) return null;
+  return el('div', { class: 'card' }, [el('h3', { class: 'card-title', text: t('funTitle') }), el('ul', { class: 'facts' }, items.map(text => el('li', { text })))]);
+}
+
+// The account against the simulated crowd, over the same length of time.
+// The crowd is simulated only here or on the simulator tab, never at start-up.
+function crowdCard(s) {
+  const t = state.t;
+  const profile = bettingProfile(state.account);
+  if (!profile || !state.data) return null;
+  const months = PERIOD_MONTHS.find(m => m >= Math.min(60, Math.ceil((profile.weeks * 12) / 52))) ?? 60;
+  const weeks = monthWeeks(months);
+  const sportBets = simSportBets();
+  const crowd = crowdCache.get(crowdKey(sportBets, weeks));
+  const title = el('h3', { class: 'card-title', text: t('crowdTitle', { n: fmtCount(SIM_PLAYERS_SHOWN), period: periodName(weeks) }) });
+  if (!crowd) {
+    crowdStats(sportBets, weeks, { quiet: true }).then(
+      () => state.tab === 'history' && state.historyView === 'stats' && renderStats(),
+      () => {}
+    );
+    return el('div', { class: 'card' }, [title, el('p', { class: 'muted crowd-wait' }, [el('span', { class: 'spinner small', 'aria-hidden': 'true' }), document.createTextNode(t('crowdRunning', { n: fmtCount(SIM_PLAYERS_SHOWN) }))])]);
+  }
+  const mine = s.net;
+  const beat = crowdPercentile(crowd.finalQuantiles, mine);
+  const crowdBack = crowd.totals.staked ? ((crowd.totals.staked + crowd.totals.net) / crowd.totals.staked) * 100 : null;
+  const habit = closestHabit(profile, HABITS);
+  const summary = crowd.summaries.find(x => x.habit.key === habit.key);
+  const perPerson = { tickets: crowd.totals.tickets / crowd.players, staked: crowd.totals.staked / crowd.players };
+  const rows = [
+    [t('crowdColNet'), fmtMoney(mine), fmtMoney(quantile(crowd.finalQuantiles, 0.5))],
+    [t('crowdColBack'), s.settled ? fmtBack(s.back) : '–', fmtBack(crowdBack)],
+    [t('crowdColSlips'), fmtInt(s.placed), fmtCount(perPerson.tickets)],
+    [t('crowdColStaked'), fmtMoney(state.account.slips.reduce((x, y) => x + y.cost, 0), { sign: false }), fmtMoney(perPerson.staked, { sign: false })],
+    [t('crowdColLegs'), profile.legs.toFixed(1), '–']
+  ];
+  return el('div', { class: 'card crowd-card' }, [
+    title,
+    el('div', { class: 'crowd-hero' }, [
+      el('strong', { text: fmtPctShort(beat) }),
+      el('span', { text: t('crowdBeat', { n: fmtCount(SIM_PLAYERS_SHOWN), period: periodName(weeks) }) })
+    ]),
+    el('div', { class: 'crowd-bar', role: 'img', 'aria-label': t('crowdBeat', { n: fmtCount(SIM_PLAYERS_SHOWN), period: periodName(weeks) }) }, [el('span', { class: 'crowd-you', style: `left:${(beat * 100).toFixed(1)}%` })]),
+    el('p', { class: 'crowd-scale muted' }, [el('span', { text: t('crowdWorst') }), el('span', { text: t('crowdBest') })]),
+    table([t('crowdColWhat'), t('crowdColYou'), t('crowdColCrowd')], rows),
+    el('p', { class: 'crowd-like' }, [
+      el('span', { class: 'crowd-like-icon', 'aria-hidden': 'true', text: HABIT_ICON[habit.key] }),
+      el('span', { text: t('crowdLike', { habit: t(`habit_${habit.key}`), ahead: summary ? fmtPctShort(summary.aheadShare) : '–', back: summary ? fmtBack(summary.back) : '–', period: periodName(weeks) }) })
+    ]),
+    el('ul', { class: 'facts' }, [
+      el('li', { text: t('crowdAhead', { share: fmtPctShort(crowd.totals.aheadShare), period: periodName(weeks) }) }),
+      el('li', { text: t('crowdNote', { weeks: fmtCount(Math.max(1, Math.round(profile.weeks))) }) })
+    ])
+  ]);
+}
+
 function renderStats() {
-  if (!state.accountReady) return;
+  // Drawn only when on screen: it can start the crowd simulation.
+  if (!state.accountReady || state.tab !== 'history' || state.historyView !== 'stats') return;
   const t = state.t;
   const s = historyStats(state.account);
   $('stats').hidden = s.placed === 0;
@@ -2577,6 +2669,7 @@ function renderStats() {
   ]);
   const cards = [el('div', { class: 'card' }, [kpis, el('p', { class: 'note', text: t('kpiNote') })])];
   if (s.timeline.length > 1) cards.push(balanceChart(s.timeline));
+  cards.push(crowdCard(s), funCard());
   if (s.settled) cards.push(el('div', { class: 'two-col' }, [luckCard(s), recordsCard(s)]), picksCard(s), breakdownCard(s), weeksCard(s));
   else cards.push(el('p', { class: 'muted', text: t('statsWait') }));
   $('stats-body').replaceChildren(...cards.filter(Boolean));
@@ -2667,7 +2760,8 @@ function hideLoading() {
 
 // Runs (or reuses) the simulation for this pool and period. A new request
 // cancels a running one, so no power goes to a result nobody will see.
-function crowdStats(sportBets, weeks) {
+// `quiet`: run without the loading screen (the history tab's comparison).
+function crowdStats(sportBets, weeks, { quiet = false } = {}) {
   const key = crowdKey(sportBets, weeks);
   const startWeek = weekOfYear(new Date());
   if (crowdCache.has(key)) return Promise.resolve(crowdCache.get(key));
@@ -2679,7 +2773,7 @@ function crowdStats(sportBets, weeks) {
   }
   const label = () => state.t('loadingSim', { n: fmtCount(SIM_PLAYERS_SHOWN), period: periodName(weeks) });
   // At start-up the simulation is the second stage of one bar.
-  const report = p => (state.booting ? showLoading(label(), BOOT_ODDS_SHARE + (1 - BOOT_ODDS_SHARE) * p) : showLoading(label(), p, 'sim'));
+  const report = quiet ? () => {} : p => (state.booting ? showLoading(label(), BOOT_ODDS_SHARE + (1 - BOOT_ODDS_SHARE) * p) : showLoading(label(), p, 'sim'));
   report(0);
   let resolve;
   let reject;
@@ -2689,7 +2783,7 @@ function crowdStats(sportBets, weeks) {
   const done = results => {
     for (const [w, stats] of Object.entries(results)) crowdCache.set(crowdKey(sportBets, Number(w)), stats);
     crowdJob = null;
-    hideLoading();
+    if (!quiet) hideLoading();
     resolve(results[weeks]);
   };
   try {
@@ -2723,16 +2817,9 @@ function renderSim() {
   const weeks = Number($('sim-weeks').value);
   const key = crowdKey(sportBets, weeks);
   const cached = crowdCache.get(key);
-  // Drawn only when the tab shows (opening it draws it): the simulator is a
-  // big page, and redrawing it hidden made every tap elsewhere slow. At
-  // start-up the default run still happens in the background.
-  if (state.tab !== 'sim') {
-    if (cached || !state.booting) return Promise.resolve();
-    return crowdStats(sportBets, weeks).then(
-      () => {},
-      () => {}
-    );
-  }
+  // Run and drawn only when the tab shows (opening it does both): the
+  // simulation takes seconds and the page is big, so nothing happens hidden.
+  if (state.tab !== 'sim') return Promise.resolve();
   // Already showing exactly this (same run, width and language): nothing to do.
   const drawn = `${key}|${window.innerWidth}|${state.locale}`;
   if (cached) {
@@ -3575,15 +3662,17 @@ const BOOT_LIMIT_MS = 45_000;
 async function load() {
   renderStatus('loading');
   const booting = state.booting;
-  const onProgress = booting ? p => showLoading(state.t('loading'), BOOT_ODDS_SHARE * p) : undefined;
+  // The simulation runs at start-up only when the page opens on its tab.
+  const oddsShare = state.tab === 'sim' ? BOOT_ODDS_SHARE : 1;
+  const onProgress = booting ? p => showLoading(state.t('loading'), oddsShare * p) : undefined;
   if (booting) onProgress(0);
   const limit = booting ? setTimeout(() => ((state.booting = false), hideLoading()), BOOT_LIMIT_MS) : null;
   $('refresh').disabled = true;
   try {
     state.data = await loadOdds(new Date(), onProgress);
     renderAll();
-    // The page opens once the default simulation is ready too.
-    if (state.booting) await renderSim();
+    // Opened on the simulator: the page opens once its simulation is ready.
+    if (state.booting && state.tab === 'sim') await renderSim();
   } catch (error) {
     console.error(error);
     renderStatus('error');
@@ -3694,7 +3783,10 @@ function showTab(tab) {
   window.scrollTo({ top: 0 });
   // The chart sizes itself to its container, which is hidden until now.
   if (tab === 'sim' && state.data) renderSim();
-  if (tab === 'history') checkResults();
+  if (tab === 'history') {
+    checkResults();
+    renderStats();
+  }
 }
 
 for (const button of document.querySelectorAll('#tabs .tab')) button.addEventListener('click', () => showTab(button.dataset.tab));
