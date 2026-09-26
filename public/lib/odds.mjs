@@ -946,6 +946,48 @@ const RECORDS = {
 };
 const RECORD_START = Object.fromEntries(Object.entries(RECORDS).map(([key, [start]]) => [key, start]));
 
+// Leaderboards: the crowd's top 10 on each record (break-even excluded), and
+// the condition a player needs to be on one at all.
+export const LEADER_SIZE = 10;
+export const LEADERBOARDS = {
+  best: s => s.final > 0 && s.final,
+  biggestWin: s => s.biggestWin > 0 && s.biggestWin,
+  longshot: s => s.longshotOdds > 1 && s.longshotOdds,
+  hotStreak: s => s.longestWinning > 1 && s.longestWinning,
+  mostTickets: s => s.tickets > 0 && s.tickets,
+  taxman: s => s.taxPaid > 0 && s.taxPaid,
+  worst: s => s.final < 0 && s.final,
+  fall: s => s.final < 0 && s.peak > 0 && s.peak,
+  worstWeek: s => s.worstWeek < 0 && s.worstWeek,
+  drought: s => s.longestLosing > 0 && s.longestLosing
+};
+
+// Where the crowd's winnings (everyone's result above zero) went: the share
+// the top winners took. `finals` is sorted from lowest to highest.
+export function surplusOf(finals) {
+  let total = 0;
+  let winners = 0;
+  for (let i = finals.length - 1; i >= 0 && finals[i] > 0; i--) (total += finals[i], winners++);
+  const topShare = k => {
+    let sum = 0;
+    for (let i = finals.length - 1; i >= finals.length - Math.min(k, winners); i--) sum += finals[i];
+    return total > 0 ? sum / total : 0;
+  };
+  // How few of the biggest winners hold half of it.
+  let half = 0;
+  for (let i = finals.length - 1, sum = 0; i >= 0 && total > 0 && sum < total / 2; i--) (sum += finals[i], half++);
+  const players = finals.length;
+  return {
+    total,
+    winners,
+    top1: topShare(1),
+    top10: topShare(10),
+    topTenth: topShare(Math.round(players / 1000)),
+    topPct: topShare(Math.round(players / 100)),
+    half
+  };
+}
+
 // Who tells each story. The riskiest habits would hold nearly every record,
 // so apart from the crowd's biggest winner and loser (always the real ones,
 // taken first), each record goes to the best habit that hasn't had a story
@@ -1173,6 +1215,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         traitSums: [...TRAITS, null].map(emptySum),
         // Each record per habit: [player index, value].
         records: Object.fromEntries(Object.entries(RECORD_START).map(([key, start]) => [key, HABITS.map(() => [-1, start])])),
+        leaders: Object.fromEntries(Object.keys(LEADERBOARDS).map(key => [key, []])),
         crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0, short: 0, broke: 0, winners: 0, winnersPaid: 0, winnersLost: 0, winnersStaked: 0 }
       }
     ])
@@ -1243,6 +1286,20 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     // Closest to breaking even, among people who really played.
     if (story.tickets >= 10) beat('closest', Math.abs(story.final), false);
     beat('taxman', story.taxPaid);
+    // Top 10s for the leaderboards: higher is better, except for results
+    // below zero, where the lowest leads.
+    for (const key in LEADERBOARDS) {
+      const value = LEADERBOARDS[key](story);
+      if (value === false) continue;
+      const list = tally.leaders[key];
+      const low = value < 0;
+      const ahead = x => (low ? value < x.value : value > x.value);
+      if (list.length === LEADER_SIZE && !ahead(list[LEADER_SIZE - 1])) continue;
+      let at = list.findIndex(ahead);
+      if (at < 0) at = list.length;
+      list.splice(at, 0, { index, value, final: story.final, traits: story.traits, g });
+      if (list.length > LEADER_SIZE) list.pop();
+    }
   };
   for (let g = 0; g < groups.length; g++) {
     const group = groups[g];
@@ -1329,7 +1386,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
   ];
   const results = {};
   for (const [m, tally] of tallies) {
-    const { finals, sums, records, crowd } = tally;
+    const { finals, sums, records, crowd, leaders } = tally;
     const summaries = HABITS.map(habit => ({ habit, ...summarize(sums.filter((_, g) => groups[g].habit === habit)) }));
     const fanSummaries = sportPools ? FANS.map(fan => ({ fan, ...summarize(sums.filter((_, g) => groups[g].fan === fan)) })) : [];
     // Traits: each one's players (and people with none), share of the crowd.
@@ -1394,6 +1451,9 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
       },
       // Notable players, replayed in full, and crowd-wide numbers for the fun facts.
       notable: pickNotable(records, replayIndex),
+      // Top 10 on each record, by serial number.
+      leaders: Object.fromEntries(Object.entries(leaders).map(([key, list]) => [key, list.map(x => ({ serial: x.index + 1, value: x.value, final: x.final, traits: x.traits, habit: groups[x.g].habit.key, fan: groups[x.g].fan?.key ?? null }))])),
+      surplus: surplusOf(sorted),
       // Everyone's final result at every 0.1%, to place any one player in the crowd.
       finalQuantiles: Array.from({ length: 1001 }, (_, i) => finalAt(i / 1000)),
       crowd: {

@@ -8,17 +8,11 @@ An educational app about the math of the Taiwan Sports Lottery (台灣運彩): w
 
 ## The app
 
-Five tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, 詳細, refresh) sit in a slim row at the top. Big numbers never wrap: they shrink (to 60% at most) to fit on one line. On desktop the tabs are in the top bar.
+Five tabs. On phones they sit in a bottom bar and there's no app header; its controls (status, refresh) sit in a slim row at the top. Big numbers never wrap: they shrink (to 60% at most) to fit on one line. On desktop the tabs are in the top bar.
 
 Logos come from ESPN, with dark-background versions in dark mode: the leagues on the filters, cards and boards, and the teams on the games.
 
-The **詳細 (Details)** switch in the top bar starts off. Off, the page shows the odds and the average back per NT$100. On, it adds:
-
-- the ± margins of error;
-- fair chances and house takes;
-- the extra stats and notes.
-
-The choice is remembered.
+The page stays simple: odds, colours and the amounts that matter. What the numbers mean (fair chance, back per NT$100, house take, margins of error) is explained in 說明's first card, 怎麼看這些數字; hovering a pick shows its own figures.
 
 ### 賽事 Games
 
@@ -32,7 +26,8 @@ The choice is remembered.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
 - **Picks:** tap one to add it to the bet slip. It shows:
   - the estimated lottery odds, tinted green or red when a bet is unusually good or bad;
-  - with 詳細 on: the odds' ± error, the fair chance and the average back per NT$100 (usually just 100 minus the take).
+  - the lottery's own price tagged 官方 when it's known;
+  - its fair chance and average back per NT$100 in its tooltip.
 - **更多玩法 (more markets)** opens the other markets:
   - 大小分 (totals): the lottery's 3 lines, plus up to 3 more either side of the main line (Premier League: DraftKings' line and 3 either side);
   - 讓分 (run lines): the lottery's ±1.5 and ±2.5, plus 1.5 to 4.5 runs given by either team;
@@ -56,7 +51,7 @@ The choice is remembered.
 
   The lottery's own lines are tagged 主盤 (the main line) or 運彩盤; the rest are the wider range. The last tab chosen is kept while the card stays open.
 
-  With 詳細 on, each market shows its own house take.
+
 - **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.
 - **場中 (live):** games in progress (MLB and the Premier League) at the top, refreshed every 30 seconds while the tab is on screen (and while the slip holds a live pick). Each card shows a red 場中 tag, the inning and outs (or the minute) and the score, with the same market tabs as before the game:
   - the winner, and for MLB the total, the run line and each team's total: the line closest to 50/50 (tagged, as the lottery posts it) with lines either side;
@@ -93,7 +88,7 @@ The choice is remembered.
   - **Every result:** the chance of k of n correct, what it pays, and which results make a profit.
   - **Each pick on its own:** the odds against the fair odds, its value per NT$100, and what the ticket returns without it. The costliest pick is flagged.
   - **One pick short:** the chance of missing by exactly one pick, how many times likelier that is than winning outright, and for each pick the chance it's the only one that lost. The pick most likely to let the ticket down is flagged.
-- **Grade:** a letter from the average back per NT$100 (a single game at the usual cut gets an A), a type from the chance of profit (steady to lottery ticket), the average loss per ticket in bubble teas, and how many tickets it takes on average to get paid once. With 詳細 on: what all-correct would pay at fair odds, and how much less the lottery pays.
+- **Grade:** a letter from the average back per NT$100 (a single game at the usual cut gets an A), a type from the chance of profit (steady to lottery ticket), the average loss per ticket in bubble teas, and how many tickets it takes on average to get paid once.
 - **How hard is it to win?** The ticket's chances of all correct and of any profit, placed among well-known odds: a coin, a die, a stranger's birthday, 10 heads in a row, a royal flush, the Lotto 6/49 and Power Lottery jackpots.
 - **Try a draw:** opens the ticket with each pick drawn from its fair chance. One ticket at a time, the picks revealed one by one; the button reads 開始 (Start), then 再開一張 (Restart) once a ticket is done. A running tally shows tickets opened, how many paid, the result so far with a small chart, the biggest ticket, and what the odds say that many tickets average.
 
@@ -152,7 +147,6 @@ The choice is remembered.
     - Parlay dreamer: "so close!", the ticket after missing by one game is doubled.
     - Chaser: losing a week at the NT$3,000 cap, quits for a month, then starts over from NT$200.
     - Careful: a stop-loss, six weeks off after losing NT$1,000 or more in a week.
-  - A player's card shows the weeks they took off (with 詳細 on).
 - **What it shows:**
   - how many in 10 are still ahead, as a pictogram;
   - the crowd's range over time;
@@ -166,7 +160,9 @@ The choice is remembered.
     - the longest winning and losing streaks;
     - the longest shot that came in and the worst single week;
     - the most tickets, the closest to break-even and the most tax paid;
-  - the brutal truths and surprising facts (all shown, 詳細 or not), each one plain sentence with its numbers highlighted, then the explanation:
+  - **Who holds the winnings:** everything the people still ahead are up, together, and a bar of who holds it (No. 1, No. 2–10, 11–100, 101–1,000, the other winners), the biggest winner's share, and how few of the winners hold half of it. It's a reminder that most "winners" are only a little ahead and the money sits with the very few who hit a big one.
+  - **Leaderboards:** the top 10 on each record (up most, biggest ticket, longest shot, win streak, most tickets, most tax, down most, roller coaster, worst week, drought), one board at a time, each person with their kind of fan, habit and trait icons; the up-most board shows each one's share of all the winnings. Tap a number to look that player up. The top 10s are kept while the crowd plays (`LEADERBOARDS` in `public/lib/odds.mjs`), so they cost no extra pass.
+  - the brutal truths and surprising facts, each one plain sentence with its numbers highlighted, then the explanation:
     - how much others lose for every NT$1 won;
     - the top-1% line and who never won once;
     - how often a first-ticket winner still loses;
@@ -176,7 +172,7 @@ The choice is remembered.
   - the typical result, the average back, the tickets bought and the total bet (averages);
   - the group's range from its biggest loser to its biggest winner;
   - the typical loss in bubble teas.
-- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart, their story, "贏過 N%" beside their number (the share of the crowd they finished ahead of), and their highest and lowest running total (and the week of each). The numbers in the stories are clickable too.
+- **Look up any player:** type a number from 1 to 100,020 (a birthday, a lucky number) or draw one at random. That person's season is replayed exactly on the device, with a small chart, their story, "贏過 N%" beside their number (the share of the crowd they finished ahead of) and, for a winner, their share of all the winnings, and their highest and lowest running total (and the week of each). The numbers in the stories are clickable too.
 - **One shared world:** each week every game and F1 race has a single real result that everyone who bet on it shares. This is a hash of (seed, week, market, which real game), so it takes no storage and any player can still be replayed alone.
   - Sports keep their real number of distinct games per week.
   - With 24 races a year, F1 long shots come in only as rarely as they should.
@@ -190,6 +186,7 @@ The choice is remembered.
 
 Folding cards explain:
 
+- reading the numbers (odds, colours, back per NT$100, fair chance, house take, margins of error, the slip's figures, the simulation's sampling error);
 - the odds math;
 - every habit and kind of fan;
 - every kind of bet;

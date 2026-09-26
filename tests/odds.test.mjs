@@ -638,3 +638,31 @@ test('personality traits: people are combinations, and traits change what they d
     assert.equal(again.final, who.final);
   }
 });
+
+test('who holds the winnings, and the top-10 leaderboards', async () => {
+  const { simulateCrowdStats, surplusOf, habitPools, sportTemplate, SPORTS, LEADERBOARDS, LEADER_SIZE } = await import('../public/lib/odds.mjs');
+  // Sorted results: -5, -1, 0, 2, 3, 15 → winners 2, 3, 15 = 20; the top one holds 75%.
+  const s = surplusOf(Float64Array.from([-5, -1, 0, 2, 3, 15]));
+  assert.equal(s.total, 20);
+  assert.equal(s.winners, 3);
+  assert.equal(s.top1, 0.75);
+  assert.equal(s.top10, 1);
+  assert.equal(s.half, 1);
+  assert.deepEqual(surplusOf(Float64Array.from([-3, -1])), { total: 0, winners: 0, top1: 0, top10: 0, topTenth: 0, topPct: 0, half: 0 });
+
+  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
+  const stats = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed: 3 });
+  assert.ok(stats.surplus.total > 0);
+  assert.ok(stats.surplus.top1 > 0 && stats.surplus.top1 <= stats.surplus.top10 && stats.surplus.top10 <= stats.surplus.topPct && stats.surplus.topPct <= 1);
+  assert.deepEqual(Object.keys(stats.leaders), Object.keys(LEADERBOARDS));
+  for (const [key, list] of Object.entries(stats.leaders)) {
+    assert.ok(list.length <= LEADER_SIZE, key);
+    // In order: the lowest first for results below zero, the highest otherwise.
+    for (let i = 1; i < list.length; i++) assert.ok(list[i].value < 0 ? list[i - 1].value <= list[i].value : list[i - 1].value >= list[i].value, key);
+  }
+  // The biggest winner tops the board, and matches the crowd's record and results.
+  const top = stats.leaders.best[0];
+  assert.equal(top.serial, stats.notable.best.serial);
+  assert.equal(top.value, stats.finalQuantiles.at(-1));
+  assert.ok(Math.abs(top.value / stats.surplus.total - stats.surplus.top1) < 1e-9);
+});
