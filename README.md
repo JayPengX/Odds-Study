@@ -97,7 +97,14 @@ The choice is remembered.
 
   Each pick is marked won, lost or void. Once all are decided the slip pays like a real ticket: a postponed or cancelled game counts at odds 1.00, every combination over NT$5,000 is taxed 20.4%, NT$20 million at most. A game still without a result three days after its start counts as void.
 - **The card** shows the balance, the money on open slips, the total won or lost, and each slip with its picks (✓ ✗ ↺ ⏳, each with its market tag and odds) and a row of large figures: cost, total odds (全部過關), and what all correct pays or, once settled, the payout and profit.
-- **Slip history:** filters for all, open, won and lost slips (10 shown, the rest behind a button). Each slip folds out what the odds said when it was bought: its average payout, the chance of any payout, each pick's fair chance and value per NT$100, and once settled, its result against that average (luck) and the tax withheld.
+- **Two views** under the account card: 投注單 (slips) and 統計分析 (stats).
+- **Slip history:** a summary row (open slips, money at stake, the most they can pay, the settled result), filters for all, open, won and lost, and the slips in groups, each with its count, cost and result (or the most it can pay):
+  - 比賽進行中: at least one game on now;
+  - 等待開賽: no game started yet;
+  - 已確定沒中: open, but nothing left can pay (a parlay with a lost pick) while its other games finish;
+  - settled slips by the day they settled (今天, 昨天, then dates); 10 shown, the rest behind a button.
+
+  Each card shows the mode, the number of games and when it was bought; a bar with one segment per pick (green won, red lost, grey void, pulsing red in play, empty not started); how many games are over and when the next one starts; each pick with its state (✓ ✗ ↺ ● ⏳), market tag and odds; and large figures: cost, total odds (parlays), what is already locked in and the most it can still pay, or once settled the payout and profit. Each slip folds out what the odds said when it was bought: its average payout, the chance of any payout, each pick's fair chance and value per NT$100, and once settled, its result against that average (luck) and the tax withheld.
 - **統計與分析 (stats and analysis)**, from `public/lib/history.mjs`:
   - key numbers: slips settled, staked, paid after tax, net, back per NT$100 and the share of slips that paid, each against what the odds said to expect;
   - the balance over time, a step line with payouts and weekly claims marked;

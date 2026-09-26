@@ -136,7 +136,9 @@ const state = {
   checking: false,
   checkedAt: 0,
   showAllSaved: false,
-  historyFilter: 'all'
+  historyFilter: 'all',
+  // 紀錄 shows the slips or the stats.
+  historyView: 'slips'
 };
 state.t = makeT(state.locale);
 
@@ -2201,36 +2203,79 @@ function renderAccount() {
 
 const RESULT_ICON = { won: '✓', lost: '✗', void: '↺' };
 
+// Where each pick stands: won / lost / void, 'live' (its game is on), or
+// 'waiting' (not started).
+function legState(leg, now = Date.now()) {
+  if (leg.result) return leg.result;
+  return leg.start && Date.parse(leg.start) <= now ? 'live' : 'waiting';
+}
+
+// What an open slip has locked in (every undecided pick lost) and the most it
+// can still pay (every undecided pick won).
+function slipRange(slip) {
+  const as = result => slip.legs.map(leg => ({ odds: leg.odds, result: leg.result ?? result }));
+  return {
+    locked: settleSlip({ legs: as('lost'), sizes: slip.sizes, stake: slip.stake }).net,
+    most: settleSlip({ legs: as('won'), sizes: slip.sizes, stake: slip.stake }).net
+  };
+}
+
+const LEG_ICON = { won: '✓', lost: '✗', void: '↺', live: '●', waiting: '⏳' };
+
 function savedSlipCard(slip) {
   const t = state.t;
   const n = slip.legs.length;
+  const now = Date.now();
   const settled = slip.status === 'settled';
-  const top = slipPayoutTable({ legs: slip.legs, sizes: slip.sizes, stake: slip.stake }).net[(1 << n) - 1];
+  const states = slip.legs.map(leg => legState(leg, now));
+  const decided = states.filter(st => ['won', 'lost', 'void'].includes(st)).length;
   const profit = settled ? slip.payout - slip.cost : null;
+  const range = settled ? null : slipRange(slip);
+  // Open, but nothing left can pay: a parlay with a lost pick.
+  const dead = !settled && range.most <= 0;
   const mode = slip.mode === 'system' ? slip.sizes.map(k => sizeName(k, n)).join('、') : t(`slipMode_${slip.mode}`);
   const pill = settled
     ? el('span', { class: `slip-pill ${profit > 0 ? 'won' : profit < 0 ? 'lost' : ''}`, text: slip.payout > 0 ? t('slipPaid', { v: fmtMoney(slip.payout, { sign: false }) }) : t('slipLost') })
-    : el('span', { class: 'slip-pill open', text: t('slipOpen') });
-  return el('article', { class: `card saved-slip ${state.freshSlips.has(slip.id) ? 'fresh' : ''}` }, [
+    : dead
+      ? el('span', { class: 'slip-pill lost', text: t('slipDead') })
+      : el('span', { class: `slip-pill ${states.includes('live') ? 'live' : 'open'}`, text: states.includes('live') ? t('slipLiveNow') : t('slipOpen') });
+  const nextStart = slip.legs.filter((leg, k) => states[k] === 'waiting' && leg.start).map(leg => leg.start).sort()[0];
+  return el('article', { class: `card saved-slip ${state.freshSlips.has(slip.id) ? 'fresh' : ''} ${dead ? 'dead' : ''}` }, [
     el('div', { class: 'saved-head' }, [
-      el('div', {}, [el('strong', { text: `${mode} · ${t('slipLegs', { n })}` }), el('small', { class: 'muted', text: ` ${fmtTime(slip.t)}` })]),
+      el('div', { class: 'saved-title' }, [
+        el('span', { class: 'mode-tag', text: mode }),
+        el('strong', { text: t('slipLegs', { n }) }),
+        el('small', { class: 'muted', text: t('slipBoughtAt', { time: fmtTime(slip.t) }) })
+      ]),
       pill
     ]),
+    // One segment per pick, coloured by where it stands.
+    el('div', { class: 'leg-bar', role: 'img', 'aria-label': t('slipProgress', { k: decided, n }) }, states.map(st => el('span', { class: `seg seg-${st}` }))),
+    el('p', { class: 'saved-progress' }, [
+      document.createTextNode(t('slipProgress', { k: decided, n })),
+      !settled && nextStart ? el('span', { class: 'muted', text: ` · ${t('slipNextStart', { time: fmtTime(nextStart) })}` }) : null
+    ]),
     el('ul', { class: 'parlay-legs saved-legs' },
-      slip.legs.map(leg =>
-        el('li', { class: leg.result ? `leg-${leg.result}` : '' }, [
-          el('span', { class: 'leg-result', 'aria-label': leg.result ? t(`legResult_${leg.result}`) : t('legPending'), text: RESULT_ICON[leg.result] ?? '⏳' }),
+      slip.legs.map((leg, k) =>
+        el('li', { class: `leg-${states[k]}` }, [
+          el('span', { class: 'leg-result', 'aria-label': t(`legState_${states[k]}`), title: t(`legState_${states[k]}`), text: LEG_ICON[states[k]] }),
           legMain(leg),
           el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(leg.odds))])
         ])
       )
     ),
-    el('div', { class: 'saved-pay' }, [
-      payCell(t('slipCost'), fmtMoney(slip.cost, { sign: false })),
-      slip.mode === 'parlay' ? payCell(t('payOdds'), `×${fmtOdds(slip.legs.reduce((p, l) => p * l.odds, 1))}`) : null,
-      settled ? payCell(t('slipPaidLabel'), fmtMoney(slip.payout, { sign: false })) : payCell(t('payAll'), fmtMoney(top, { sign: false })),
-      settled ? payCell(t('slipResult'), fmtMoney(profit), profit > 0 ? 'back-high' : profit < 0 ? 'back-low' : '') : null
-    ]),
+    el('div', { class: 'saved-pay' }, settled
+      ? [
+          payCell(t('slipCost'), fmtMoney(slip.cost, { sign: false })),
+          payCell(t('slipPaidLabel'), fmtMoney(slip.payout, { sign: false })),
+          payCell(t('slipResult'), fmtMoney(profit), profit > 0 ? 'back-high' : profit < 0 ? 'back-low' : '')
+        ]
+      : [
+          payCell(t('slipCost'), fmtMoney(slip.cost, { sign: false })),
+          slip.mode === 'parlay' ? payCell(t('payOdds'), `×${fmtOdds(slip.legs.reduce((p, l) => p * l.odds, 1))}`) : null,
+          decided && range.locked > 0 ? payCell(t('slipLocked'), fmtMoney(range.locked, { sign: false }), 'back-high') : null,
+          payCell(decided ? t('slipMost') : t('payAll'), fmtMoney(range.most, { sign: false }), dead ? 'back-low' : '')
+        ]),
     slipInsight(slip)
   ]);
 }
@@ -2258,6 +2303,67 @@ const HISTORY_FILTERS = {
   lost: s => s.status === 'settled' && s.payout <= s.cost
 };
 
+// Groups for the slip list: games on now, waiting to start, already lost
+// (a parlay with a lost pick, waiting for its other games), then settled
+// slips by the Taiwan day they were settled.
+function slipGroupKey(slip, now) {
+  if (slip.status === 'settled') return `day|${taipeiDayKey(slip.settledAt ?? slip.t)}`;
+  if (slipRange(slip).most <= 0) return 'dead';
+  return slip.legs.some(leg => legState(leg, now) === 'live') ? 'live' : 'waiting';
+}
+
+function groupTitle(key) {
+  const t = state.t;
+  if (key === 'live') return t('groupLive');
+  if (key === 'waiting') return t('groupWaiting');
+  if (key === 'dead') return t('groupDead');
+  const day = key.slice(4);
+  const today = taipeiDayKey(new Date());
+  const yesterday = taipeiDayKey(new Date(Date.now() - 86_400_000));
+  const [, m, d] = day.split('-').map(Number);
+  const name = day === today ? t('today') : day === yesterday ? t('yesterday') : `${m}/${d}（${dayLabel(day)}）`;
+  return t('groupSettled', { day: name });
+}
+
+function groupSummary(key, slips) {
+  const t = state.t;
+  const cost = slips.reduce((s, x) => s + x.cost, 0);
+  if (key.startsWith('day|')) {
+    const net = slips.reduce((s, x) => s + x.payout - x.cost, 0);
+    return el('span', { class: 'group-sum' }, [
+      document.createTextNode(t('groupCountCost', { n: slips.length, cost: fmtMoney(cost, { sign: false }) })),
+      el('strong', { class: net > 0.5 ? 'back-high' : net < -0.5 ? 'back-low' : '', text: fmtMoney(net) })
+    ]);
+  }
+  if (key === 'dead') return el('span', { class: 'group-sum' }, [document.createTextNode(t('groupCountCost', { n: slips.length, cost: fmtMoney(cost, { sign: false }) })), el('strong', { class: 'back-low', text: fmtMoney(-cost) })]);
+  const most = slips.reduce((s, x) => s + slipRange(x).most, 0);
+  return el('span', { class: 'group-sum' }, [document.createTextNode(t('groupCountCost', { n: slips.length, cost: fmtMoney(cost, { sign: false }) })), el('strong', { text: t('groupMost', { v: fmtMoney(most, { sign: false }) }) })]);
+}
+
+// The 紀錄 tab shows either the slips or the stats.
+function applyHistoryView() {
+  const t = state.t;
+  const any = state.accountReady && state.account.slips.length > 0;
+  const view = state.historyView;
+  $('history-tabs').hidden = !any;
+  $('history-tabs').replaceChildren(
+    ...['slips', 'stats'].map(key =>
+      el('button', {
+        type: 'button',
+        'aria-pressed': String(key === view),
+        text: t(`historyView_${key}`),
+        onclick: () => {
+          state.historyView = key;
+          applyHistoryView();
+        }
+      })
+    )
+  );
+  if (!any) return;
+  $('saved').hidden = view !== 'slips';
+  $('stats').hidden = view !== 'stats';
+}
+
 function renderSaved() {
   renderStats();
   if (!state.accountReady) return;
@@ -2265,33 +2371,61 @@ function renderSaved() {
   const slips = state.account.slips;
   const open = slips.filter(s => s.status === 'open');
   $('saved').hidden = slips.length === 0;
+  applyHistoryView();
   if (!slips.length) return;
+  const now = Date.now();
   const filtered = slips.filter(HISTORY_FILTERS[state.historyFilter]);
-  const shown = state.showAllSaved ? filtered : filtered.slice(0, SAVED_SHOWN);
+  // Open slips all show; settled ones fold after SAVED_SHOWN.
+  let settledShown = 0;
+  const groups = new Map();
+  for (const slip of filtered) {
+    const key = slipGroupKey(slip, now);
+    if (key.startsWith('day|') && !state.showAllSaved && settledShown++ >= SAVED_SHOWN) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(slip);
+  }
+  const rank = key => ({ live: 0, waiting: 1, dead: 2 })[key] ?? 3;
+  const order = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || b.localeCompare(a));
+  const hidden = filtered.filter(s => s.status === 'settled').length - Math.min(settledShown, SAVED_SHOWN);
+  const openCost = open.reduce((s, x) => s + x.cost, 0);
+  const openMost = open.reduce((s, x) => s + slipRange(x).most, 0);
+  const settledNet = slips.filter(s => s.status === 'settled').reduce((s, x) => s + x.payout - x.cost, 0);
   $('saved-body').replaceChildren(
-    el('div', { class: 'chips history-filter', role: 'group', 'aria-label': t('savedTitle') },
-      Object.keys(HISTORY_FILTERS).map(key =>
-        chip({
-          pressed: key === state.historyFilter,
-          text: t(`filter_${key}`),
-          count: String(slips.filter(HISTORY_FILTERS[key]).length),
-          onclick: () => {
-            state.historyFilter = key;
-            state.showAllSaved = false;
-            renderSaved();
-          }
-        })
-      )
-    ),
+    el('div', { class: 'saved-summary' }, [
+      payCell(t('sumOpen'), t('sumSlips', { n: open.length })),
+      payCell(t('sumAtStake'), fmtMoney(openCost, { sign: false })),
+      payCell(t('sumMost'), fmtMoney(openMost, { sign: false })),
+      payCell(t('sumSettledNet'), fmtMoney(settledNet), settledNet > 0.5 ? 'back-high' : settledNet < -0.5 ? 'back-low' : '')
+    ]),
     el('div', { class: 'saved-toolbar' }, [
-      el('span', { class: 'muted', text: t('savedCount', { open: open.length, all: slips.length }) }),
+      el('div', { class: 'chips history-filter', role: 'group', 'aria-label': t('savedTitle') },
+        Object.keys(HISTORY_FILTERS).map(key =>
+          chip({
+            pressed: key === state.historyFilter,
+            text: t(`filter_${key}`),
+            count: String(slips.filter(HISTORY_FILTERS[key]).length),
+            onclick: () => {
+              state.historyFilter = key;
+              state.showAllSaved = false;
+              renderSaved();
+            }
+          })
+        )
+      ),
       open.length
         ? el('button', { class: 'ghost-button', type: 'button', disabled: state.checking ? '' : null, text: state.checking ? t('checking') : t('checkResults'), onclick: () => checkResults(true) })
         : null
     ]),
-    shown.length ? el('div', { class: 'saved-list' }, shown.map(savedSlipCard)) : el('p', { class: 'muted', text: t('filterEmpty') }),
-    ...(filtered.length > shown.length
-      ? [el('button', { class: 'ghost-button', type: 'button', text: t('savedMore', { n: filtered.length - shown.length }), onclick: () => ((state.showAllSaved = true), renderSaved()) })]
+    ...(order.length
+      ? order.map(key =>
+          el('section', { class: `slip-group group-${key.split('|')[0]}` }, [
+            el('div', { class: 'group-head' }, [el('h3', { text: groupTitle(key) }), groupSummary(key, groups.get(key))]),
+            el('div', { class: 'saved-list' }, groups.get(key).map(savedSlipCard))
+          ])
+        )
+      : [el('p', { class: 'muted', text: t('filterEmpty') })]),
+    ...(hidden > 0 && !state.showAllSaved
+      ? [el('button', { class: 'ghost-button', type: 'button', text: t('savedMore', { n: hidden }), onclick: () => ((state.showAllSaved = true), renderSaved()) })]
       : [])
   );
 }
