@@ -1701,13 +1701,21 @@ function saveAccountLocal() {
 }
 
 // Every change goes to this device at once and to the synced copy shortly after.
-function commitAccount(next) {
+function commitAccount(next, { quiet = false } = {}) {
   // Nothing is written before the saved account has opened: it would be lost.
   if (next === state.account || !state.accountReady) return;
   state.account = next;
   saveAccountLocal();
-  renderAccount();
-  renderSaved();
+  if (quiet) {
+    // Mid-round money: only the balance and today's mini-game total change,
+    // in place; the full redraw waits for the round's end.
+    const shown = document.querySelector('.account-balance');
+    if (shown) shown.textContent = fmtMoney(balance(next), { sign: false });
+    renderArcade();
+  } else {
+    renderAccount();
+    renderSaved();
+  }
   pushSoon();
 }
 
@@ -1928,6 +1936,15 @@ function finalOf(outcome) {
 
 function renderAccount() {
   if (!state.accountReady) return;
+  // A mini-game round in progress: only the balance changes, in place (a
+  // full redraw moves the page under the player's finger); the rest waits
+  // for the round's end.
+  if (state.roundLive && $('account-body').firstChild) {
+    const shown = document.querySelector('.account-balance');
+    if (shown) shown.textContent = fmtMoney(balance(state.account), { sign: false });
+    renderArcade();
+    return;
+  }
   const t = state.t;
   const account = state.account;
   const now = new Date();
@@ -3837,36 +3854,47 @@ const ARCADE_MAX = Object.fromEntries(ARCADE.games.map(game => [game, bestRound(
 function renderArcade() {
   if (!state.accountReady) return;
   const t = state.t;
-  // The game keeps the keyboard focus while money comes in mid-round.
-  const focused = state.arcadeView?.contains(document.activeElement) ? document.activeElement : null;
-  queueMicrotask(() => focused?.isConnected && document.activeElement !== focused && focused.focus({ preventScroll: true }));
   const earned = earnedToday(state.account);
   const room = roomToday(state.account);
-  $('arcade-body').replaceChildren(
-    el('div', { class: 'card arcade' }, [
+  // Built once, then updated in place: redrawing it while a round is on
+  // restarted every animation (the money popup played again), moved the
+  // page, and could swallow a tap that landed mid-redraw.
+  let shell = state.arcadeShell;
+  if (!shell || shell.locale !== state.locale || !shell.card.isConnected) {
+    const capFill = el('div');
+    const capText = el('small', { class: 'muted' });
+    const tiles = Object.fromEntries(
+      ARCADE.games.map(game => [
+        game,
+        el('button', { class: 'arcade-tile', type: 'button', onclick: () => openGame(game) }, [
+          el('span', { class: 'arcade-icon', 'aria-hidden': 'true', text: ARCADE_ICON[game] }),
+          el('span', { class: 'arcade-name', text: t(`arcade_${game}`) }),
+          el('small', { class: 'muted', text: t(`arcadeKind_${game}`) }),
+          el('small', { class: 'arcade-max', text: t('arcadeUpTo', { v: fmtMoney(ARCADE_MAX[game], { sign: false }) }) })
+        ])
+      ])
+    );
+    const slot = el('div', { class: 'arcade-slot' });
+    const card = el('div', { class: 'card arcade' }, [
       el('p', { class: 'lede', text: t('arcadeIntro', { cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) }),
-      el('div', { class: 'arcade-cap' }, [
-        el('div', { class: 'arcade-cap-bar', 'aria-hidden': 'true' }, el('div', { style: `width:${Math.min(100, (earned / ARCADE.dailyCap) * 100)}%` })),
-        el('small', { class: 'muted', text: room > 0 ? t('arcadeEarned', { v: fmtMoney(earned, { sign: false }), cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) : t('arcadeCapped') })
-      ]),
-      el('div', { class: 'arcade-tiles' },
-        ARCADE.games.map(game =>
-          el('button', { class: 'arcade-tile', type: 'button', 'aria-pressed': String(state.arcadeGame === game), onclick: () => openGame(game) }, [
-            el('span', { class: 'arcade-icon', 'aria-hidden': 'true', text: ARCADE_ICON[game] }),
-            el('span', { class: 'arcade-name', text: t(`arcade_${game}`) }),
-            el('small', { class: 'muted', text: t(`arcadeKind_${game}`) }),
-            el('small', { class: 'arcade-max', text: t('arcadeUpTo', { v: fmtMoney(ARCADE_MAX[game], { sign: false }) }) })
-          ])
-        )
-      ),
-      state.arcadeView
-    ])
-  );
+      el('div', { class: 'arcade-cap' }, [el('div', { class: 'arcade-cap-bar', 'aria-hidden': 'true' }, capFill), capText]),
+      el('div', { class: 'arcade-tiles' }, Object.values(tiles)),
+      slot
+    ]);
+    shell = state.arcadeShell = { locale: state.locale, card, capFill, capText, tiles, slot };
+    $('arcade-body').replaceChildren(card);
+  }
+  shell.capFill.style.width = `${Math.min(100, (earned / ARCADE.dailyCap) * 100)}%`;
+  shell.capText.textContent = room > 0 ? t('arcadeEarned', { v: fmtMoney(earned, { sign: false }), cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) : t('arcadeCapped');
+  for (const [game, tile] of Object.entries(shell.tiles)) tile.setAttribute('aria-pressed', String(state.arcadeGame === game));
+  // The game's own view goes in once; it's never moved while it runs.
+  if (shell.slot.firstChild !== state.arcadeView) shell.slot.replaceChildren(...(state.arcadeView ? [state.arcadeView] : []));
 }
 
 function openGame(game) {
   stopGame();
   state.arcadeGame = state.arcadeGame === game ? null : game;
+  state.roundLive = Boolean(state.arcadeGame);
   state.arcadeView = state.arcadeGame ? { typing: typingView, sort: sortView, derby: derbyView, freethrow: freeThrowView }[game]() : null;
   renderArcade();
   state.arcadeView?.focus({ preventScroll: true });
@@ -3902,7 +3930,7 @@ function gameHud(game) {
     if (earned === banked) return;
     const next = payRound(state.account, round, game, earned);
     banked = earned;
-    if (next.account !== state.account) commitAccount(next.account);
+    if (next.account !== state.account) commitAccount(next.account, { quiet: true });
   };
   const progress = el('div', { class: 'hud-bar', 'aria-hidden': 'true' }, el('div'));
   const count = el('span', { class: 'hud-count' });
@@ -3950,9 +3978,15 @@ function streakRule(game) {
 function finishRound(game, amount, box, summary, ms, score = null, round = roundId()) {
   const t = state.t;
   stopGame();
+  state.roundLive = false;
   // The round's entry has been kept up to date as it went; this settles it.
   const { account, paid } = payRound(state.account, round, game, amount);
   if (account !== state.account) commitAccount(account);
+  else {
+    // Paid as it went: now the full redraw the round held back.
+    renderAccount();
+    renderSaved();
+  }
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   box.replaceChildren(
@@ -4746,6 +4780,21 @@ function renderF1() {
       : null
   );
 }
+
+// ============================================================================
+// DO NOT REMOVE - iOS Safari "a tap needs two taps" fix (from Match-Find).
+// ============================================================================
+// Empty, passive, page-wide touch/pointer listeners. They do nothing; their
+// existence is the fix. iOS WebKit handles a tap differently depending on
+// whether the spot touched has touch/pointer listeners; with listeners only
+// on some elements (the mini games' canvases and pads, the number pad) a
+// gesture there can leave its tap handling stuck, and the next tap
+// elsewhere is used up clearing it. With listeners on the whole document
+// every tap goes down the same path. Passive, so they never block
+// scrolling. Chromium never reproduces this, so no test can catch it.
+['touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'pointercancel'].forEach(type => {
+  document.addEventListener(type, () => {}, { capture: true, passive: true });
+});
 
 // ---- Boot ---------------------------------------------------------------------
 
