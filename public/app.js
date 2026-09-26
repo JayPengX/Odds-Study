@@ -58,10 +58,32 @@ import {
   legResult,
   applyResults,
   mergeAccounts,
+  mergeDistinct,
+  poolEntries,
+  stakedThisWeek,
   compactAccount,
   isAccount
 } from './lib/account.mjs';
-import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
+import { readSync, writeSync, cleanPasscode, PASSCODE_PATTERN, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
+import {
+  APPS,
+  PASS_PATTERN,
+  ODDS_LIMIT_KEY,
+  formatPass,
+  storedPass,
+  storePass,
+  cachedWallet,
+  cacheWallet,
+  othersBalance,
+  entriesNotFrom,
+  describeEntry,
+  setting,
+  settingPatch,
+  ecoMerge,
+  ecoTransfer,
+  installGate,
+  watchUpdates
+} from './lib/quadra.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile, moneySources } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
@@ -123,6 +145,8 @@ const state = {
   account: null,
   accountReady: false,
   sync: { code: '', busy: false, error: '', at: null },
+  // The Quadra Pass's wallet (the shared money pool), when the code is a pass.
+  wallet: null,
   syncOpen: false,
   // Slips saved or settled since the page opened, highlighted.
   freshSlips: new Set(),
@@ -736,7 +760,7 @@ function gameCard(game, bets) {
     else state.open.add(game.id);
     rerender();
   };
-  return el('article', { class: `game ${open ? 'open' : ''} ${game.live ? 'live' : ''}` }, [
+  return el('article', { class: `game ${open ? 'open' : ''} ${game.live ? 'live' : ''}`, 'data-game': game.id }, [
     el('div', { class: 'game-top' }, [
       leagueImg(game.sport, 'logo-xs'),
       el('span', { class: 'game-series', text: gameSeries(game) }),
@@ -750,6 +774,35 @@ function gameCard(game, bets) {
       document.createTextNode(open ? t('lessMarkets') : t('moreMarkets'))
     ])
   ]);
+}
+
+// Pins a game to Quadra Fixtures (Match Find): kept in the pass's wallet,
+// where Fixtures reads it and puts the game in your schedule.
+function pinButton(game) {
+  const t = state.t;
+  const pinned = Boolean(state.wallet?.pins?.[game.id]?.on);
+  return el('button', {
+    class: `ghost-button pin-button ${pinned ? 'on' : ''}`,
+    type: 'button',
+    'aria-pressed': String(pinned),
+    text: t(pinned ? 'pinRemove' : 'pinAdd'),
+    onclick: async () => {
+      if (!onPass()) {
+        alert(t('pinNeedPass'));
+        return;
+      }
+      const pin = { t: Date.now(), on: !pinned, sport: game.sport, start: game.startUtc, home: game.home.en, away: game.away.en, homeZh: game.home.zh, awayZh: game.away.zh, series: gameSeries(game) };
+      state.wallet = { ...state.wallet, pins: { ...(state.wallet?.pins || {}), [game.id]: pin } };
+      renderGames();
+      try {
+        state.wallet = await writePass(state.sync.code, null, { pins: { [game.id]: pin } });
+        cacheWallet(state.sync.code, state.wallet);
+      } catch (error) {
+        console.error(error);
+      }
+      renderGames();
+    }
+  });
 }
 
 // Every other market of a game, one small card each, then the game's details.
@@ -787,6 +840,7 @@ function gameMore(game, bets) {
       : null,
     current ? marketPanel(game, current, bets.filter(b => b.kind === current.kind)) : null,
     el('div', { class: 'game-foot' }, [
+      game.live ? null : pinButton(game),
       el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), el('p', { text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }), ...notes.map(text => el('p', { text }))])
     ])
   ]);
@@ -1704,10 +1758,30 @@ async function loadAccount() {
 
 function loadSyncCode() {
   try {
-    return localStorage.getItem(SYNC_KEY) || '';
+    // A Quadra Pass entered in another Quadra app on this browser counts here too.
+    return localStorage.getItem(SYNC_KEY) || storedPass() || '';
   } catch {
     return '';
   }
+}
+
+const onPass = () => isPassCode(state.sync.code);
+
+// Money to bet with: this account's own ledger, plus (with a Quadra Pass)
+// what the rest of the shared pool holds: Securities' cash, rewards, transfers.
+function poolExtra() {
+  return onPass() ? othersBalance(state.wallet, 'odds') : 0;
+}
+function funds(account = state.account) {
+  return balance(account) + poolExtra();
+}
+const weeklyLimit = () => (onPass() ? Number(setting(state.wallet, ODDS_LIMIT_KEY, 0)) || 0 : Number(localStorage.getItem('oddsStudy.weeklyLimit')) || 0);
+
+// The weekly grant arrives by itself when the app is opened in a new week.
+function applyGrant() {
+  if (!state.accountReady || !canClaim(state.account)) return;
+  commitAccount(claimGrant(state.account));
+  state.grantNote = true;
 }
 
 // Writes go one after another, so an older (slower to compress) save never
@@ -1721,6 +1795,8 @@ function saveAccountLocal() {
       localStorage.setItem(ACCOUNT_KEY, await pack(account));
       if (code) localStorage.setItem(SYNC_KEY, code);
       else localStorage.removeItem(SYNC_KEY);
+      // A pass is shared with the other Quadra apps on this browser.
+      if (isPassCode(code)) storePass(code);
     } catch {}
   });
   return saving;
@@ -1736,7 +1812,7 @@ function commitAccount(next, { quiet = false } = {}) {
     // Mid-round money: only the balance and today's mini-game total change,
     // in place; the full redraw waits for the round's end.
     const shown = document.querySelector('.account-balance');
-    if (shown) shown.textContent = fmtMoney(balance(next), { sign: false });
+    if (shown) shown.textContent = fmtMoney(funds(next), { sign: false });
     renderArcade();
   } else {
     renderAccount();
@@ -1758,10 +1834,17 @@ function pushSoon() {
 async function syncNow() {
   const code = state.sync.code;
   if (!code || state.sync.busy || !state.accountReady) return;
+  if (isPassCode(code)) return syncPass();
   state.sync = { ...state.sync, busy: true, error: '' };
   renderAccount();
   try {
     const remote = await readSync(code);
+    // Moved into a Quadra Pass (and deleted) from another device.
+    if (!remote) {
+      state.sync = { ...state.sync, busy: false, error: state.t('legacyGone') };
+      renderAccount();
+      return;
+    }
     if (remote && !isAccount(remote)) throw new Error('bad account');
     const merged = mergeAccounts(state.account, remote);
     if (!remote || JSON.stringify(merged) !== JSON.stringify(remote)) await writeSync(code, merged);
@@ -1778,12 +1861,57 @@ async function syncNow() {
   renderAccount();
 }
 
+// With a Quadra Pass: this account's data and the shared wallet together.
+// Merges the synced copy (and any account a merge brought in, waiting in the
+// inbox) into this device's, writes back what's new, and shares the ledger's
+// entries and the money in open bets with the pool.
+async function syncPass() {
+  const code = state.sync.code;
+  state.sync = { ...state.sync, busy: true, error: '' };
+  renderAccount();
+  try {
+    const remote = await readPass(code);
+    if (!remote) {
+      state.sync = { ...state.sync, busy: false, error: state.t('syncNotFound') };
+      renderAccount();
+      return;
+    }
+    if (remote.account && !isAccount(remote.account)) throw new Error('bad account');
+    let merged = mergeAccounts(state.account, remote.account);
+    for (const item of remote.inbox) if (isAccount(item.account)) merged = mergeDistinct(merged, compactAccount(item.account));
+    const have = new Set((remote.wallet?.entries || []).map(e => e.id));
+    const entries = poolEntries(merged).filter(e => !have.has(e.id));
+    const open = merged.slips.filter(s => s.status === 'open').reduce((sum, s) => sum + s.cost, 0);
+    const snap = remote.wallet?.snap?.odds?.open === open ? undefined : { odds: { open, t: Date.now() } };
+    const changed = !remote.account || JSON.stringify(merged) !== JSON.stringify(remote.account);
+    let wallet = remote.wallet;
+    if (changed || entries.length || snap) wallet = await writePass(code, changed ? merged : null, { entries, snap });
+    for (const item of remote.inbox) await dropInbox(code, item.id).catch(() => {});
+    state.wallet = wallet;
+    cacheWallet(code, wallet);
+    if (JSON.stringify(merged) !== JSON.stringify(state.account)) {
+      state.account = merged;
+      saveAccountLocal();
+      renderSaved();
+    }
+    state.sync = { ...state.sync, busy: false, at: new Date().toISOString() };
+  } catch (error) {
+    console.error(error);
+    state.sync = { ...state.sync, busy: false, error: state.t(error.code === 'TOO_BIG' ? 'syncTooBig' : 'syncFailed') };
+  }
+  renderAccount();
+  renderParlay();
+}
+
+// New accounts only get Quadra Passes (they work in every Quadra app).
 async function createSyncCode() {
   state.sync = { ...state.sync, busy: true, error: '' };
   renderAccount();
   try {
-    const code = await createSync(state.account);
+    const { code, wallet } = await createPass(state.account, { entries: poolEntries(state.account) });
     state.sync = { code, busy: false, error: '', at: new Date().toISOString(), fresh: true };
+    state.wallet = wallet;
+    cacheWallet(code, wallet);
     saveAccountLocal();
   } catch (error) {
     console.error(error);
@@ -1796,13 +1924,35 @@ async function createSyncCode() {
 // merged (the NT$10,000 start counts once).
 async function linkSyncCode(raw) {
   const code = cleanPasscode(raw);
-  if (!PASSCODE_PATTERN.test(code)) {
-    state.sync = { ...state.sync, error: state.t('syncBadCode') };
+  if (!PASSCODE_PATTERN.test(code) && !PASS_PATTERN.test(code)) {
+    state.sync = { ...state.sync, error: state.t('passBad') };
     renderAccount();
     return;
   }
   state.sync = { ...state.sync, busy: true, error: '' };
   renderAccount();
+  if (PASS_PATTERN.test(code)) {
+    // A pass: its account (if Sportsbook was used with it) and this device's merged.
+    try {
+      const remote = await readPass(code);
+      if (!remote) {
+        state.sync = { ...state.sync, busy: false, error: state.t('syncNotFound') };
+        renderAccount();
+        return;
+      }
+      state.sync = { code, busy: false, error: '', at: null };
+      state.wallet = remote.wallet;
+      if (isAccount(remote.account)) state.account = mergeAccounts(remote.account, state.account);
+      saveAccountLocal();
+      renderSaved();
+      await syncNow();
+    } catch (error) {
+      console.error(error);
+      state.sync = { ...state.sync, busy: false, error: state.t('syncFailed') };
+      renderAccount();
+    }
+    return;
+  }
   try {
     const remote = await readSync(code);
     if (!isAccount(remote)) {
@@ -1824,8 +1974,35 @@ async function linkSyncCode(raw) {
 
 function unlinkSync() {
   if (!confirm(state.t('syncUnlinkConfirm'))) return;
+  if (onPass()) storePass('');
   state.sync = { code: '', busy: false, error: '', at: null };
+  state.wallet = null;
   saveAccountLocal();
+  renderAccount();
+  renderParlay();
+}
+
+// Old code → Quadra Pass, optionally merged with other apps' accounts (their
+// old codes). The Worker moves everything to one new pass and deletes the old.
+async function moveToPass(extraSources = []) {
+  const t = state.t;
+  const code = state.sync.code;
+  const sources = [...(code && !isPassCode(code) ? [{ app: 'odds', passcode: code }] : []), ...extraSources];
+  if (!sources.length) return;
+  // Everything this device has goes up first.
+  if (code && !isPassCode(code)) await syncNow();
+  state.sync = { ...state.sync, busy: true, error: '' };
+  renderAccount();
+  try {
+    const res = await ecoMerge(sources, isPassCode(code) ? code : undefined);
+    state.sync = { code: res.passcode, busy: false, error: '', at: null, fresh: true, note: t(extraSources.length ? 'linkDone' : 'legacyUpgraded', { code: formatPass(res.passcode) }) };
+    state.wallet = res.wallet;
+    saveAccountLocal();
+    await syncNow();
+  } catch (error) {
+    console.error(error);
+    state.sync = { ...state.sync, busy: false, error: t('linkFailed', { msg: error.message }) };
+  }
   renderAccount();
 }
 
@@ -1883,18 +2060,21 @@ function legRecord(bet) {
 // The 模擬下注 button: buys the slip on the simulated account.
 function placeButton(legs, sizes, cost, errors) {
   const t = state.t;
-  const funds = balance(state.account);
-  const short = cost > funds;
-  const blocked = errors.length > 0 || sizes.length === 0 || short || !state.accountReady;
+  const money = funds();
+  const short = cost > money;
+  const limit = weeklyLimit();
+  const room = limit > 0 ? Math.max(0, limit - stakedThisWeek(state.account)) : Infinity;
+  const over = cost > room;
+  const blocked = errors.length > 0 || sizes.length === 0 || short || over || !state.accountReady;
   return el('div', { class: 'place-row' }, [
     el('button', {
       class: 'primary-button place-button',
       type: 'button',
       disabled: blocked ? '' : null,
-      text: short ? t('placeShort', { v: fmtMoney(funds, { sign: false }) }) : t('placeSlip', { v: fmtMoney(cost, { sign: false }) }),
+      text: short ? t('placeShort', { v: fmtMoney(money, { sign: false }) }) : over ? t('limitHit', { v: fmtMoney(room, { sign: false }) }) : t('placeSlip', { v: fmtMoney(cost, { sign: false }) }),
       onclick: () => {
         const slip = { id: newSlipId(), mode: state.slipMode, sizes, stake: state.slipStake, cost, legs: legs.map(legRecord) };
-        const { account, error } = placeSlip(state.account, slip);
+        const { account, error } = placeSlip(state.account, slip, new Date(), { extra: poolExtra(), limit });
         if (error) return;
         state.parlay = [];
         state.freshSlips.add(slip.id);
@@ -1907,7 +2087,7 @@ function placeButton(legs, sizes, cost, errors) {
         showTab('history');
       }
     }),
-    el('small', { class: 'muted', text: t('placeNote', { v: fmtMoney(funds, { sign: false }) }) })
+    el('small', { class: 'muted', text: t('placeNote', { v: fmtMoney(money, { sign: false }) }) })
   ]);
 }
 
@@ -1967,30 +2147,30 @@ function renderAccount() {
   // for the round's end.
   if (state.roundLive && $('account-body').firstChild) {
     const shown = document.querySelector('.account-balance');
-    if (shown) shown.textContent = fmtMoney(balance(state.account), { sign: false });
+    if (shown) shown.textContent = fmtMoney(funds(), { sign: false });
     renderArcade();
     return;
   }
   const t = state.t;
   const account = state.account;
   const now = new Date();
-  const funds = balance(account);
+  const own = balance(account);
+  const money = funds();
   // Money that didn't come from betting: the weekly grants and mini games.
   const grants = account.ledger.filter(e => e.kind === 'grant' || e.kind === 'game').reduce((s, e) => s + e.amount, 0);
   const open = account.slips.filter(s => s.status === 'open');
   const atStake = open.reduce((s, x) => s + x.cost, 0);
   // Won or lost on settled slips, and money still on open ones.
-  const net = funds + atStake - START_BALANCE - grants;
-  const claim = canClaim(account, now)
-    ? el('button', { class: 'primary-button', type: 'button', text: t('claimGrant', { v: fmtMoney(WEEKLY_GRANT, { sign: false }) }), onclick: () => commitAccount(claimGrant(state.account)) })
-    : el('p', { class: 'muted', text: t(account.ledger.some(e => e.id === `grant-${weekKey(now)}`) ? 'nextGrant' : 'firstGrant', { v: fmtMoney(WEEKLY_GRANT, { sign: false }), when: fmtTime(nextGrantAt(now).toISOString()) }) });
+  const net = own + atStake - START_BALANCE - grants;
+  const grantLine = el('p', { class: 'muted', text: `${state.grantNote ? `${t('grantAdded', { v: fmtMoney(WEEKLY_GRANT, { sign: false }) })} ` : ''}${t('grantAuto', { v: fmtMoney(WEEKLY_GRANT, { sign: false }), when: fmtTime(nextGrantAt(now).toISOString()) })}` });
   const sync = state.sync;
+  const pass = onPass();
   let syncBody;
   if (sync.code) {
     syncBody = [
       el('p', { class: 'sync-code-line' }, [
-        el('span', { text: t('syncCode') }),
-        el('code', { class: 'sync-code', text: `${sync.code.slice(0, 4)} ${sync.code.slice(4)}` }),
+        el('span', { text: t(pass ? 'passCode' : 'syncCode') }),
+        el('code', { class: 'sync-code', text: pass ? formatPass(sync.code) : `${sync.code.slice(0, 4)} ${sync.code.slice(4)}` }),
         el('button', {
           class: 'ghost-button',
           type: 'button',
@@ -2000,7 +2180,10 @@ function renderAccount() {
           }
         })
       ]),
+      sync.note ? el('p', { class: 'note', text: sync.note }) : null,
       sync.fresh ? el('p', { class: 'note', text: t('syncKeep') }) : null,
+      pass ? null : el('p', { class: 'note', text: t('legacyNote') }),
+      pass ? null : el('div', { class: 'button-row' }, [el('button', { class: 'primary-button', type: 'button', text: t('legacyUpgrade'), disabled: sync.busy ? '' : null, onclick: () => moveToPass() })]),
       el('p', { class: 'muted', text: sync.busy ? t('syncing') : sync.at ? t('syncedAt', { when: fmtTime(sync.at) }) : '' }),
       el('div', { class: 'button-row' }, [
         el('button', { class: 'ghost-button', type: 'button', text: t('syncNow'), disabled: sync.busy ? '' : null, onclick: () => syncNow() }),
@@ -2008,10 +2191,11 @@ function renderAccount() {
       ])
     ];
   } else {
-    const input = el('input', { class: 'sync-input', type: 'text', maxlength: '9', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: t('syncPlaceholder'), 'aria-label': t('syncEnter') });
+    const input = el('input', { class: 'sync-input', type: 'text', maxlength: '12', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: t('passPlaceholder'), 'aria-label': t('passEnter') });
     syncBody = [
-      el('p', { class: 'muted', text: t('syncIntro') }),
-      el('div', { class: 'button-row' }, [el('button', { class: 'ghost-button', type: 'button', text: t('syncCreate'), disabled: sync.busy ? '' : null, onclick: createSyncCode })]),
+      el('p', { class: 'muted', text: t('passIntro') }),
+      el('div', { class: 'button-row' }, [el('button', { class: 'primary-button', type: 'button', text: t('passCreate'), disabled: sync.busy ? '' : null, onclick: createSyncCode })]),
+      el('p', { class: 'muted small', text: t('passEnter') }),
       el('form', {
         class: 'sync-form',
         onsubmit: event => {
@@ -2021,26 +2205,133 @@ function renderAccount() {
       }, [input, el('button', { class: 'ghost-button', type: 'submit', text: t('syncLink'), disabled: sync.busy ? '' : null })])
     ];
   }
+  // Linking a Stock Study (Quadra Securities) account: both into one pass.
+  const linkInput = el('input', { class: 'sync-input', type: 'text', maxlength: '12', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', placeholder: t('linkPlaceholder'), 'aria-label': t('linkPlaceholder') });
+  const linkBox = el('details', { class: 'sync' }, [
+    el('summary', { text: t('linkTitle') }),
+    el('p', { class: 'muted', text: t('linkIntro') }),
+    el('form', {
+      class: 'sync-form',
+      onsubmit: event => {
+        event.preventDefault();
+        const other = cleanPasscode(linkInput.value);
+        if (!PASSCODE_PATTERN.test(other) && !PASS_PATTERN.test(other)) {
+          state.sync = { ...state.sync, error: t('passBad') };
+          return renderAccount();
+        }
+        if (!confirm(t('linkConfirm'))) return;
+        moveToPass([{ app: PASS_PATTERN.test(other) ? 'eco' : 'stock', passcode: other }]);
+      }
+    }, [linkInput, el('button', { class: 'ghost-button', type: 'submit', text: t('linkGo'), disabled: sync.busy ? '' : null })]),
+    el('p', {}, [el('a', { href: `${APPS.stock.path}merge.html`, text: t('mergeTool') })])
+  ]);
   $('account-body').replaceChildren(
     el('div', { class: 'card account-card' }, [
       el('div', { class: 'account-top' }, [
-        el('div', {}, [el('p', { class: 'muted', text: t('accountBalance') }), el('p', { class: 'account-balance stat-value', text: fmtMoney(funds, { sign: false }) })]),
+        el('div', {}, [el('p', { class: 'muted', text: t(pass ? 'poolTotal' : 'accountBalance') }), el('p', { class: 'account-balance stat-value', text: fmtMoney(money, { sign: false }) })]),
         el('div', { class: 'account-side' }, [
           el('p', {}, [el('span', { class: 'muted', text: `${t('accountAtStake')} ` }), el('strong', { text: fmtMoney(atStake, { sign: false }) })]),
           el('p', {}, [el('span', { class: 'muted', text: `${t('accountNet')} ` }), el('strong', { class: net < -0.5 ? 'back-low' : net > 0.5 ? 'back-high' : '', text: fmtMoney(net) })])
         ])
       ]),
-      claim,
+      grantLine,
       el('p', { class: 'muted small', text: t('accountNote', { start: fmtMoney(START_BALANCE, { sign: false }), v: fmtMoney(WEEKLY_GRANT, { sign: false }) }) }),
-      el('details', { class: 'sync', open: state.syncOpen || sync.error || sync.fresh ? '' : null, ontoggle: event => (state.syncOpen = event.target.open) }, [
-        el('summary', { text: sync.code ? t('syncOn') : t('syncTitle') }),
+      pass ? poolBox(own) : null,
+      limitBox(),
+      el('details', { class: 'sync', open: state.syncOpen || sync.error || sync.fresh || sync.note ? '' : null, ontoggle: event => (state.syncOpen = event.target.open) }, [
+        el('summary', { text: sync.code ? (pass ? `${t('passTitle')} ✓` : t('syncOn')) : t('passTitle') }),
         ...syncBody,
         sync.error ? el('p', { class: 'back-low', text: sync.error }) : null
       ]),
+      pass ? transferBox() : null,
+      linkBox,
       backupBox()
     ])
   );
   renderArcade();
+}
+
+// The shared pool, broken down, and what the other apps put in or took out.
+function poolBox(own) {
+  const t = state.t;
+  const w = state.wallet;
+  const stockCash = w?.snap?.stock?.cash ?? 0;
+  const other = othersBalance(w, 'odds') - stockCash;
+  const lines = entriesNotFrom(w, 'odds').filter(e => e.app !== 'stock').slice(0, 30);
+  const row = (label, value) => el('div', { class: 'pool-line' }, [el('span', { class: 'pool-label', text: label }), el('strong', { class: 'pool-value', text: fmtMoney(value, { sign: false }) })]);
+  return el('details', { class: 'sync pool' }, [
+    el('summary', { text: t('poolTitle') }),
+    el('p', { class: 'muted small', text: t('poolNote') }),
+    row(t('poolMine'), own),
+    row(t('poolStock'), stockCash),
+    row(t('poolOther'), other),
+    el('h4', { class: 'pool-head', text: t('poolRecords') }),
+    lines.length
+      ? el('ul', { class: 'pool-records' }, lines.map(e => el('li', {}, [
+          el('span', { class: 'pool-when', text: fmtTime(new Date(e.t).toISOString()) }),
+          el('span', { class: 'pool-what', text: describeEntry(e, state.locale) }),
+          el('strong', { class: e.amount < 0 ? 'back-low' : 'back-high', text: fmtMoney(e.amount) })
+        ])))
+      : el('p', { class: 'muted', text: t('poolNone') })
+  ]);
+}
+
+// The weekly betting limit: kept in the wallet with a pass (so every device
+// and app sees it), on this device otherwise.
+function limitBox() {
+  const t = state.t;
+  const limit = weeklyLimit();
+  const used = stakedThisWeek(state.account);
+  const input = el('input', { class: 'sync-input', type: 'number', min: '0', step: '100', inputmode: 'numeric', value: String(limit || 0), 'aria-label': t('limitTitle') });
+  return el('details', { class: 'sync' }, [
+    el('summary', { text: `${t('limitTitle')} · ${limit ? fmtMoney(limit, { sign: false }) : '—'}` }),
+    el('p', { class: 'muted', text: t('limitIntro') }),
+    el('p', { text: limit ? t('limitNow', { used: fmtMoney(used, { sign: false }), cap: fmtMoney(limit, { sign: false }) }) : t('limitNone', { used: fmtMoney(used, { sign: false }) }) }),
+    el('form', {
+      class: 'sync-form',
+      onsubmit: async event => {
+        event.preventDefault();
+        const value = Math.max(0, Math.round(Number(input.value) || 0));
+        try {
+          localStorage.setItem('oddsStudy.weeklyLimit', String(value));
+        } catch {}
+        if (onPass()) {
+          state.wallet = { ...state.wallet, settings: { ...(state.wallet?.settings || {}), ...settingPatch(ODDS_LIMIT_KEY, value).settings } };
+          writePass(state.sync.code, null, settingPatch(ODDS_LIMIT_KEY, value)).then(w => ((state.wallet = w), renderAccount()), console.error);
+        }
+        renderAccount();
+        renderParlay();
+      }
+    }, [input, el('button', { class: 'ghost-button', type: 'submit', text: t('limitSave') })])
+  ]);
+}
+
+// Money to another Quadra Pass (a friend's, or your own second one).
+function transferBox() {
+  const t = state.t;
+  const amount = el('input', { class: 'sync-input', type: 'number', min: '1', step: '1', inputmode: 'numeric', placeholder: t('transferAmount'), 'aria-label': t('transferAmount') });
+  const to = el('input', { class: 'sync-input', type: 'text', maxlength: '12', autocapitalize: 'characters', autocomplete: 'off', spellcheck: 'false', placeholder: t('transferTo'), 'aria-label': t('transferTo') });
+  const note = el('input', { class: 'sync-input', type: 'text', maxlength: '40', placeholder: t('transferNote'), 'aria-label': t('transferNote') });
+  return el('details', { class: 'sync' }, [
+    el('summary', { text: t('transferTitle') }),
+    el('form', {
+      class: 'sync-form transfer-form',
+      onsubmit: async event => {
+        event.preventDefault();
+        const v = Math.round(Number(amount.value));
+        if (!(v > 0)) return;
+        try {
+          const res = await ecoTransfer(state.sync.code, to.value, v, note.value.trim() || undefined);
+          state.wallet = res.wallet;
+          cacheWallet(state.sync.code, res.wallet);
+          state.sync = { ...state.sync, note: t('transferDone', { v: fmtMoney(v, { sign: false }) }), error: '' };
+        } catch (error) {
+          state.sync = { ...state.sync, error: t('transferFailed', { msg: error.message }) };
+        }
+        renderAccount();
+      }
+    }, [amount, to, note, el('button', { class: 'ghost-button', type: 'submit', text: t('transferGo') })])
+  ]);
 }
 
 // Every slip is kept for good: in this browser, in the sync (when on), and in
@@ -5010,12 +5301,14 @@ async function load() {
     if (state.wantedTab && state.tab !== state.wantedTab && tabAvailable(state.wantedTab)) state.tab = state.wantedTab;
     state.wantedTab = null;
     renderAll();
+    openWantedGame();
     // The other leagues and championships join once they arrive.
     loadExtraLeagues(new Date()).then(games => {
       if (!games.length || !state.data) return;
       const ids = new Set(state.data.games.map(g => g.id));
       state.data.games = [...state.data.games, ...games.filter(g => !ids.has(g.id))].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
       renderAll();
+      openWantedGame();
     }, error => console.error(error));
     loadExtraFutures().then(futures => {
       if (!futures.length || !state.data) return;
@@ -5138,6 +5431,31 @@ $('tabs').addEventListener('keydown', event => {
 {
   const fromHash = location.hash.slice(1);
   if (TABS.includes(fromHash)) state.tab = state.wantedTab = fromHash;
+  // #game=<id>: Quadra Fixtures' "bet on this" opens that game.
+  const wanted = /^game=(.+)$/.exec(fromHash);
+  if (wanted) state.wantedGame = decodeURIComponent(wanted[1]);
+}
+window.addEventListener('hashchange', () => {
+  const wanted = /^game=(.+)$/.exec(location.hash.slice(1));
+  if (!wanted) return;
+  state.wantedGame = decodeURIComponent(wanted[1]);
+  openWantedGame();
+});
+
+// Opens the game asked for in the address: its day and sport, its card
+// open with every market, scrolled into view.
+function openWantedGame() {
+  const id = state.wantedGame;
+  const game = id && state.data?.games.find(g => g.id === id || g.id.toLowerCase() === id.toLowerCase());
+  if (!game) return;
+  state.wantedGame = null;
+  state.tab = 'games';
+  state.day = dayKey(game.startUtc);
+  state.sport = 'all';
+  state.open.add(game.id);
+  renderAll();
+  showTab('games');
+  requestAnimationFrame(() => document.querySelector(`[data-game="${CSS.escape(game.id)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
 }
 
 $('refresh').addEventListener('click', load);
@@ -5211,14 +5529,19 @@ if ('ResizeObserver' in window) {
 
 // Tells the page's failsafe (in index.html) that the scripts loaded and started.
 window.__oddsStarted = true;
+// Phones and tablets: from the home screen only. Always the newest deploy.
+installGate('odds', state.locale);
+watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.content, key: 'oddsStudy', busy: () => state.roundLive });
 state.account = newAccount();
 state.sync = { ...state.sync, code: loadSyncCode() };
+if (onPass()) state.wallet = cachedWallet(state.sync.code);
 renderStatic();
 renderTabs();
 // The saved account is compressed, so it opens a moment after the page.
 loadAccount().then(account => {
   state.account = account;
   state.accountReady = true;
+  applyGrant();
   renderAccount();
   renderSaved();
   syncNow();
@@ -5236,6 +5559,19 @@ setInterval(() => {
 // Back on the tab: pick up what another device did, and any games that ended.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  applyGrant();
   syncNow();
   if (state.tab === 'history') checkResults();
 });
+
+// Offline and installable: the page's own files, kept by the service worker.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker
+    .register('./sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then(reg => {
+      const urls = [location.href.split('#')[0], ...performance.getEntriesByType('resource').map(e => e.name)].filter(u => u.startsWith(location.origin));
+      reg.active?.postMessage({ type: 'cache', urls });
+    })
+    .catch(() => {});
+}

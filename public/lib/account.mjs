@@ -1,5 +1,6 @@
 // The simulated betting account: play money only. It starts with NT$10,000,
-// can claim NT$5,000 once a week (Taiwan time, weeks from Monday), and buys
+// gets NT$1,000 once a week when the app is opened (Taiwan time, weeks from
+// Monday; it was NT$5,000 before the Quadra money pool), and buys
 // saved slips at the lottery's own prices; once every game on a slip is over,
 // the slip pays out like a real ticket (tax and payout cap included).
 //
@@ -9,9 +10,10 @@
 import { settleSlip } from './odds.mjs';
 import { taipeiDayKey } from './sources.mjs';
 import { isSoccer } from './teams.mjs';
+import { ECONOMY } from './quadra.mjs';
 
-export const START_BALANCE = 10_000;
-export const WEEKLY_GRANT = 5_000;
+export const START_BALANCE = ECONOMY.oddsStart;
+export const WEEKLY_GRANT = ECONOMY.oddsWeekly;
 
 export function newAccount(now = new Date()) {
   const t = now.toISOString();
@@ -70,8 +72,19 @@ export function compactAccount(account) {
   return { ...account, slips: account.slips.map(slip => ({ ...slip, legs: slip.legs.map(compactLeg) })) };
 }
 
-export function placeSlip(account, slip, now = new Date()) {
-  if (!(slip.cost > 0) || slip.cost > balance(account)) return { error: 'funds' };
+// Staked in the Taiwan week `now` falls in.
+export function stakedThisWeek(account, now = new Date()) {
+  const week = weekKey(now);
+  return 0 - account.ledger.filter(e => e.kind === 'stake' && weekKey(new Date(e.t)) === week).reduce((sum, e) => sum + e.amount, 0);
+}
+
+// `extra`: money in the shared Quadra pool beyond this account's own ledger
+// (Securities' cash, rewards, transfers), spendable here too. `limit`: the
+// most that may be staked this week (0 or none: no limit).
+// Returns { account } or { error: 'funds' | 'limit' }.
+export function placeSlip(account, slip, now = new Date(), { extra = 0, limit = 0 } = {}) {
+  if (!(slip.cost > 0) || slip.cost > balance(account) + extra) return { error: 'funds' };
+  if (limit > 0 && stakedThisWeek(account, now) + slip.cost > limit) return { error: 'limit' };
   const t = now.toISOString();
   const saved = { ...slip, t, status: 'open', legs: slip.legs.map(leg => compactLeg({ ...leg, result: null })) };
   const entry = { id: `stake-${slip.id}`, t, kind: 'stake', amount: -slip.cost, slipId: slip.id };
@@ -259,6 +272,27 @@ export function mergeAccounts(a, b) {
     ledger: [...ledger.values()].sort((x, y) => x.t.localeCompare(y.t)),
     slips: [...slips.values()].sort((x, y) => y.t.localeCompare(x.t))
   };
+}
+
+// Another, separate account folded into this one (the Quadra merge tool):
+// both accounts' money and slips, kept apart where their fixed ids ('start',
+// 'grant-<Monday>') would collide.
+export function mergeDistinct(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const tag = `m${Date.parse(b.created).toString(36)}`;
+  const have = new Set(a.ledger.map(e => e.id));
+  const ledger = b.ledger.map(e => (have.has(e.id) && !/^(stake|payout|game)-/.test(e.id) ? { ...e, id: `${e.id}-${tag}` } : e));
+  return mergeAccounts(a, { ...b, created: a.created, ledger });
+}
+
+// The ledger as the shared pool's entries. A mini-game round's entry keeps
+// changing while it's played, so it's shared once the round is well over.
+export function poolEntries(account, now = new Date()) {
+  const settled = now.getTime() - 10 * 60_000;
+  return account.ledger
+    .filter(e => e.kind !== 'game' || Date.parse(e.t) < settled)
+    .map(e => ({ id: `odds:${e.id}`, t: Date.parse(e.t), app: 'odds', kind: e.kind, amount: e.amount }));
 }
 
 // Whether a stored value looks like an account (from storage or the sync).

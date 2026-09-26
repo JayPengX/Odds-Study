@@ -26,7 +26,7 @@ test('weeks start on Monday, Taiwan time', () => {
   assert.equal(weekKey(at('2026-09-27T16:30:00Z')), '2026-09-28');
 });
 
-test('a new account starts with NT$10,000 and claims NT$5,000 once a week from the next week', () => {
+test('a new account starts with NT$10,000 and gets its weekly grant once a week from the next week', () => {
   let account = newAccount(at('2026-09-25T00:00:00Z'));
   assert.equal(balance(account), START_BALANCE);
   assert.equal(canClaim(account, at('2026-09-26T00:00:00Z')), false);
@@ -303,4 +303,27 @@ test('money sources: every NT$ in and out of the account, by where it came from'
   assert.deepEqual(m.open, { n: 1, sum: 200 });
   assert.equal(m.weeks.length, 1);
   assert.equal(m.weeks[0].games, 85);
+});
+
+test('Quadra pool: extra money to bet with, the weekly limit, entries for the pool', async () => {
+  const { newAccount, placeSlip, poolEntries, stakedThisWeek, mergeDistinct, balance, claimGrant } = await import('../public/lib/account.mjs');
+  const now = new Date('2026-09-23T04:00:00Z');
+  const base = newAccount(new Date('2026-09-01T00:00:00Z'));
+  const slip = (id, cost) => ({ id, mode: 'single', sizes: [1], stake: cost, cost, legs: [{ id: 'x', odds: 2 }] });
+  // Beyond the ledger's own NT$10,000, with the pool's extra.
+  assert.deepEqual(placeSlip(base, slip('a', 15_000), now), { error: 'funds' });
+  const { account } = placeSlip(base, slip('a', 15_000), now, { extra: 90_000 });
+  assert.equal(balance(account), -5_000);
+  assert.equal(stakedThisWeek(account, now), 15_000);
+  assert.deepEqual(placeSlip(account, slip('b', 600), now, { extra: 90_000, limit: 15_500 }), { error: 'limit' });
+  assert.ok(placeSlip(account, slip('b', 500), now, { extra: 90_000, limit: 15_500 }).account);
+  // A new week starts the limit over.
+  assert.equal(stakedThisWeek(account, new Date('2026-09-29T04:00:00Z')), 0);
+  const entries = poolEntries(account, now);
+  assert.deepEqual(entries.map(e => [e.id, e.amount, e.app]), [['odds:start', 10_000, 'odds'], ['odds:stake-a', -15_000, 'odds']]);
+  // Two separate accounts folded together keep both starts and grants.
+  const other = claimGrant(newAccount(new Date('2026-08-01T00:00:00Z')), new Date('2026-09-22T01:00:00Z'));
+  const both = mergeDistinct(claimGrant(base, new Date('2026-09-22T01:00:00Z')), other);
+  assert.equal(balance(both), 2 * (10_000 + 1_000));
+  assert.equal(mergeDistinct(both, other).ledger.length, both.ledger.length);
 });
