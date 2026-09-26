@@ -38,6 +38,7 @@ import {
   median,
   quantile,
   SLIP_RULES,
+  afterTax,
   choose,
   seededRandom,
   simulateCrowd,
@@ -1628,9 +1629,8 @@ function renderParlay() {
       legs.map(b =>
         el('li', {}, [
           betIcon(b),
-          // The start time tells doubleheader games apart.
-          el('span', { class: 'leg-main' }, [el('strong', { text: b.shortLabel }), el('small', { class: 'slip-leg-game', text: b.start ? `${b.matchup} · ${fmtTime(b.start)}` : b.matchup })]),
-          el('span', { class: 'leg-odds', text: fmtOdds(effectiveOdds(b)) }),
+          legMain(b),
+          el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(effectiveOdds(b)))]),
           el('button', { class: 'leg-remove', type: 'button', 'aria-label': t('removeLeg'), text: '×', onclick: () => toggleLeg(b) })
         ])
       )
@@ -1692,6 +1692,7 @@ function renderParlay() {
     ticket.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit }) }))));
   }
   const cost = sizes.reduce((sum, k) => sum + choose(n, k), 0) * stake;
+  if (sizes.length && !errors.includes('stakeUnit')) ticket.push(payoutBox(slip, sizes, stake, mode));
   ticket.push(placeButton(legs, sizes, cost, errors));
   ticket.push(el('details', { class: 'info' }, [el('summary', { text: t('slipRulesTitle') }), el('p', { text: t('slipRulesNote') })]));
 
@@ -1725,6 +1726,71 @@ function renderParlay() {
     });
   }
   body.replaceChildren(el('div', { class: 'slip has-legs' }, [el('div', { class: 'card ticket' }, ticket), el('div', { class: 'slip-results' }, results)]));
+}
+
+// ---- Slip: what each pick is, what the ticket pays ------------------------------
+
+// The market a pick is from, as a small tag: 不讓分, 大小分, 讓分 …
+function marketTag(kind) {
+  const key = { ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'topInningShort', f1: 'f1Short', future: 'futuresTitle' }[kind];
+  return key ? el('span', { class: `market-tag tag-${kind}`, text: state.t(key) }) : null;
+}
+
+// A pick on a slip: what it is (with its market), then its game and start
+// time in full (the time tells doubleheader games apart).
+function legMain(leg) {
+  return el('span', { class: 'leg-main' }, [
+    el('span', { class: 'leg-pick' }, [marketTag(leg.kind), el('strong', { text: leg.shortLabel })]),
+    el('small', { class: 'slip-leg-game', text: leg.start ? `${leg.matchup} · ${fmtTime(leg.start)}` : leg.matchup })
+  ]);
+}
+
+// Payout at a glance: for a parlay the odds multiplied out, for singles each
+// pick's return, for a system each size; then cost, what all correct pays
+// (after tax) and the least a winning ticket pays.
+function payoutBox(legs, sizes, stake, mode) {
+  const t = state.t;
+  const n = legs.length;
+  const combos = sizes.reduce((sum, k) => sum + choose(n, k), 0);
+  const cost = combos * stake;
+  const { gross, net } = slipPayoutTable({ legs, sizes, stake });
+  const all = (1 << n) - 1;
+  let least = Infinity;
+  for (let won = 1; won < gross.length; won++) if (gross[won] > 0) least = Math.min(least, net[won]);
+  const rows = [];
+  if (mode === 'parlay') {
+    const product = legs.reduce((p, l) => p * l.odds, 1);
+    rows.push(el('div', { class: 'pay-line pay-formula' }, [
+      el('span', { text: `${legs.map(l => fmtOdds(l.odds)).join(' × ')} =` }),
+      el('strong', { text: `×${fmtOdds(product)}` })
+    ]));
+    rows.push(payLine(t('payStake'), fmtMoney(stake, { sign: false })));
+  } else if (mode === 'single') {
+    legs.forEach((l, i) => rows.push(payLine(`${t('payEach', { i: i + 1 })} ${fmtMoney(stake, { sign: false })} × ${fmtOdds(l.odds)}`, fmtMoney(afterTax(stake * l.odds), { sign: false }))));
+  } else {
+    for (const k of sizes) rows.push(payLine(t('paySize', { size: sizeName(k, n), c: fmtInt(choose(n, k)) }), fmtMoney(choose(n, k) * stake, { sign: false })));
+  }
+  rows.push(payLine(t('payCost', { c: fmtInt(combos) }), fmtMoney(cost, { sign: false }), 'pay-cost'));
+  const taxed = gross[all] - net[all] > 0.5;
+  return el('div', { class: 'pay-box' }, [
+    el('p', { class: 'pay-title', text: t('payTitle') }),
+    ...rows,
+    el('div', { class: 'pay-top' }, [
+      el('span', { text: t('payAll') }),
+      el('strong', { text: fmtMoney(net[all], { sign: false }) }),
+      el('small', { class: net[all] > cost ? 'back-high' : 'back-low', text: t('payProfit', { v: fmtMoney(net[all] - cost) }) })
+    ]),
+    taxed ? el('p', { class: 'pay-note', text: t('payTaxed', { gross: fmtMoney(gross[all], { sign: false }), tax: fmtMoney(gross[all] - net[all], { sign: false }) }) }) : null,
+    mode !== 'parlay' && least < net[all] ? el('p', { class: 'pay-note', text: t('payLeast', { v: fmtMoney(least, { sign: false }) }) }) : null
+  ]);
+}
+
+function payCell(label, value, cls = '') {
+  return el('div', { class: 'pay-cell' }, [el('small', { text: label }), el('strong', { class: cls, text: value })]);
+}
+
+function payLine(label, value, cls = '') {
+  return el('div', { class: `pay-line ${cls}` }, [el('span', { text: label }), el('strong', { text: value })]);
 }
 
 // ---- Simulated account and saved slips ------------------------------------------
@@ -2042,18 +2108,18 @@ function savedSlipCard(slip) {
       slip.legs.map(leg =>
         el('li', { class: leg.result ? `leg-${leg.result}` : '' }, [
           el('span', { class: 'leg-result', 'aria-label': leg.result ? t(`legResult_${leg.result}`) : t('legPending'), text: RESULT_ICON[leg.result] ?? '⏳' }),
-          el('span', { class: 'leg-main' }, [el('strong', { text: leg.shortLabel }), el('small', { class: 'slip-leg-game', text: leg.start ? `${leg.matchup} · ${fmtTime(leg.start)}` : leg.matchup })]),
-          el('span', { class: 'leg-odds', text: fmtOdds(leg.odds) })
+          legMain(leg),
+          el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(leg.odds))])
         ])
       )
     ),
-    slipInsight(slip),
-    el('p', { class: 'saved-foot' }, [
-      el('span', { text: `${t('slipCost')} ${fmtMoney(slip.cost, { sign: false })}` }),
-      settled
-        ? el('strong', { class: profit > 0 ? 'back-high' : profit < 0 ? 'back-low' : '', text: `${t('slipResult')} ${fmtMoney(profit)}` })
-        : el('span', { class: 'muted', text: `${t('slipTop')} ${fmtMoney(top, { sign: false })}` })
-    ])
+    el('div', { class: 'saved-pay' }, [
+      payCell(t('slipCost'), fmtMoney(slip.cost, { sign: false })),
+      slip.mode === 'parlay' ? payCell(t('payOdds'), `×${fmtOdds(slip.legs.reduce((p, l) => p * l.odds, 1))}`) : null,
+      settled ? payCell(t('slipPaidLabel'), fmtMoney(slip.payout, { sign: false })) : payCell(t('payAll'), fmtMoney(top, { sign: false })),
+      settled ? payCell(t('slipResult'), fmtMoney(profit), profit > 0 ? 'back-high' : profit < 0 ? 'back-low' : '') : null
+    ]),
+    slipInsight(slip)
   ]);
 }
 

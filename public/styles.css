@@ -938,3 +938,29 @@ details.market[open] > summary { margin-bottom: 6px; }
 .line-row .pick, .line-row .pick-wrap { min-width: 0; }
 .market-panel.inning .market-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
 .line-title { font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); }
+
+/* Slip: what each pick is, what it pays */
+.leg-pick { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.leg-pick strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parlay-legs .slip-leg-game { white-space: normal; overflow: visible; }
+.market-tag { flex: none; font-size: 0.66rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--surface-sunken); color: var(--text-secondary); }
+.market-tag.tag-ml { background: var(--accent-wash); color: var(--accent); }
+.market-tag.tag-total, .market-tag.tag-teamtotal { background: var(--good-wash); color: var(--good); }
+.market-tag.tag-runline { background: var(--bad-wash); color: var(--bad); }
+.leg-odds { font-size: 1.1rem; }
+.leg-odds small { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); margin-right: 1px; }
+.pay-box { display: grid; gap: 6px; margin: 0 0 12px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-raised); border: 1px solid var(--border); }
+.pay-title { font-size: 0.78rem; font-weight: 700; color: var(--text-secondary); }
+.pay-line { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.pay-line span { color: var(--text-secondary); min-width: 0; overflow-wrap: anywhere; }
+.pay-formula strong { font-size: 1.15rem; color: var(--accent); }
+.pay-cost { border-top: 1px dashed var(--grid); padding-top: 6px; }
+.pay-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; border-top: 1px solid var(--grid); padding-top: 8px; }
+.pay-top span { font-size: 0.86rem; font-weight: 600; }
+.pay-top strong { font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-left: auto; }
+.pay-top small { flex-basis: 100%; text-align: right; font-size: 0.8rem; font-weight: 600; }
+.pay-note { font-size: 0.74rem; color: var(--text-muted); }
+.saved-pay { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-raised); }
+.pay-cell { display: grid; gap: 2px; min-width: 0; }
+.pay-cell small { font-size: 0.72rem; color: var(--text-muted); }
+.pay-cell strong { font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
