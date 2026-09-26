@@ -119,6 +119,7 @@
   <div id="panel-games" class="tab-panel" role="tabpanel" aria-labelledby="tab-games">
     <div class="toolbar">
       <nav id="sport-filter" class="chips" aria-label="sport"></nav>
+      <nav id="league-filter" class="chips league-chips" aria-label="league" hidden></nav>
       <nav id="day-filter" class="chips" aria-label="day"></nav>
     </div>
 
@@ -129,18 +130,6 @@
       </div>
       <p class="lede" data-t="liveIntro"></p>
       <div id="live-list" class="games-grid"></div>
-    </section>
-
-    <section id="ranking" class="card ranking-card">
-      <div class="ranking-head">
-        <h2 id="ranking-title"></h2>
-      </div>
-      <ol id="ranking-podium" class="podium"></ol>
-      <div id="ranking-notes" class="ranking-notes"></div>
-      <details class="ranking-more">
-        <summary id="ranking-more-label"></summary>
-        <ol id="ranking-list" class="ranking-list"></ol>
-      </details>
     </section>
 
     <section id="games" aria-labelledby="games-title">
@@ -197,8 +186,6 @@
           <label class="period-head" for="sim-months"><span data-t="periodLabel"></span><strong id="period-value"></strong></label>
           <input id="sim-months" type="range" min="1" max="60" step="1" value="12" />
           <div id="sim-periods" class="period-presets" role="group"></div>
-          <div id="sim-stake" class="segmented sim-stake" role="group"></div>
-          <p id="sim-stake-note" class="note"></p>
         </div>
         <input id="sim-weeks" type="hidden" value="52" />
       </div>
@@ -215,27 +202,18 @@
         <div id="sim-lapse"></div>
       </div>
       <div id="sim-players" class="players"></div>
-      <div class="two-col">
-        <div class="card">
-          <h3 class="card-title" data-t="habitsTitle"></h3>
-          <ol id="sim-habits" class="bars-list"></ol>
-        </div>
-        <div class="card">
-          <h3 class="card-title" data-t="fansTitle"></h3>
-          <ol id="sim-fans" class="bars-list"></ol>
-        </div>
-      </div>
       <div class="card">
         <h3 class="card-title" data-t="traitsTitle"></h3>
-        <p class="lede" data-t="traitsIntro"></p>
-        <ol id="sim-traits" class="bars-list"></ol>
+        <div id="sim-group-tabs" class="segmented group-tabs" role="tablist"></div>
+        <p id="sim-group-note" class="note"></p>
+        <ol id="sim-groups" class="bars-list"></ol>
       </div>
       <div class="two-col">
         <div class="card">
           <h3 class="card-title" data-t="youTitle"></h3>
           <p class="lede" data-t="youIntro"></p>
           <div class="you-pickers">
-            <select id="you-habit" aria-label="habit"></select>
+            <select id="you-trait" aria-label="trait"></select>
             <select id="you-fan" aria-label="fan"></select>
           </div>
           <div id="you-result"></div>

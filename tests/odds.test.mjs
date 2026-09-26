@@ -21,12 +21,6 @@ import {
   combineParlay,
   blendOutcomes,
   devigProportional,
-  HABITS,
-  habitPools,
-  simulateHabit,
-  simulateCrowdStats,
-  groupSize,
-  playerRandom,
   quantile,
   seededRandom,
   K_BOTH,
@@ -105,100 +99,6 @@ test('proportional devig handles three outcomes', () => {
   close(a + d + h, 1);
   assert.ok(h > 0.68 && h < 0.7);
   assert.equal(devigProportional([0.5, null, 0.5]), null);
-});
-
-// 10 games, two sides each, every price at the estimated 1.15 cut.
-function examplePool() {
-  const pool = [];
-  for (let g = 0; g < 10; g++) {
-    const p = 0.35 + g * 0.03;
-    for (const q of [p, 1 - p]) pool.push({ gameId: g, fairChance: q, odds: estimateLotteryOdds(q, 1.15) });
-  }
-  return pool;
-}
-const habit = key => HABITS.find(h => h.key === key);
-
-test('habit pools pick favorites, underdogs and the least costly bets', () => {
-  const pools = habitPools(examplePool());
-  assert.ok(pools.favorite.every(b => b.fairChance >= 0.55));
-  assert.ok(pools.underdog.every(b => b.fairChance <= 0.4));
-  assert.equal(pools.best.length, 5);
-  // Nothing to pick falls back to the whole pool.
-  const even = [{ gameId: 1, fairChance: 0.5, odds: 1.74 }, { gameId: 2, fairChance: 0.5, odds: 1.74 }];
-  assert.equal(habitPools(even).favorite.length, 2);
-});
-
-test('a season is reproducible and its path adds up', () => {
-  const pools = habitPools(examplePool());
-  const run = () => simulateHabit({ habit: habit('casual'), pools, weeks: 52, random: seededRandom(5), big: false, traits: false });
-  assert.deepEqual(run(), run());
-  const a = run();
-  assert.equal(a.path.length, 52);
-  assert.equal(a.final, a.path.at(-1));
-  assert.ok(a.wonTickets <= a.tickets && a.staked >= a.tickets * 100 && a.maxStake <= 3000);
-  assert.equal(a.everAhead, a.peak > 0);
-});
-
-test('the chaser doubles after a losing week and stays under the cap', () => {
-  const pools = habitPools(examplePool());
-  const run = simulateHabit({ habit: habit('chaser'), pools, weeks: 156, random: seededRandom(2), big: false, traits: false });
-  assert.ok(run.maxStake > 200 && run.maxStake <= 3000);
-  assert.ok([400, 800, 1600, 3000].includes(run.maxStake));
-});
-
-test('riders keep betting their winnings, within the ticket limit', () => {
-  const pools = habitPools(examplePool());
-  const ride = key => simulateHabit({ habit: habit(key), pools, weeks: 260, random: seededRandom(5) });
-  const flat = key => simulateHabit({ habit: { ...habit(key), ride: false }, pools, weeks: 260, random: seededRandom(5) });
-  for (const key of ['dreamer', 'underdog']) {
-    const [r, f] = [ride(key), flat(key)];
-    assert.ok(r.tickets >= f.tickets, key);
-    assert.ok(r.staked > f.staked, key);
-    assert.ok(r.maxStake > 3000 && r.maxStake <= 100_000 && r.maxStake % 10 === 0, `${key} ${r.maxStake}`);
-  }
-});
-
-test('the habits\' quirks: breaks, hot hands and burnout', () => {
-  const pools = habitPools(examplePool());
-  const run = (key, change = {}) => simulateHabit({ habit: { ...habit(key), ...change }, pools, weeks: 156, random: seededRandom(7), big: false, traits: false });
-  // Casual, chaser and careful take weeks off; the others never do.
-  for (const key of ['casual', 'chaser', 'careful']) assert.ok(run(key).restWeeks > 0, key);
-  for (const key of ['fan', 'underdog', 'dreamer']) assert.equal(run(key).restWeeks, 0, key);
-  // Without the quirk, no weeks off and (for the fan) smaller stakes.
-  assert.equal(run('casual', { satisfied: 0, quitStreak: null }).restWeeks, 0);
-  assert.ok(run('fan').staked > run('fan', { hotHand: false }).staked);
-  assert.ok(run('fan').maxStake <= 3000);
-});
-
-test('each extra parlay leg takes the cut again, and a big crowd is stable', () => {
-  const pools = habitPools(examplePool());
-  const crowd = seed => simulateCrowdStats({ pools, weeks: 52, perHabit: 2000, seed, big: false });
-  const a = crowd(1);
-  const back = key => a.summaries.find(h => h.habit.key === key).back;
-  // 2 legs: (1 / 1.15)^2 = 75.6 before tax; the occasional big ticket paying
-  // over NT$5,000 loses 20.4% to tax, so a bit less. 4-6 legs: about 50.
-  assert.ok(back('casual') > 66 && back('casual') < 76, `${back('casual')}`);
-  assert.ok(back('dreamer') > 38 && back('dreamer') < 60, `${back('dreamer')}`);
-  // The same seed is the same world: identical results. (Another seed is
-  // another world, with its own lucky and unlucky results for everyone.)
-  const b = crowd(1);
-  for (let i = 0; i < a.summaries.length; i++) assert.equal(a.summaries[i].back, b.summaries[i].back);
-  // Bands are ordered and every week is counted.
-  for (const w of a.bands) assert.ok(w.q10 <= w.q25 && w.q25 <= w.q50 && w.q50 <= w.q75 && w.q75 <= w.q90);
-  assert.equal(a.players, 2000 * HABITS.length);
-});
-
-test('the highlighted players are replayed exactly and sit at their rank', () => {
-  const pools = habitPools(examplePool());
-  const stats = simulateCrowdStats({ pools, weeks: 26, perHabit: 300, seed: 4 });
-  const { best, median, worst } = stats.characters;
-  assert.ok(worst.final <= median.final && median.final <= best.final);
-  assert.equal(best.path.length, 26);
-  assert.equal(best.path.at(-1), best.final);
-  // Same seed and index, same player.
-  const again = simulateHabit({ habit: best.habit, pools, weeks: 26, random: playerRandom(4, 0) });
-  const first = simulateHabit({ habit: best.habit, pools, weeks: 26, random: playerRandom(4, 0) });
-  assert.deepEqual(again, first);
 });
 
 test('quantile interpolates a sorted list', () => {
@@ -366,46 +266,6 @@ test('MLB run lines: the lottery shrinks DraftKings toward 50/50', () => {
   assert.ok(dog.fair > dog.lottery);
 });
 
-test('the streaming crowd equals simulating everyone in full', () => {
-  // The slow way: every player's whole path kept, exact percentiles.
-  const pools = habitPools(examplePool());
-  const weeks = 13;
-  const perHabit = 400;
-  const seed = 9;
-  const stats = simulateCrowdStats({ pools, weeks, perHabit, seed });
-  const players = [];
-  let start = 0;
-  for (const habit of HABITS) {
-    const n = groupSize(habit, perHabit);
-    for (let i = 0; i < n; i++) players.push({ index: start + i, ...simulateHabit({ habit, pools, weeks, random: playerRandom(seed, start + i), seed }) });
-    start += n;
-  }
-  // Totals match to the cent.
-  close(stats.totals.staked, players.reduce((s, p) => s + p.staked, 0), 1e-6);
-  close(stats.totals.net, players.reduce((s, p) => s + p.final, 0), 1e-6);
-  assert.equal(stats.totals.aheadShare, players.filter(p => p.final > 0).length / players.length);
-  // The highlighted players are the same people, replayed exactly.
-  const byFinal = [...players].sort((a, b) => a.final - b.final);
-  const at = q => byFinal[Math.round((byFinal.length - 1) * q)];
-  for (const [key, q] of [['best', 0.9], ['median', 0.5], ['worst', 0.1]]) {
-    assert.equal(stats.characters[key].final, at(q).final, key);
-    assert.deepEqual([...stats.characters[key].path], [...at(q).path], key);
-  }
-  // Record holders too.
-  assert.equal(stats.notable.best.final, byFinal.at(-1).final);
-  assert.equal(stats.notable.worst.final, byFinal[0].final);
-  // Weekly bands: within one histogram step of the exact percentiles.
-  const step = (2 * (2500 * weeks + 20000)) / Math.min(20000, Math.floor(2_000_000 / weeks));
-  for (let w = 0; w < weeks; w++) {
-    const values = players.map(p => p.path[w]).sort((a, b) => a - b);
-    for (const [k, q] of [['q10', 0.1], ['q50', 0.5], ['q90', 0.9]]) {
-      const exact = values[Math.floor(q * (values.length - 1))];
-      assert.ok(Math.abs(stats.bands[w][k] - exact) <= step, `week ${w} ${k}: ${stats.bands[w][k]} vs ${exact}`);
-    }
-    assert.equal(stats.bands[w].ahead, values.filter(v => v > 0).length);
-  }
-});
-
 test('ticket analysis: exact figures, where the money goes, each leg, one short', async () => {
   const { analyzeSlip } = await import('../public/lib/odds.mjs');
   const legs = [
@@ -435,88 +295,6 @@ test('ticket analysis: exact figures, where the money goes, each leg, one short'
   close(a.nearMiss, a.byHits[3].chance, 1e-12);
 });
 
-test('the sport calendar has a realistic number of games per year', async () => {
-  const { gamesInWeek, SPORTS } = await import('../public/lib/odds.mjs');
-  const perYear = Object.fromEntries(SPORTS.map(s => [s, Array.from({ length: 52 }, (_, w) => gamesInWeek(s, w)).reduce((a, b) => a + b, 0)]));
-  // MLB ~2,430 + postseason; Premier League 380; NBA 1,230 + playoffs; 24 F1 races.
-  assert.ok(perYear.mlb > 2400 && perYear.mlb < 2650, `${perYear.mlb}`);
-  assert.ok(perYear.epl > 360 && perYear.epl < 410, `${perYear.epl}`);
-  assert.ok(perYear.nba > 1200 && perYear.nba < 1350, `${perYear.nba}`);
-  assert.equal(perYear.f1, 24);
-  // Seasons: no MLB in January, no Premier League or NBA in July.
-  assert.equal(gamesInWeek('mlb', 2), 0);
-  assert.equal(gamesInWeek('epl', 28), 0);
-  assert.equal(gamesInWeek('nba', 28), 0);
-  // The newer sports: NFL 272 + playoffs, NHL 1,312 + playoffs, MLS ~500.
-  assert.ok(perYear.nfl > 270 && perYear.nfl < 320, `${perYear.nfl}`);
-  assert.ok(perYear.nhl > 1250 && perYear.nhl < 1450, `${perYear.nhl}`);
-  assert.ok(perYear.mls > 450 && perYear.mls < 560, `${perYear.mls}`);
-  assert.equal(gamesInWeek('nfl', 25), 0);
-});
-
-test('every listed league is in the simulation, and every simulated sport is listed', async () => {
-  const { SIM_SPORTS, FANS } = await import('../public/lib/odds.mjs');
-  const { LEAGUES, familyOf } = await import('../public/lib/teams.mjs');
-  for (const key of Object.keys(LEAGUES)) assert.ok(SIM_SPORTS[key], `${key} missing from SIM_SPORTS`);
-  for (const [key, sport] of Object.entries(SIM_SPORTS)) {
-    assert.equal(familyOf(key), sport.family, key);
-    assert.ok(FANS.some(f => f.sports.includes(key) && f.key !== 'all'), key);
-  }
-});
-
-test('the multi-sport crowd splits by fan type and replays players exactly', async () => {
-  const { sportTemplate, FANS, SPORTS } = await import('../public/lib/odds.mjs');
-  const sportPools = Object.fromEntries(SPORTS.map(s => [s, habitPools(sportTemplate(s))]));
-  const stats = simulateCrowdStats({ sportPools, startWeek: 38, weeks: 26, perGroup: 60, seed: 3 });
-  assert.equal(stats.players, 60 * HABITS.length * FANS.length);
-  assert.equal(stats.fanSummaries.length, FANS.length);
-  // F1 fans face the biggest cut: on average over several seasons (one season
-  // has only ~24 real races, so it can go either way).
-  let f1 = 0;
-  let mlb = 0;
-  for (const seed of [1, 2, 3, 4, 5, 6]) {
-    const year = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 30, seed });
-    f1 += year.fanSummaries.find(f => f.fan.key === 'f1').back;
-    mlb += year.fanSummaries.find(f => f.fan.key === 'mlb').back;
-  }
-  assert.ok(f1 < mlb, `${f1 / 6} vs ${mlb / 6}`);
-  // Replaying a record holder gives the same person.
-  const again = simulateCrowdStats({ sportPools, startWeek: 38, weeks: 26, perGroup: 60, seed: 3 });
-  assert.equal(again.notable.best.serial, stats.notable.best.serial);
-  assert.equal(again.notable.best.final, stats.notable.best.final);
-  assert.deepEqual([...again.characters.median.path], [...stats.characters.median.path]);
-});
-
-test('one run gives every shorter period, and 3 years carries on from 1 year', async () => {
-  const { simulateCrowd, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
-  const base = { sportPools, startWeek: 38, perGroup: 40, seed: 9 };
-  const strip = r => ({ ...r, bands: undefined });
-  // Checkpoints inside one 52-week run = separate runs of 4 / 13 / 52 weeks.
-  const year = simulateCrowd({ ...base, weeks: 52, checkpoints: [4, 13, 52] });
-  for (const w of [4, 13, 52]) {
-    const alone = simulateCrowdStats({ ...base, weeks: w });
-    assert.deepEqual(strip(year.results[w]), strip(alone), `${w} weeks`);
-    assert.equal(year.results[w].bands.length, w);
-    for (let i = 0; i < w; i++) assert.equal(year.results[w].bands[i].ahead, alone.bands[i].ahead);
-  }
-  // 52 weeks then 104 more = 156 weeks straight.
-  const longer = simulateCrowd({ ...base, weeks: 156, resume: year.resume }).results[156];
-  const straight = simulateCrowdStats({ ...base, weeks: 156 });
-  assert.deepEqual(strip(longer), strip(straight));
-  assert.equal(longer.bands.length, 156);
-  for (let i = 0; i < 156; i++) assert.equal(longer.bands[i].ahead, straight.bands[i].ahead);
-});
-
-test('ticket frequency matches surveys: about one ticket every two weeks for the median bettor', async () => {
-  const { simulateCrowdStats, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
-  const stats = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 100, seed: 2 });
-  const perMonth = stats.totals.tickets / stats.players / 12;
-  // Hong Kong football bettors (HKU, 2021): median once every two weeks.
-  assert.ok(perMonth > 1 && perMonth < 3.5, `${perMonth} tickets a month`);
-});
-
 test('every guide entry is a [title, text] pair in both languages', async () => {
   globalThis.navigator ??= { language: 'en' };
   const { makeT } = await import('../public/lib/i18n.mjs');
@@ -527,44 +305,6 @@ test('every guide entry is a [title, text] pair in both languages', async () => 
       for (const item of items) assert.ok(Array.isArray(item) && item.length === 2 && item.every(x => typeof x === 'string'), `${locale} ${title}: ${JSON.stringify(item).slice(0, 60)}`);
     }
   }
-});
-
-test('any player can be replayed on their own, and groups add up', async () => {
-  const { simulateCrowdStats, replayPlayer, sportTemplate, SPORTS, FANS } = await import('../public/lib/odds.mjs');
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
-  const opts = { sportPools, startWeek: 20, weeks: 26, perGroup: 30, seed: 5 };
-  const stats = simulateCrowdStats(opts);
-  for (const who of Object.values(stats.notable)) {
-    const again = replayPlayer({ ...opts, index: who.serial - 1 });
-    assert.equal(again.final, who.final);
-    assert.equal(again.tickets, who.tickets);
-    assert.equal(again.habit, who.habit);
-  }
-  // The stories are spread over the habits: every habit tells at least one.
-  const habitsTelling = new Set(Object.values(stats.notable).map(who => who.habit.key));
-  assert.equal(habitsTelling.size, HABITS.length);
-  for (const key of ['best', 'worst']) assert.ok(stats.notable[key].overall, key);
-  assert.equal(stats.groupStats.length, HABITS.length * FANS.length);
-  assert.equal(stats.groupStats.reduce((n, g) => n + g.players, 0), stats.players);
-  for (const g of stats.groupStats) assert.ok(g.worst <= g.q10 && g.q10 <= g.median && g.median <= g.q90 && g.q90 <= g.best);
-});
-
-test('everyone bets into one world: a race has one winner for all', async () => {
-  const { simulateCrowdStats, sportTemplate, estimateF1LotteryOdds, SPORTS } = await import('../public/lib/odds.mjs');
-  // An F1 field with long shots, as the lottery prices it.
-  const raw = [0.41, 0.22, 0.145, 0.115, 0.0555, 0.034, 0.0275, 0.0065, ...Array(14).fill(0.0015), 0.0025, 0.002, 0.0005];
-  const sum = raw.reduce((a, b) => a + b);
-  const f1 = raw.map((p, i) => ({ gameId: 'race', key: `f1|race|win|${i}`.replace(/\|\d+$/, ''), fairChance: p / sum, odds: estimateF1LotteryOdds(p / sum) }));
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sp === 'f1' ? f1 : sportTemplate(sp))]));
-  // Over many worlds, a 0.1-0.25% driver comes in rarely: the longest shot
-  // anyone cashes in a season is usually a normal price.
-  let longshotSeasons = 0;
-  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
-    const stats = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed });
-    if (stats.notable.longshot.longshotOdds >= 300) longshotSeasons++;
-  }
-  // 24 races, each with ~2% combined chance for a 300+ driver: ~40% of seasons at most.
-  assert.ok(longshotSeasons <= 5, `${longshotSeasons} of 8 seasons`);
 });
 
 test('wider lines: team totals and run lines from the score model, odds never below 1.01', async () => {
@@ -584,85 +324,3 @@ test('wider lines: team totals and run lines from the score model, odds never be
   close(estimateLineOdds(0.5, 1.158), 1.73, 0.01);
 });
 
-test('simulated players play by the practice account rules: NT$10,000, NT$5,000 a week, no betting money they lack', async () => {
-  const { simulateHabit, habitPools, sportTemplate, SIM_START_BALANCE, SIM_WEEKLY_GRANT } = await import('../public/lib/odds.mjs');
-  const pools = habitPools(sportTemplate('mlb'));
-  // Someone who wants NT$20,000 tickets every week can only bet what they have.
-  const greedy = { key: 'greedy', share: 0, perWeek: 3, legs: [1, 1], stakes: [20_000], big: 0, pick: 'any' };
-  const story = simulateHabit({ habit: greedy, pools, weeks: 10, seed: 3 });
-  assert.ok(story.shortWeeks > 0);
-  // Never below zero, and the balance is the start, the claims and the result.
-  assert.ok(story.lowestCash >= 0, story.lowestCash);
-  assert.ok(Math.abs(story.cash - (SIM_START_BALANCE + 9 * SIM_WEEKLY_GRANT + story.final)) < 1e-6);
-  // A person who can afford every ticket bets exactly as before.
-  const casual = simulateHabit({ habit: HABITS[0], pools, weeks: 20, seed: 3 });
-  assert.equal(casual.shortWeeks, 0);
-});
-
-test('big bets (the default): stakes grow with the balance, and every winner\'s NT$ comes from a loser', async () => {
-  const { simulateCrowdStats, habitPools, sportTemplate, SPORTS } = await import('../public/lib/odds.mjs');
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
-  const big = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed: 2 });
-  const real = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed: 2, big: false });
-  assert.ok(big.totals.staked > 3 * real.totals.staked, `${big.totals.staked} vs ${real.totals.staked}`);
-  for (const stats of [big, real]) {
-    const f = stats.flow;
-    // Losers' losses = winners' winnings + the lottery's take + tax.
-    assert.ok(Math.abs(f.balance) < 1e-3 * f.staked, `${f.balance}`);
-    assert.ok(Math.abs(f.losersLost - (f.winnersWon + f.take + f.tax)) < 1e-3 * f.staked);
-    // Winners won on their winning tickets and lost on others: net = paid - staked.
-    assert.ok(Math.abs(f.winnersPaid - f.winnersStaked - f.winnersWon) < 1e-3 * f.staked);
-    assert.ok(f.winnersLost > 0);
-    assert.ok(f.take > 0);
-    assert.equal(f.weeks, 52);
-  }
-});
-
-test('personality traits: people are combinations, and traits change what they do', async () => {
-  const { simulateCrowdStats, replayPlayer, habitPools, sportTemplate, SPORTS, TRAITS, traitKeys } = await import('../public/lib/odds.mjs');
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
-  const opts = { sportPools, startWeek: 10, weeks: 52, perGroup: 60, seed: 4, big: false };
-  const stats = simulateCrowdStats(opts);
-  const by = key => stats.traitSummaries.find(x => x.trait.key === key);
-  assert.equal(stats.traitSummaries.length, TRAITS.length + 1);
-  // Each trait is about as common as its share.
-  for (const trait of TRAITS) assert.ok(Math.abs(by(trait.key).share - trait.share) < 0.03, trait.key);
-  // Tilting raises stakes; the easily bored really quit.
-  assert.ok(by('tilt').avgStaked > by('none').avgStaked);
-  assert.ok(by('bored').quitShare > 0.1);
-  assert.equal(by('none').quitShare, 0);
-  // Replayed players keep their traits.
-  for (const who of Object.values(stats.notable).slice(0, 4)) {
-    const again = replayPlayer({ ...opts, index: who.serial - 1 });
-    assert.deepEqual(traitKeys(again.traits), traitKeys(who.traits));
-    assert.equal(again.final, who.final);
-  }
-});
-
-test('who holds the winnings, and the top-10 leaderboards', async () => {
-  const { simulateCrowdStats, surplusOf, habitPools, sportTemplate, SPORTS, LEADERBOARDS, LEADER_SIZE } = await import('../public/lib/odds.mjs');
-  // Sorted results: -5, -1, 0, 2, 3, 15 → winners 2, 3, 15 = 20; the top one holds 75%.
-  const s = surplusOf(Float64Array.from([-5, -1, 0, 2, 3, 15]));
-  assert.equal(s.total, 20);
-  assert.equal(s.winners, 3);
-  assert.equal(s.top1, 0.75);
-  assert.equal(s.top10, 1);
-  assert.equal(s.half, 1);
-  assert.deepEqual(surplusOf(Float64Array.from([-3, -1])), { total: 0, winners: 0, top1: 0, top10: 0, topTenth: 0, topPct: 0, half: 0 });
-
-  const sportPools = Object.fromEntries(SPORTS.map(sp => [sp, habitPools(sportTemplate(sp))]));
-  const stats = simulateCrowdStats({ sportPools, startWeek: 10, weeks: 52, perGroup: 40, seed: 3 });
-  assert.ok(stats.surplus.total > 0);
-  assert.ok(stats.surplus.top1 > 0 && stats.surplus.top1 <= stats.surplus.top10 && stats.surplus.top10 <= stats.surplus.topPct && stats.surplus.topPct <= 1);
-  assert.deepEqual(Object.keys(stats.leaders), Object.keys(LEADERBOARDS));
-  for (const [key, list] of Object.entries(stats.leaders)) {
-    assert.ok(list.length <= LEADER_SIZE, key);
-    // In order: the lowest first for results below zero, the highest otherwise.
-    for (let i = 1; i < list.length; i++) assert.ok(list[i].value < 0 ? list[i - 1].value <= list[i].value : list[i - 1].value >= list[i].value, key);
-  }
-  // The biggest winner tops the board, and matches the crowd's record and results.
-  const top = stats.leaders.best[0];
-  assert.equal(top.serial, stats.notable.best.serial);
-  assert.equal(top.value, stats.finalQuantiles.at(-1));
-  assert.ok(Math.abs(top.value / stats.surplus.total - stats.surplus.top1) < 1e-9);
-});

@@ -123,12 +123,46 @@ export function legResult(leg, outcome) {
       const final = `${home}-${away}`;
       return win(leg.score === 'other' ? !(leg.listed || []).includes(final) : leg.score === final);
     }
+    case 'htft': {
+      // Half-time and full-time results, both right.
+      const a = outcome.awayInnings || [];
+      const h = outcome.homeInnings || [];
+      if (!a.length && !h.length) return null;
+      const res = (x, y) => (y > x ? 'home' : y === x ? 'draw' : 'away');
+      return win(res(Number(a[0]) || 0, Number(h[0]) || 0) === leg.ht && res(away, home) === leg.ft);
+    }
+    case 'goalbands':
+      return win(away + home >= leg.lo && (leg.hi == null || away + home <= leg.hi));
+    // Played in sets: the score is sets won; `homeSets`/`awaySets` each set's score.
+    case 'sets':
+      return win(`${home}-${away}` === leg.score);
+    case 'totalsets':
+      return push(leg.side === 'over' ? away + home - leg.line : leg.line - away - home);
+    case 'sethcap':
+      return push(leg.side === 'away' ? away + leg.line - home : home + leg.line - away);
+    case 'firstset': {
+      const h = outcome.homeSets?.[0];
+      const a = outcome.awaySets?.[0];
+      if (h == null || a == null) return null;
+      return win(leg.side === 'home' ? h > a : a > h);
+    }
+    case 'gamehcap':
+    case 'gametotal': {
+      // Games (tennis) or points across every set.
+      if (!outcome.homeSets || !outcome.awaySets) return null;
+      const sum = list => list.reduce((s, x) => s + (Number(x) || 0), 0);
+      const hs = sum(outcome.homeSets);
+      const as = sum(outcome.awaySets);
+      if (leg.kind === 'gametotal') return push(leg.side === 'over' ? hs + as - leg.line : leg.line - hs - as);
+      return push(leg.side === 'away' ? as + leg.line - hs : hs + leg.line - as);
+    }
+    case 'q1':
     case 'half':
     case 'f5':
     case 'regulation': {
       // Part of the game, from the period scores: the first half (one soccer
       // half, two quarters), the first five innings, or hockey's three periods.
-      const periods = leg.kind === 'f5' ? 5 : leg.kind === 'regulation' ? 3 : leg.sport && isSoccer(leg.sport) ? 1 : 2;
+      const periods = leg.kind === 'f5' ? 5 : leg.kind === 'regulation' ? 3 : leg.kind === 'q1' || (leg.sport && isSoccer(leg.sport)) ? 1 : 2;
       const a = outcome.awayInnings || [];
       const h = outcome.homeInnings || [];
       if (!a.length && !h.length) return null;

@@ -5,6 +5,8 @@
 import { americanToProbability, devigProportional, devigPower } from './odds.mjs';
 import { normalizeTeamName, teamZh, LEAGUES, familyOf, isSoccer, rememberLogo } from './teams.mjs';
 import { runOrder } from './live.mjs';
+import { fetchKambiLeague, fetchKambiLive, decidedFromLive } from './kambi.mjs';
+import { KAMBI_LEAGUES } from './teams.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const ESPN = 'https://site.api.espn.com/apis/site/v2/sports';
@@ -92,15 +94,59 @@ export const FUTURES = [
   { key: 'nba', sport: 'nba', title: /^NBA: \d{4} Champion$/i }
 ];
 
+// More championships, found with Polymarket's search after the page opens
+// (they aren't under the tags the page already reads).
+export const EXTRA_FUTURES = [
+  { key: 'nfl', sport: 'nfl', query: 'Pro Football Champion', title: /^Pro Football: \d{4} Champion$/i },
+  { key: 'nhl', sport: 'nhl', query: 'NHL Champion', title: /^NHL: \d{4} Champion$/i },
+  { key: 'wnba', sport: 'wnba', query: 'WNBA Champion', title: /^WNBA: \d{4} Champion$/i },
+  { key: 'ncaaf', sport: 'ncaaf', query: 'NCAA Football National Champion', title: /^NCAA Football: \d{4} National Champion$/i },
+  { key: 'ucl', sport: 'ucl', query: 'UEFA Champions League Champion', title: /^UEFA Champions League: \d{4} Champion$/i },
+  { key: 'uel', sport: 'uel', query: 'UEFA Europa League Champion', title: /^UEFA Europa League: \d{4} Champion$/i },
+  { key: 'laliga', sport: 'laliga', query: 'LALIGA Champion', title: /^LALIGA: \d{4} Champion$/i },
+  { key: 'seriea', sport: 'seriea', query: 'Serie A Champion', title: /^Serie A: \d{4} Champion$/i },
+  { key: 'bundesliga', sport: 'bundesliga', query: 'Bundesliga Champion', title: /^Bundesliga: \d{4} Champion$/i },
+  { key: 'ligue1', sport: 'ligue1', query: 'Ligue 1 Champion', title: /^Ligue 1: \d{4} Champion$/i },
+  { key: 'mls', sport: 'mls', query: 'MLS Cup Winner', title: /^MLS Cup Winner \d{4}$/i },
+  { key: 'f1drivers', sport: 'f1', query: "F1 Drivers' Champion", title: /^F1 Drivers' Champion$/i },
+  { key: 'f1constructors', sport: 'f1', query: "F1 Constructors' Champion", title: /^F1 Constructors' Champion$/i }
+];
+
+// The team (or driver) a championship market is about: Polymarket's short
+// name when it has one, else from the question ("Will the X win the ...?",
+// "Will X be (named) the ... Champion?").
+export function futureTeamName(market) {
+  const short = (market.groupItemTitle || '').trim();
+  if (short) return short;
+  return /^Will (?:the )?(.+?) (?:win the|be (?:named )?the) /i.exec(market.question || '')?.[1] ?? null;
+}
+
 export function proxied(url, trim) {
   return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}${trim ? `&trim=${trim}` : ''}`;
 }
 
+// At most this many requests at once: the page asks for dozens of lists at
+// start-up (leagues, championships), and a burst is what gets a client
+// throttled. The rest wait their turn.
+const MAX_CONCURRENT = 6;
+let running = 0;
+const queue = [];
+async function slot(task) {
+  if (running >= MAX_CONCURRENT) await new Promise(resolve => queue.push(resolve));
+  running++;
+  try {
+    return await task();
+  } finally {
+    running--;
+    queue.shift()?.();
+  }
+}
+
 // One retry after a short pause: a dropped connection on a phone network
 // shouldn't lose a whole sport.
-async function getJson(url, trim, retries = 1) {
+export async function getJson(url, trim, retries = 1) {
   try {
-    const res = await fetch(proxied(url, trim), { signal: AbortSignal.timeout(30_000) });
+    const res = await slot(() => fetch(proxied(url, trim), { signal: AbortSignal.timeout(30_000) }));
     if (!res.ok) throw new Error(`${res.status} ${url}`);
     return await res.json();
   } catch (error) {
@@ -217,7 +263,7 @@ async function fetchLeague(key, now) {
 
 // Leagues fetched from ESPN alone (DraftKings); MLB and the Premier League
 // also have Polymarket.
-export const EXTRA_LEAGUES = Object.keys(LEAGUES).filter(key => !['mlb', 'epl'].includes(key));
+export const EXTRA_LEAGUES = Object.keys(LEAGUES).filter(key => LEAGUES[key].path && !['mlb', 'epl'].includes(key));
 
 // ---- Polymarket ---------------------------------------------------------------
 
@@ -331,6 +377,22 @@ export function parseF1RaceWinner(events, now) {
   };
 }
 
+// The next race weekend's qualifying and race start from ESPN's F1
+// scoreboard: { qualifyingUtc, raceUtc } for the race nearest `startUtc`.
+export function parseF1Schedule(data, startUtc) {
+  let best = null;
+  for (const event of data?.events || []) {
+    const comps = event.competitions || [];
+    const race = comps.find(c => c.type?.abbreviation === 'Race');
+    const qual = comps.find(c => c.type?.abbreviation === 'Qual');
+    if (!race) continue;
+    const gap = Math.abs(Date.parse(race.date) - Date.parse(startUtc));
+    if (gap > 4 * DAY_MS || (best && gap >= best.gap)) continue;
+    best = { gap, raceUtc: new Date(race.date).toISOString(), qualifyingUtc: qual ? new Date(qual.date).toISOString() : null };
+  }
+  return best ? { raceUtc: best.raceUtc, qualifyingUtc: best.qualifyingUtc } : null;
+}
+
 // ---- Futures ---------------------------------------------------------------
 
 // "2026" for MLB; "2026/27" for leagues whose season spans two years (the
@@ -346,16 +408,16 @@ function seasonLabel(event, sport) {
 // "Will (the) Los Angeles Dodgers win the 2026 World Series?" -> the team.
 // Polymarket's placeholder markets ("Team C", "another team") are dropped, and
 // so are eliminated teams (price 0).
-export function parseFutures(events, sport) {
+export function parseFutures(events, sport, markets = FUTURES.filter(f => f.sport === sport)) {
   const out = [];
-  for (const market of FUTURES.filter(f => f.sport === sport)) {
+  for (const market of markets) {
     const year = e => Number(/\d{4}/.exec(e.title)?.[0] ?? 9999);
-    const event = events.filter(e => market.title.test(e.title || '')).sort((a, b) => year(a) - year(b))[0];
+    const event = events.filter(e => market.title.test(e.title || '') && !e.closed).sort((a, b) => year(a) - year(b))[0];
     if (!event) continue;
     const teams = [];
     for (const m of event.markets || []) {
-      const name = /^Will (?:the )?(.+?) win the /i.exec(m.question || '')?.[1];
-      if (!name || /^(team [a-z]|another team|other)$/i.test(name)) continue;
+      const name = futureTeamName(m);
+      if (!name || m.closed || /^(team [a-z]|another team|other|driver [a-z])$/i.test(name)) continue;
       const outcomes = parseJsonArray(m.outcomes);
       const prices = parseJsonArray(m.outcomePrices);
       const price = Number(prices?.[outcomes?.findIndex(o => /^yes$/i.test(o)) ?? 0]);
@@ -365,15 +427,23 @@ export function parseFutures(events, sport) {
     if (!fair || teams.length < 2) continue;
     out.push({
       key: market.key,
-      sport,
+      sport: market.sport,
       slug: event.slug,
-      season: seasonLabel(event, sport),
+      season: seasonLabel(event, market.sport),
       teams: teams
-        .map((t, i) => ({ name: { en: t.name, zh: teamZh(sport, t.name) }, fair: fair[i] }))
+        .map((t, i) => ({ name: { en: t.name, zh: teamZh(market.sport, t.name) }, fair: fair[i] }))
         .sort((a, b) => b.fair - a.fair)
     });
   }
   return out;
+}
+
+// The championships found by search, loaded in the background.
+export async function loadExtraFutures() {
+  const results = await Promise.allSettled(
+    EXTRA_FUTURES.map(market => getJson(`${GAMMA}/public-search?q=${encodeURIComponent(market.query)}&limit_per_type=8&events_status=active`).then(d => parseFutures(d?.events || [], market.sport, [market])))
+  );
+  return results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
 }
 
 // ---- Merge --------------------------------------------------------------------
@@ -426,15 +496,18 @@ export async function loadOdds(now = new Date(), onProgress) {
       fetchEspnEpl(now),
       fetchPolymarketEvents(POLYMARKET_TAG.epl, 'polymarket-events'),
       fetchPolymarketEvents(POLYMARKET_TAG.f1),
-      fetchPolymarketEvents(POLYMARKET_TAG.nba, 'polymarket-events')
+      fetchPolymarketEvents(POLYMARKET_TAG.nba, 'polymarket-events'),
+      getJson(`${ESPN}/racing/f1/scoreboard`)
     ].map(track)
   );
   if (results.every(r => r.status === 'rejected')) throw results[0].reason;
-  const [mlbDk, mlbPm, eplDk, eplPm, f1, nbaPm] = results.map(r => (r.status === 'fulfilled' ? r.value : []));
+  const [mlbDk, mlbPm, eplDk, eplPm, f1, nbaPm, f1Espn] = results.map(r => (r.status === 'fulfilled' ? r.value : []));
+  const race = parseF1RaceWinner(f1, now);
+  if (race) Object.assign(race, { qualifyingUtc: parseF1Schedule(f1Espn, race.startUtc)?.qualifyingUtc ?? null });
   return {
     loadedAt: now.toISOString(),
     games: lotteryGames(mergeGames([...mlbDk, ...eplDk], [...parsePolymarketMlb(mlbPm, now), ...parsePolymarketEpl(eplPm, now)]), now),
-    f1: parseF1RaceWinner(f1, now),
+    f1: race,
     futures: [...parseFutures(mlbPm, 'mlb'), ...parseFutures(eplPm, 'epl'), ...(nbaInSeason(now) ? parseFutures(nbaPm, 'nba') : [])]
   };
 }
@@ -495,13 +568,40 @@ export function parseFutureResult(events) {
   const event = events?.[0];
   if (!event?.closed) return { status: 'pending' };
   for (const m of event.markets || []) {
-    const name = /^Will (?:the )?(.+?) win the /i.exec(m.question || '')?.[1];
+    const name = futureTeamName(m);
     const outcomes = parseJsonArray(m.outcomes);
     const prices = parseJsonArray(m.outcomePrices);
     const yes = Number(prices?.[outcomes?.findIndex(o => /^yes$/i.test(o)) ?? 0]);
     if (name && yes >= 0.99) return { status: 'final', winner: name };
   }
   return { status: 'pending' };
+}
+
+// A tennis match from ESPN's scoreboard (the whole tournament's matches),
+// found by the two players' names in either order: sets won and each set's
+// games, from the leg's home and away. A retirement or walkover is void.
+export function parseEspnTennis(data, home, away) {
+  const key = name => normalizeTeamName(name);
+  const want = new Set([key(home), key(away)]);
+  for (const event of data?.events || []) {
+    for (const grouping of event.groupings || []) {
+      for (const comp of grouping.competitions || []) {
+        const players = comp.competitors || [];
+        const names = players.map(c => key(c.athlete?.displayName || c.athlete?.fullName || ''));
+        if (players.length !== 2 || !names.every(n => want.has(n)) || names[0] === names[1]) continue;
+        const type = comp.status?.type || {};
+        if (/RETIRED|WALKOVER|CANCELED|CANCELLED|POSTPONED|ABANDONED/.test(type.name || '')) return { status: 'void' };
+        if (!type.completed) return { status: 'pending' };
+        const h = players[names.indexOf(key(home))];
+        const a = players[names.indexOf(key(away))];
+        const homeSets = (h.linescores || []).map(l => Number(l.value) || 0);
+        const awaySets = (a.linescores || []).map(l => Number(l.value) || 0);
+        const won = side => homeSets.filter((g, i) => (side === 'home' ? g > awaySets[i] : awaySets[i] > g)).length;
+        return { status: 'final', homeScore: won('home'), awayScore: won('away'), homeSets, awaySets };
+      }
+    }
+  }
+  return null;
 }
 
 // ESPN files games under the US Eastern date.
@@ -531,6 +631,23 @@ export async function fetchOutcomes(legs, now = new Date()) {
       if (leg.kind === 'f1') {
         const data = await page(`${ESPN}/racing/f1/scoreboard?dates=${yyyymmdd(new Date(leg.start))}`);
         const result = data && parseEspnRace(data, leg.start);
+        if (result) out.set(leg.id, result);
+        return;
+      }
+      const league = LEAGUES[leg.sport];
+      if (league?.results) {
+        const data = await page(`${ESPN}/${league.results}/scoreboard?dates=${yyyymmdd(new Date(leg.start))}`);
+        const result = data && parseEspnTennis(data, leg.home, leg.away);
+        if (result && result.status !== 'pending') {
+          out.set(leg.id, result);
+          return;
+        }
+      }
+      // Kambi's sports: the result once the live score shows the match decided.
+      if (league?.kambi && leg.kambiId) {
+        if (!pages.has('kambi-live')) pages.set('kambi-live', fetchKambiLive(getJson).catch(() => null));
+        const live = await pages.get('kambi-live');
+        const result = live && decidedFromLive(live.get(leg.kambiId), leg.sport);
         if (result) out.set(leg.id, result);
         return;
       }
@@ -678,7 +795,10 @@ async function fetchPolymarketLiveEvents(tagId, now) {
 // Every other league (ESPN / DraftKings only), fetched after the page opens
 // so they don't hold it up. A league that fails is left out.
 export async function loadExtraLeagues(now = new Date()) {
-  const results = await Promise.allSettled(EXTRA_LEAGUES.map(key => fetchLeague(key, now)));
-  const games = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
-  return lotteryGames(mergeGames(games, []), now);
+  const [espn, kambi] = await Promise.all([
+    Promise.allSettled(EXTRA_LEAGUES.map(key => fetchLeague(key, now))),
+    Promise.allSettled(KAMBI_LEAGUES.map(key => fetchKambiLeague(key, now, getJson)))
+  ]);
+  const ok = results => results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
+  return lotteryGames([...mergeGames(ok(espn), []), ...ok(kambi)], now);
 }

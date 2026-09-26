@@ -118,6 +118,7 @@ export function normalizeTeamName(name) {
 export function teamZh(sport, name) {
   if (sport === 'epl') return EPL_TEAM_ZH_BY_KEY[normalizeTeamName(name)] ?? name;
   if (sport === 'nba') return NBA_TEAM_ZH[name] ?? name;
+  if (['npb', 'kbo', 'cpbl'].includes(sport)) return ASIA_TEAM_ZH[normalizeTeamName(name)] ?? name;
   return MLB_TEAM_ZH[name] ?? name;
 }
 
@@ -171,7 +172,39 @@ export const LEAGUES = {
   championship: { family: 'soccer', path: 'soccer/eng.2', logo: 24 },
   mls: { family: 'soccer', path: 'soccer/usa.1', logo: 19 },
   ligamx: { family: 'soccer', path: 'soccer/mex.1', logo: 22 },
-  jleague: { family: 'soccer', path: 'soccer/jpn.1', logo: 2199 }
+  jleague: { family: 'soccer', path: 'soccer/jpn.1', logo: 2199 },
+  // From Kambi's public odds (one bookmaker's line). Asian baseball and
+  // basketball use their kind of sport's markets; the rest are played in
+  // sets (`sets`: best of how many, and what a set is made of). Only tennis
+  // has an automatic result (ESPN); the others settle from the live score
+  // once the match is decided, or by hand.
+  npb: { family: 'baseball', kambi: 'baseball/japan/npb', icon: '⚾' },
+  kbo: { family: 'baseball', kambi: 'baseball/south_korea/kbo_league', icon: '⚾' },
+  cpbl: { family: 'baseball', kambi: 'baseball/taiwan/chinese_professional_baseball', icon: '⚾' },
+  euroleague: { family: 'basketball', kambi: 'basketball/euroleague', icon: '🏀' },
+  bleague: { family: 'basketball', kambi: 'basketball/japan/b1__league', icon: '🏀' },
+  tennis: { family: 'sets', kambi: 'tennis/atp', icon: '🎾', sets: { bestOf: 3, unit: 'games', target: 6 }, results: 'tennis/atp' },
+  wta: { family: 'sets', kambi: 'tennis/wta', icon: '🎾', sets: { bestOf: 3, unit: 'games', target: 6 }, results: 'tennis/wta' },
+  badminton: { family: 'sets', kambi: 'badminton', icon: '🏸', sets: { bestOf: 3, unit: 'points', target: 21, cap: 30 } },
+  tabletennis: { family: 'sets', kambi: 'table_tennis', icon: '🏓', sets: { bestOf: 5, unit: 'points', target: 11 }, cap: 16 },
+  volleyball: { family: 'sets', kambi: 'volleyball', icon: '🏐', sets: { bestOf: 5, unit: 'points', target: 25, last: 15 }, cap: 16 },
+  snooker: { family: 'sets', kambi: 'snooker', icon: '🎱', sets: { bestOf: null, unit: 'frames' } }
+};
+
+// Leagues from Kambi.
+export const KAMBI_LEAGUES = Object.keys(LEAGUES).filter(key => LEAGUES[key].kambi);
+export const isSets = sport => LEAGUES[sport]?.family === 'sets';
+
+// Asian baseball clubs as Taiwan writes them, keyed by normalizeTeamName().
+const ASIA_TEAM_ZH = {
+  // CPBL
+  'tsg hawks': '台鋼雄鷹', 'uni lions': '統一7-ELEVEn獅', 'fubon guardians': '富邦悍將', 'chinatrust brothers': '中信兄弟', 'ctbc brothers': '中信兄弟', 'rakuten monkeys': '樂天桃猿', 'wei chuan dragons': '味全龍',
+  // NPB
+  'yomiuri giants': '讀賣巨人', 'hanshin tigers': '阪神虎', 'chunichi dragons': '中日龍', 'yokohama dena baystars': '橫濱DeNA海灣之星', 'hiroshima toyo carp': '廣島東洋鯉魚', 'tokyo yakult swallows': '東京養樂多燕子', 'fukuoka softbank hawks': '福岡軟銀鷹', 'hokkaido nippon ham fighters': '北海道日本火腿鬥士', 'chiba lotte marines': '千葉羅德海洋', 'tohoku rakuten golden eagles': '東北樂天金鷲', 'orix buffaloes': '歐力士猛牛', 'saitama seibu lions': '埼玉西武獅',
+  // KBO
+  'kia tigers': '起亞虎', 'samsung lions': '三星獅', 'lg twins': 'LG雙子', 'doosan bears': '斗山熊', 'kt wiz': 'KT巫師', 'ssg landers': 'SSG登陸者', 'lotte giants': '樂天巨人', 'hanwha eagles': '韓華鷹', 'nc dinos': 'NC恐龍', 'kiwoom heroes': '培證英雄',
+  // Kambi's spellings
+  'yokohama bay stars': '橫濱DeNA海灣之星', 'nippon ham fighters': '北海道日本火腿鬥士', 'rakuten golden eagles': '東北樂天金鷲', 'seibu lions': '埼玉西武獅', 'kt wiz suwon': 'KT巫師', 'yomiuri': '讀賣巨人', 'hiroshima carp': '廣島東洋鯉魚'
 };
 
 export function familyOf(sport) {

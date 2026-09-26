@@ -92,7 +92,7 @@ export function pointsMarkets(m, { spreadLine, totalLine }) {
     if (Math.abs(awayLine) < 0.5) continue;
     const awayCover = normalCdf((awayLine - m.margin) / m.marginSd);
     if (awayCover < 0.04 || awayCover > 0.96) continue;
-    out.push({ kind: 'runline', market: `rl|${awayLine}`, awayLine, giver: awayLine < 0 ? 'away' : 'home', posted: d === 0, cut: CUT.twoWay, picks: [
+    out.push({ kind: 'runline', market: `rl|${awayLine}`, awayLine, giver: awayLine < 0 ? 'away' : 'home', posted: d === 0, steps: Math.abs(d), cut: CUT.twoWay, picks: [
       { side: 'away', fair: awayCover, line: awayLine },
       { side: 'home', fair: 1 - awayCover, line: -awayLine }
     ] });
@@ -103,7 +103,7 @@ export function pointsMarkets(m, { spreadLine, totalLine }) {
       const line = round2(mainTotal + d * step * 1.5);
       const over = 1 - normalCdf((line - m.total) / m.totalSd);
       if (over < 0.04 || over > 0.96) continue;
-      out.push({ kind: 'total', market: `total|${line}`, line, posted: d === 0, main: d === 0, cut: CUT.twoWay, picks: [
+      out.push({ kind: 'total', market: `total|${line}`, line, posted: d === 0, main: d === 0, steps: Math.abs(d), cut: CUT.twoWay, picks: [
         { side: 'over', fair: over },
         { side: 'under', fair: 1 - over }
       ] });
@@ -128,6 +128,15 @@ export function pointsMarkets(m, { spreadLine, totalLine }) {
     { side: 'away', fair: 1 - home - tie },
     { side: 'draw', fair: tie },
     { side: 'home', fair: home }
+  ] });
+  // 第一節 (basketball) / 第一節 of football: a quarter of the margin, half the spread.
+  const q = { margin: m.margin / 4, marginSd: m.marginSd / 2 };
+  const qTie = marginBetween(q, 0, 0);
+  const qHome = 1 - normalCdf((0.5 - q.margin) / q.marginSd);
+  out.push({ kind: 'q1', market: 'q1', cut: CUT.threeWay, picks: [
+    { side: 'away', fair: 1 - qHome - qTie },
+    { side: 'draw', fair: qTie },
+    { side: 'home', fair: qHome }
   ] });
   return out;
 }
@@ -225,6 +234,20 @@ export function goalMarkets(means, { family, totalLine }) {
       { side: 'draw', fair: chance(first, (a, h) => a === h) },
       { side: 'away', fair: chance(first, (a, h) => a > h) }
     ] });
+    // 半全場: the half-time and full-time results together (9 outcomes), the
+    // second half's goals on their own.
+    const second = goalGrid(means, 0.55);
+    const res = (a, h) => (h > a ? 'home' : h === a ? 'draw' : 'away');
+    const htft = new Map();
+    for (const x of first) for (const y of second) {
+      const key = `${res(x.away, x.home)}|${res(x.away + y.away, x.home + y.home)}`;
+      htft.set(key, (htft.get(key) ?? 0) + x.p * y.p);
+    }
+    const order = ['home', 'draw', 'away'];
+    out.push({ kind: 'htft', market: 'htft', cut: CUT.bands, picks: order.flatMap(ht => order.map(ft => ({ side: `${ht}|${ft}`, ht, ft, fair: htft.get(`${ht}|${ft}`) ?? 0 }))) });
+    // 總進球數: total goals in bands.
+    const bands = [[0, 1], [2, 3], [4, 6], [7, null]];
+    out.push({ kind: 'goalbands', market: 'goalbands', cut: CUT.bands, picks: bands.map(([lo, hi]) => ({ side: `${lo}`, lo, hi, fair: chance(grid, (a, h) => a + h >= lo && (hi == null || a + h <= hi)) })) });
   }
   const odd = chance(grid, (a, h) => (a + h) % 2 === 1);
   out.push({ kind: 'oddeven', market: 'oddeven', cut: CUT.twoWay, picks: [{ side: 'odd', fair: odd }, { side: 'even', fair: 1 - odd }] });
@@ -271,6 +294,12 @@ export function baseballMarkets({ homeWin, total }) {
   let away = 0;
   let tie = 0;
   for (let a = 0; a < A.length; a++) for (let h = 0; h < H.length; h++) (a > h ? (away += A[a] * H[h]) : a === h ? (tie += A[a] * H[h]) : 0);
+  // 首分: who scores first. Each half-inning a team scores with its own
+  // chance (a ninth of its runs); the away team bats first.
+  const sa = 1 - nb(means.away / 9, r)[0];
+  const sh = 1 - nb(means.home / 9, r)[0];
+  const awayFirst = sa / (1 - (1 - sa) * (1 - sh));
+  out.push({ kind: 'nextrun', market: 'nextrun|1', line: 1, cut: CUT.twoWay, picks: [{ side: 'away', fair: awayFirst }, { side: 'home', fair: 1 - awayFirst }] });
   out.push({ kind: 'f5', market: 'f5', cut: CUT.threeWay, picks: [
     { side: 'away', fair: away },
     { side: 'draw', fair: tie },
@@ -279,7 +308,75 @@ export function baseballMarkets({ homeWin, total }) {
   return out;
 }
 
-// Odds for one pick of a market at its cut.
-export function marketOdds(market, fair) {
-  return market.cut >= CUT.bands ? bandOdds(fair, market.cut) : oddsAt(fair, market.cut);
+// Odds for one pick of a market at its cut (`k`: the house's cut for this
+// market, its base cut when not given; many-outcome markets price every
+// pick at the cut, others never more than halfway to certain).
+export function marketOdds(market, fair, k = market.cut) {
+  return market.cut >= CUT.bands ? bandOdds(fair, k) : oddsAt(fair, k);
+}
+
+// ---- Played in sets (tennis, badminton, table tennis, volleyball) -----------------
+
+const choose = (n, k) => {
+  let c = 1;
+  for (let i = 1; i <= k; i++) c = (c * (n - k + i)) / i;
+  return c;
+};
+
+// Chance the home side wins a best-of-`bestOf` match, winning each set with
+// chance q, and the q that gives match chance p.
+export function matchChance(q, bestOf) {
+  const need = Math.ceil(bestOf / 2);
+  let p = 0;
+  for (let lost = 0; lost < need; lost++) p += choose(need - 1 + lost, lost) * q ** need * (1 - q) ** lost;
+  return p;
+}
+export function setChance(p, bestOf) {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (matchChance(mid, bestOf) < p) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// Every final set score (home-away) with its chance, sets independent.
+export function setScores(q, bestOf) {
+  const need = Math.ceil(bestOf / 2);
+  const out = [];
+  for (let lost = 0; lost < need; lost++) {
+    out.push({ home: need, away: lost, p: choose(need - 1 + lost, lost) * q ** need * (1 - q) ** lost });
+    out.push({ home: lost, away: need, p: choose(need - 1 + lost, lost) * (1 - q) ** need * q ** lost });
+  }
+  return out;
+}
+
+// The set markets: 比分 (correct sets), 總局數 (total sets), 讓局 (set
+// handicap) and 第一局 (first set), from the match win chance.
+export function setsMarkets({ homeWin, bestOf }) {
+  if (!bestOf || !(homeWin > 0 && homeWin < 1)) return [];
+  const q = setChance(homeWin, bestOf);
+  const scores = setScores(q, bestOf);
+  const need = Math.ceil(bestOf / 2);
+  const out = [];
+  out.push({ kind: 'firstset', market: 'firstset', cut: CUT.twoWay, picks: [{ side: 'away', fair: 1 - q }, { side: 'home', fair: q }] });
+  out.push({ kind: 'sets', market: 'sets', cut: CUT.bands, picks: scores.map(x => ({ side: `${x.home}-${x.away}`, score: `${x.home}-${x.away}`, fair: x.p })) });
+  for (let line = need + 0.5; line < bestOf; line += 1) {
+    const over = scores.filter(x => x.home + x.away > line).reduce((s, x) => s + x.p, 0);
+    out.push({ kind: 'totalsets', market: `totalsets|${line}`, line, cut: CUT.twoWay, picks: [{ side: 'over', fair: over }, { side: 'under', fair: 1 - over }] });
+  }
+  for (let line = 1.5; line < need; line += 1) {
+    // The home side giving `line` sets, and taking them.
+    for (const awayLine of [line, -line]) {
+      const awayCover = scores.filter(x => x.away + awayLine > x.home).reduce((s, x) => s + x.p, 0);
+      if (awayCover < 0.03 || awayCover > 0.97) continue;
+      out.push({ kind: 'sethcap', market: `sethcap|${awayLine}`, awayLine, giver: awayLine > 0 ? 'home' : 'away', cut: CUT.twoWay, picks: [
+        { side: 'away', fair: awayCover, line: awayLine },
+        { side: 'home', fair: 1 - awayCover, line: -awayLine }
+      ] });
+    }
+  }
+  return out;
 }

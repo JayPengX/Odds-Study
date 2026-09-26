@@ -5,16 +5,16 @@
 // 1-year run answers every period up to a year at once. The worker keeps where
 // every player stopped at the furthest week so far, so a longer period only
 // plays the weeks after that instead of starting over.
-import { habitPools, simulateCrowd, MONTH_WEEKS } from './lib/odds.mjs';
+import { crowdPools, simulateCrowd, MONTH_WEEKS } from './lib/sim.mjs';
 
 const YEAR = 52;
 let base = null;
 
 self.onmessage = ({ data }) => {
-  const { id, sportBets, startWeek, weeks, perGroup, seed, big } = data;
-  const key = JSON.stringify([sportBets, startWeek, perGroup, seed, big]);
+  const { id, sportBets, startWeek, weeks, perGroup, seed } = data;
+  const key = JSON.stringify([id.split('|')[1], startWeek, perGroup, seed]);
   if (base?.key !== key) base = null;
-  const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
+  const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, crowdPools(bets)]));
   // Carry on from the furthest week played; the first run plays at least a year.
   const resume = base && base.resume.weeks < weeks ? base.resume : null;
   const from = resume?.weeks ?? 0;
@@ -25,7 +25,6 @@ self.onmessage = ({ data }) => {
     startWeek,
     perGroup,
     seed,
-    big,
     weeks: to,
     checkpoints,
     resume,

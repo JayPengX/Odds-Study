@@ -1,0 +1,292 @@
+{
+ "events": [
+  {
+   "event": {
+    "id": 1029255522,
+    "name": "Juan Manuel Cerundolo - Alejandro Davidovich Fokina",
+    "homeName": "Juan Manuel Cerundolo",
+    "awayName": "Alejandro Davidovich Fokina",
+    "start": "2026-09-26T05:00:00Z",
+    "state": "NOT_STARTED",
+    "group": "Chengdu",
+    "sport": "TENNIS"
+   },
+   "betOffers": [
+    {
+     "criterion": {
+      "englishLabel": "Match Odds"
+     },
+     "betOfferType": {
+      "englishName": "Match"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 2350
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1580
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Game Handicap"
+     },
+     "betOfferType": {
+      "englishName": "Handicap"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 2080,
+       "line": 1500
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1700,
+       "line": -1500
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Total Games"
+     },
+     "betOfferType": {
+      "englishName": "Over/Under"
+     },
+     "outcomes": [
+      {
+       "type": "OT_OVER",
+       "odds": 1970,
+       "line": 22500
+      },
+      {
+       "type": "OT_UNDER",
+       "odds": 1780,
+       "line": 22500
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "event": {
+    "id": 1029253515,
+    "name": "Quentin Halys - Roman Safiullin",
+    "homeName": "Quentin Halys",
+    "awayName": "Roman Safiullin",
+    "start": "2026-09-26T05:30:00Z",
+    "state": "NOT_STARTED",
+    "group": "Hangzhou",
+    "sport": "TENNIS"
+   },
+   "betOffers": [
+    {
+     "criterion": {
+      "englishLabel": "Match Odds"
+     },
+     "betOfferType": {
+      "englishName": "Match"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 2100
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1730
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Game Handicap"
+     },
+     "betOfferType": {
+      "englishName": "Handicap"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 2000,
+       "line": 500
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1760,
+       "line": -500
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Total Games"
+     },
+     "betOfferType": {
+      "englishName": "Over/Under"
+     },
+     "outcomes": [
+      {
+       "type": "OT_OVER",
+       "odds": 1920,
+       "line": 23500
+      },
+      {
+       "type": "OT_UNDER",
+       "odds": 1820,
+       "line": 23500
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "event": {
+    "id": 1029253919,
+    "name": "Martin Damm - Hubert Hurkacz",
+    "homeName": "Martin Damm",
+    "awayName": "Hubert Hurkacz",
+    "start": "2026-09-26T06:10:00Z",
+    "state": "NOT_STARTED",
+    "group": "Chengdu",
+    "sport": "TENNIS"
+   },
+   "betOffers": [
+    {
+     "criterion": {
+      "englishLabel": "Match Odds"
+     },
+     "betOfferType": {
+      "englishName": "Match"
+     },
+     "outcomes": [
+      {
+       "type": "OT_TWO",
+       "odds": 1380
+      },
+      {
+       "type": "OT_ONE",
+       "odds": 3050
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Game Handicap"
+     },
+     "betOfferType": {
+      "englishName": "Handicap"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 2450,
+       "line": 1500
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1500,
+       "line": -1500
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Total Games"
+     },
+     "betOfferType": {
+      "englishName": "Over/Under"
+     },
+     "outcomes": [
+      {
+       "type": "OT_OVER",
+       "odds": 1790,
+       "line": 24500
+      },
+      {
+       "type": "OT_UNDER",
+       "odds": 1960,
+       "line": 24500
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "event": {
+    "id": 1029253377,
+    "name": "Federico Cina - Alexandre Muller",
+    "homeName": "Federico Cina",
+    "awayName": "Alexandre Muller",
+    "start": "2026-09-26T06:10:00Z",
+    "state": "NOT_STARTED",
+    "group": "Chengdu",
+    "sport": "TENNIS"
+   },
+   "betOffers": [
+    {
+     "criterion": {
+      "englishLabel": "Match Odds"
+     },
+     "betOfferType": {
+      "englishName": "Match"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 1930
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1870
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Game Handicap"
+     },
+     "betOfferType": {
+      "englishName": "Handicap"
+     },
+     "outcomes": [
+      {
+       "type": "OT_ONE",
+       "odds": 1840,
+       "line": 500
+      },
+      {
+       "type": "OT_TWO",
+       "odds": 1900,
+       "line": -500
+      }
+     ]
+    },
+    {
+     "criterion": {
+      "englishLabel": "Total Games"
+     },
+     "betOfferType": {
+      "englishName": "Over/Under"
+     },
+     "outcomes": [
+      {
+       "type": "OT_OVER",
+       "odds": 1870,
+       "line": 22500
+      },
+      {
+       "type": "OT_UNDER",
+       "odds": 1870,
+       "line": 22500
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

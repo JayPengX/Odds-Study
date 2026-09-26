@@ -1,0 +1,147 @@
+{
+ "events": [
+  {
+   "name": "Chengdu Open",
+   "groupings": [
+    {
+     "grouping": {
+      "id": "1",
+      "slug": "mens-singles",
+      "displayName": "Men's Singles"
+     },
+     "competitions": [
+      {
+       "date": "2026-09-22T05:00Z",
+       "status": {
+        "type": {
+         "name": "STATUS_FINAL",
+         "completed": true
+        }
+       },
+       "competitors": [
+        {
+         "homeAway": "away",
+         "winner": false,
+         "athlete": {
+          "displayName": "Luka Pavlovic"
+         },
+         "linescores": [
+          {
+           "value": 4
+          },
+          {
+           "value": 7
+          },
+          {
+           "value": 3
+          }
+         ]
+        },
+        {
+         "homeAway": "home",
+         "winner": true,
+         "athlete": {
+          "displayName": "Alexandre Muller"
+         },
+         "linescores": [
+          {
+           "value": 6
+          },
+          {
+           "value": 6
+          },
+          {
+           "value": 6
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "date": "2026-09-22T05:00Z",
+       "status": {
+        "type": {
+         "name": "STATUS_FINAL",
+         "completed": true
+        }
+       },
+       "competitors": [
+        {
+         "homeAway": "away",
+         "winner": true,
+         "athlete": {
+          "displayName": "Alexis Galarneau"
+         },
+         "linescores": [
+          {
+           "value": 7
+          },
+          {
+           "value": 7
+          }
+         ]
+        },
+        {
+         "homeAway": "home",
+         "winner": false,
+         "athlete": {
+          "displayName": "Elias Ymer"
+         },
+         "linescores": [
+          {
+           "value": 5
+          },
+          {
+           "value": 6
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "date": "2026-09-22T05:00Z",
+       "status": {
+        "type": {
+         "name": "STATUS_FINAL",
+         "completed": true
+        }
+       },
+       "competitors": [
+        {
+         "homeAway": "away",
+         "winner": false,
+         "athlete": {
+          "displayName": "Andre Ilagan"
+         },
+         "linescores": [
+          {
+           "value": 6
+          },
+          {
+           "value": 6
+          }
+         ]
+        },
+        {
+         "homeAway": "home",
+         "winner": true,
+         "athlete": {
+          "displayName": "Petr Bar Biryukov"
+         },
+         "linescores": [
+          {
+           "value": 7
+          },
+          {
+           "value": 7
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

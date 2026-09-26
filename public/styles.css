@@ -261,7 +261,6 @@ button.pick:active { transform: scale(0.98); }
 .pick.in-slip { background: var(--accent); border-color: var(--accent); color: #fff; }
 .pick.in-slip .pick-name, .pick.in-slip small { color: rgba(255, 255, 255, 0.85); }
 .pick.in-slip::after { content: '✓'; position: absolute; top: 3px; right: 6px; font-size: 0.72rem; font-weight: 800; }
-.pick-real { width: 100%; margin-top: 4px; font: inherit; font-size: 0.74rem; padding: 3px 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); text-align: center; font-variant-numeric: tabular-nums; }
 
 .more-toggle {
   width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-top: 1px solid var(--border);
@@ -328,7 +327,6 @@ button.pick:active { transform: scale(0.98); }
 .entry.in-slip { background: var(--accent-wash); }
 .entry-chance { position: relative; width: 44px; height: 4px; background: var(--surface-sunken); border-radius: 2px; flex: none; }
 .entry-chance span { position: absolute; inset: 0 auto 0 0; background: var(--gold); border-radius: 2px; }
-.entry-real { width: 5.2em; font: inherit; font-size: 0.74rem; padding: 3px 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); }
 .board-more { border-top: 0; }
 .board-more > summary { list-style: none; cursor: pointer; padding: 9px 14px; text-align: center; color: var(--accent); font-weight: 600; font-size: 0.82rem; background: var(--surface-raised); }
 .board-more > summary::-webkit-details-marker { display: none; }
@@ -510,7 +508,6 @@ button.pick:active { transform: scale(0.98); }
 .loading-error { display: grid; gap: 10px; justify-items: center; }
 
 /* ---- Ticket analysis ------------------------------------------------------------ */
-.pick-wrap { display: grid; gap: 0; min-width: 0; }
 .split-bar { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--surface-sunken); }
 .split-seg { display: block; min-width: 2px; }
 .split-back { background: var(--accent); }
@@ -642,6 +639,7 @@ details.market[open] > summary { margin-bottom: 6px; }
 .board-emblem .league-badge { --s: 30px; }
 .league-badge .logo-wrap.logo-wrap { display: grid; place-items: center; width: 78%; height: 78%; margin: 0; }
 .league-badge .league-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.league-badge .league-icon { display: grid; place-items: center; font-size: calc(var(--s) * 0.58); line-height: 1; }
 
 /* ---- Best value of the day: podium, then the full list ---------------------------- */
 .ranking-card { padding: 16px; }
@@ -898,8 +896,9 @@ details.market[open] > summary { margin-bottom: 6px; }
 #stats-body .table-view th { white-space: nowrap; }
 
 /* A game's other markets: one tab per kind, one row per line */
-.market-tabs { display: flex; width: 100%; margin-bottom: 10px; }
-.market-tabs button { flex: 1 1 0; min-width: 0; padding: 6px 6px; overflow: hidden; text-overflow: ellipsis; }
+.market-tabs { display: flex; flex-wrap: nowrap; width: 100%; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; }
+.market-tabs::-webkit-scrollbar { display: none; }
+.market-tabs button { flex: 1 0 auto; padding: 6px 10px; }
 .market-panel { display: grid; gap: 12px; }
 .line-table { display: grid; gap: 6px; }
 .line-head, .line-row { display: grid; grid-template-columns: minmax(4.6em, 0.8fr) 1fr 1fr; gap: 8px; align-items: center; }
@@ -992,7 +991,6 @@ details.market[open] > summary { margin-bottom: 6px; }
 .spinner.small { width: 18px; height: 18px; border-width: 2px; flex: none; }
 
 /* Simulator: stake mode and money flow */
-.sim-stake { margin-top: 10px; }
 .flow-equation { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 .flow-equation strong { font-size: 1.05rem; }
 .flow-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: 12px 0 6px; background: var(--surface-sunken); }
@@ -1016,3 +1014,26 @@ details.market[open] > summary { margin-bottom: 6px; }
 .leader-value { display: grid; justify-items: end; text-align: right; }
 .leader-value strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .leader-value small { color: var(--text-secondary); font-size: 0.72rem; white-space: nowrap; }
+
+/* Recommendations: a small corner badge on the pick. */
+.pick .rec { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); padding: 0 6px; border-radius: 999px; font-size: 0.62rem; font-weight: 800; line-height: 1.5; white-space: nowrap; color: #fff; background: var(--good); box-shadow: 0 0 0 2px var(--surface); }
+.pick .rec-steady { background: var(--series-1, #2563eb); }
+.pick .rec-shot { background: var(--gold, #d97706); }
+.pick.in-slip .rec { box-shadow: none; }
+/* Locked by the house; sold only in parlays of 2 or 3+. */
+.pick.locked { opacity: 0.55; cursor: not-allowed; background: var(--surface-sunken); }
+.pick .lock { font-size: 0.8em; margin-right: 2px; }
+.pick .min-legs { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 4px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.6rem; font-weight: 700; vertical-align: middle; }
+.pick.in-slip .min-legs { background: rgba(255, 255, 255, 0.2); color: #fff; }
+/* Leagues of the picked kind of sport. */
+.league-chips { margin-top: 6px; }
+.league-chips .chip { font-size: 0.8rem; padding: 4px 10px; }
+/* Settling a pick by hand. */
+.hand-settle { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; grid-column: 1 / -1; margin-top: 4px; }
+.ghost-button.tiny { padding: 2px 10px; font-size: 0.76rem; }
+/* The crowd by traits, one tab at a time. */
+.group-tabs { margin: 2px 0 6px; }
+/* A person's betting in numbers. */
+.profile { display: grid; gap: 8px; margin-top: 8px; }
+.profile .player-tags small { margin-right: 2px; }
+.crowd-like-list li { display: flex; gap: 8px; align-items: baseline; }

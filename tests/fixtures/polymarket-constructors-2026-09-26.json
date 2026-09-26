@@ -1,0 +1,94 @@
+{
+ "events": [
+  {
+   "title": "F1 Constructors' Champion",
+   "slug": "f1-constructors-champion",
+   "closed": false,
+   "markets": [
+    {
+     "question": "Will McLaren be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "McLaren",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0.005\", \"0.995\"]",
+     "closed": false
+    },
+    {
+     "question": "Will Mercedes be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Mercedes",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0.9605\", \"0.0395\"]",
+     "closed": false
+    },
+    {
+     "question": "Will Red Bull Racing be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Red Bull Racing",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0.0005\", \"0.9995\"]",
+     "closed": false
+    },
+    {
+     "question": "Will Ferrari be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Ferrari",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0.014\", \"0.986\"]",
+     "closed": false
+    },
+    {
+     "question": "Will Williams be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Williams",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will Racing Bulls be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Racing Bulls",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will Aston Martin be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Aston Martin",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will Haas be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Haas",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will Audi be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Audi",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will Alpine be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Alpine",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will Cadillac be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Cadillac",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0\", \"1\"]",
+     "closed": true
+    },
+    {
+     "question": "Will another team be the 2026 F1 Constructors' Champion?",
+     "groupItemTitle": "Other",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "closed": false
+    }
+   ]
+  }
+ ]
+}

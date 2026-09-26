@@ -220,9 +220,9 @@ test('saves are gzip-compressed and read back; old plain saves still read', asyn
   assert.equal(await unpack('gz1:!!'), null);
 });
 
-test('fun facts and the closest simulated habit', async () => {
-  const { funFacts, bettingProfile, closestHabit, crowdPercentile } = await import('../public/lib/history.mjs');
-  const { HABITS } = await import('../public/lib/odds.mjs');
+test('fun facts, and your tickets told like a simulated person\'s', async () => {
+  const { funFacts, crowdPercentile } = await import('../public/lib/history.mjs');
+  const { ticketProfile, accountTickets } = await import('../public/lib/profile.mjs');
   let account = newAccount(at('2026-09-01T00:00:00Z'));
   const leg = (id, name, chance, odds, result) => ({ id, kind: 'ml', side: 'away', sport: 'mlb', shortLabel: name, matchup: 'A @ B', odds, fairChance: chance, result: null, final: result });
   const add = (id, t, legs) => {
@@ -239,10 +239,14 @@ test('fun facts and the closest simulated habit', async () => {
   assert.ok(Math.abs(f.nearMiss.missed - 372) < 1e-9);
   assert.deepEqual([f.team.name, f.team.picks, f.team.won], ['道奇', 3, 2]);
   assert.equal(f.weekday.day, 6); // Saturdays
-  const profile = bettingProfile(account, at('2026-09-29T00:00:00Z'));
-  assert.equal(profile.legs, 2);
-  assert.equal(profile.cost, 100);
-  // Two picks, NT$100, about once a week: most like the casual bettor.
-  assert.equal(closestHabit(profile, HABITS).key, 'casual');
+  const profile = ticketProfile(accountTickets(account));
+  assert.equal(profile.tickets, 3);
+  assert.equal(profile.avgLegs, 2);
+  assert.equal(profile.avgStake, 100);
+  assert.equal(profile.won, 1);
+  assert.equal(profile.nearMisses, 1);
+  assert.deepEqual([profile.longestWin, profile.longestLose], [1, 1]);
+  // One ticket a week over three weeks, two picks at about 50%: no trait shows.
+  assert.deepEqual(profile.traits, []);
   assert.equal(crowdPercentile([-3, -1, 0, 2, 10], 1), 0.625);
 });

@@ -1,24 +1,16 @@
 import {
-  FANS,
-  HABITS,
-  groupSize,
-  SPORTS,
-  SIM_SPORTS,
-  traitKeys,
-  sportTemplate,
-  weekOfYear,
   K_DRAFTKINGS,
   blendOutcomes,
   FUTURES_OVERROUND,
   ODDS_ERROR,
   backMargin,
   estimateF1LotteryOdds,
+  f1Phase,
   estimateFuturesOdds,
   estimateLotteryOdds,
   analyzeSlip,
   slipPayoutTable,
   expectedReturn,
-  habitPools,
   lotteryTotalLines,
   lotteryRunLines,
   fitTeamRuns,
@@ -38,21 +30,36 @@ import {
   median,
   quantile,
   SLIP_RULES,
-  SIM_START_BALANCE,
-  SIM_WEEKLY_GRANT,
   afterTax,
   choose,
   seededRandom,
+  slipErrors,
+  slipSizes,
+} from './lib/odds.mjs';
+import {
+  FANS,
+  STYLES,
+  TRAITS,
+  TRAIT_ROWS,
+  SPORTS,
+  SIM_SPORTS,
+  traitKeys,
+  sportTemplate,
+  weekOfYear,
+  crowdPools,
+  crowdSize,
+  hashString,
+  SIM_START_BALANCE,
+  SIM_WEEKLY_GRANT,
   simulateCrowd,
   gamesInWeek,
   MONTH_WEEKS,
   PERIOD_MONTHS,
   monthWeeks,
-  replayPlayer,
-  slipErrors,
-  slipSizes,
-} from './lib/odds.mjs';
-import { loadOdds, loadExtraLeagues, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
+  replayPlayer
+} from './lib/sim.mjs';
+import { ticketProfile, accountTickets } from './lib/profile.mjs';
+import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
 import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, nextRunChances, nextRunOdds, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
@@ -72,29 +79,24 @@ import {
 } from './lib/account.mjs';
 import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
 import { pack, unpack } from './lib/codec.mjs';
-import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile, bettingProfile, closestHabit } from './lib/history.mjs';
+import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer } from './lib/teams.mjs';
-import { pointsModel, pointsMarkets, fitHockey, goalMarkets, baseballMarkets, marketOdds } from './lib/markets.mjs';
+import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets } from './lib/teams.mjs';
+import { pointsModel, pointsMarkets, fitHockey, goalMarkets, baseballMarkets, setsMarkets, marketOdds } from './lib/markets.mjs';
+import { houseRule, houseCut, minLegsProblem } from './lib/rules.mjs';
+import { recommend } from './lib/recommend.mjs';
 
 const STAKE = 100;
-// Simulated players per habit. Big enough that the results barely move
-// between runs, so one fixed-seed run is shown.
-// Simulated players per habit x fan type group, on average: each habit gets
-// its share of the crowd (100,020 in all).
-const PER_GROUP = Math.ceil(100_000 / (HABITS.length * FANS.length));
-const SIM_PLAYERS = FANS.length * HABITS.reduce((n, habit) => n + groupSize(habit, PER_GROUP), 0);
+// Simulated people per pick style x fan type group, on average: each style
+// gets its share of the crowd, 100,000 people in all.
+const PER_GROUP = Math.ceil(100_000 / (STYLES.length * FANS.length));
+const SIM_PLAYERS = crowdSize(PER_GROUP);
 const SIM_SEED = 1;
 // Shown as a round "100,000".
 const SIM_PLAYERS_SHOWN = Math.round(SIM_PLAYERS / 1000) * 1000;
 const THIN_LIQUIDITY = 10_000;
-const TIE_BAND = 2;
 // Championship teams shown before the rest fold away.
 const FUTURES_SHOWN = 8;
-// One icon and colour per betting habit.
-const HABIT_ICON = { casual: '🎟️', fan: '📣', underdog: '🎯', dreamer: '🎰', chaser: '🔁', careful: '🧮' };
-const HABIT_COLOR = { casual: '#0ea5e9', fan: '#f59e0b', underdog: '#8b5cf6', dreamer: '#ec4899', chaser: '#ef4444', careful: '#10b981' };
-const USER_ODDS_KEY = 'oddsStudy.userOdds';
 const ACCOUNT_KEY = 'oddsStudy.account';
 const SYNC_KEY = 'oddsStudy.syncCode';
 // Saved slips shown before the rest fold away.
@@ -106,11 +108,13 @@ const state = {
   data: null,
   bets: [],
   futures: [],
+  // Recommended picks (recommend.mjs): bet id -> { tag, back, beats }.
+  recs: new Map(),
   // Games in progress and their live bets.
   liveGames: [],
   liveBets: [],
+  liveRecs: new Map(),
   liveAt: null,
-  userOdds: loadUserOdds(),
   parlay: [],
   slipMode: 'single',
   // Chosen 過關組合 sizes; 'all' stands for 全過, whatever the leg count.
@@ -121,12 +125,10 @@ const state = {
   booting: true,
   sport: 'all',
   tab: 'games',
-  // Game cards showing all their markets, and cards showing real-odds boxes.
+  // Game cards showing all their markets.
   open: new Set(),
-  editing: new Set(),
   // Each open game's market tab (大小分, 讓分, 單隊大小, 得分最高單局).
   marketTab: new Map(),
-  // Off: only the odds and the average back. On: margins, chances, takes, extra stats.
   // The simulated account (play money) and its sync.
   account: null,
   accountReady: false,
@@ -138,7 +140,6 @@ const state = {
   checkedAt: 0,
   showAllSaved: false,
   // 大手筆 (bets grow with the balance) or 真實 (survey-based stakes) in the simulator.
-  simBig: loadSimBig(),
   // The leaderboard shown.
   leaderKey: 'best',
   historyFilter: 'all',
@@ -166,28 +167,6 @@ function svgEl(tag, attrs = {}) {
   const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   return node;
-}
-
-function loadUserOdds() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_ODDS_KEY)) || {};
-  } catch {
-    return {};
-  }
-}
-
-function loadSimBig() {
-  try {
-    return localStorage.getItem('oddsStudy.simBig') !== '0';
-  } catch {
-    return true;
-  }
-}
-
-function saveUserOdds() {
-  try {
-    localStorage.setItem(USER_ODDS_KEY, JSON.stringify(state.userOdds));
-  } catch {}
 }
 
 // ---- Formatting -------------------------------------------------------------
@@ -265,8 +244,9 @@ function gameModel(game) {
   const key = `${game.id}|${game.total?.line}|${game.total?.overFair}|${game.draftKings?.home}`;
   if (modelCache.has(key)) return modelCache.get(key);
   const model = {};
-  if (game.total) model.mu = fitTotalRuns(game.total.line, game.total.overFair, game.sport === 'mlb' ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION);
-  if (game.sport === 'mlb' && game.total && game.draftKings) {
+  const baseball = familyOf(game.sport) === 'baseball';
+  if (game.total && !isSets(game.sport)) model.mu = fitTotalRuns(game.total.line, game.total.overFair, baseball ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION);
+  if (baseball && game.total && game.draftKings) {
     model.means = fitTeamRuns(game.draftKings.home, game.total.line, game.total.overFair);
     model.grid = scoreGrid(model.means.home, model.means.away);
   }
@@ -286,6 +266,9 @@ function lineBets(game, base, matchup) {
   const model = gameModel(game);
   const total = game.total;
   const mlb = game.sport === 'mlb';
+  const baseball = familyOf(game.sport) === 'baseball';
+  // The house's cut on a line `steps` from the main one.
+  const cut = (base, steps) => houseCut({ base, sport: game.sport, steps });
 
   // 大小分. MLB: the lottery's three lines, modelled from DraftKings' one line
   // (any line, whole or half). Premier League: DraftKings' own half-goal line.
@@ -293,7 +276,7 @@ function lineBets(game, base, matchup) {
   if (total && mlb) for (const l of lotteryTotalLines(total.line, total.overFair)) totals.set(l.line, { ...l, posted: true });
   else if (total && total.line % 1 !== 0) totals.set(total.line, { line: total.line, over: total.overFair, main: true, posted: true });
   if (model.mu != null) {
-    const r = mlb ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION;
+    const r = baseball ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION;
     const main = [...totals.values()].find(l => l.main)?.line ?? Math.floor(model.mu) + 0.5;
     for (let d = -TOTAL_SPAN; d <= TOTAL_SPAN; d++) {
       const line = main + d;
@@ -302,7 +285,9 @@ function lineBets(game, base, matchup) {
       if (lineInRange(over) && lineInRange(1 - over)) totals.set(line, { line, over, main: false, posted: false });
     }
   }
+  const mainTotal = [...totals.values()].find(l => l.main)?.line;
   for (const { line, over, main, posted } of [...totals.values()].sort((a, b) => a.line - b.line)) {
+    const k = cut(K_DRAFTKINGS, posted || mainTotal == null ? 0 : line - mainTotal);
     for (const side of ['over', 'under']) {
       const p = side === 'over' ? over : 1 - over;
       bets.push({
@@ -323,7 +308,8 @@ function lineBets(game, base, matchup) {
         label: `${matchup} ${t(side)} ${line}`,
         shortLabel: `${t(side)} ${line}`,
         fairChance: p,
-        estOdds: estimateLineOdds(p, K_DRAFTKINGS)
+        cut: k,
+        estOdds: estimateLineOdds(p, k)
       });
     }
   }
@@ -331,10 +317,14 @@ function lineBets(game, base, matchup) {
   // 讓分: true chance from DraftKings; the lottery's two posted lines priced
   // from its own (shrunk) chance, which differs from the true one. Other
   // lines come from the per-team score model at the lottery's usual cut.
-  if (mlb && (game.spread || model.grid)) {
+  if (baseball && (game.spread || model.grid)) {
     const lines = new Map();
-    if (game.spread) {
+    // MLB: the lottery's two posted lines (its own shrunk chances); other
+    // leagues: the bookmaker's line as it is.
+    if (game.spread && mlb) {
       for (const [i, l] of lotteryRunLines(game.spread.awayLine, game.spread.awayFair).entries()) lines.set(l.awayLine, { ...l, posted: true, first: i === 0 });
+    } else if (game.spread && game.spread.awayLine % 1 !== 0) {
+      lines.set(game.spread.awayLine, { awayLine: game.spread.awayLine, fair: game.spread.awayFair, lottery: game.spread.awayFair, posted: true, first: true });
     }
     if (model.grid) {
       for (const abs of RUN_LINES) {
@@ -348,6 +338,7 @@ function lineBets(game, base, matchup) {
     const order = [...lines.values()].sort((a, b) => Math.abs(a.awayLine) - Math.abs(b.awayLine) || a.awayLine - b.awayLine);
     for (const { awayLine, fair, lottery, posted, first } of order) {
       const giver = awayLine < 0 ? 'away' : 'home';
+      const k = cut(MLB_MARKET_OVERROUND, posted ? 0 : Math.max(1, Math.abs(awayLine) - 2.5));
       for (const side of ['away', 'home']) {
         const line = side === 'away' ? awayLine : -awayLine;
         const text = `${teamName(game[side])} ${fmtLine(line)}`;
@@ -367,11 +358,12 @@ function lineBets(game, base, matchup) {
           chip: text,
           // DraftKings' own line has one source; the extra run adds model error.
           fairMargin: first ? 0.02 : 0.03,
-          errKey: posted ? 'mlbRunLine' : 'mlbRunLineExtra',
+          errKey: !mlb ? errKeyOf(game.sport) : posted ? 'mlbRunLine' : 'mlbRunLineExtra',
           label: text,
           shortLabel: `${t('runLine')} ${text}`,
           fairChance: p,
-          estOdds: estimateLineOdds(priced, MLB_MARKET_OVERROUND)
+          cut: k,
+          estOdds: estimateLineOdds(priced, k)
         });
       }
     }
@@ -387,6 +379,7 @@ function lineBets(game, base, matchup) {
         if (line <= 0) continue;
         const over = teamOverChance(model.means[team], line);
         if (!(lineInRange(over) && lineInRange(1 - over))) continue;
+        const k = cut(MLB_MARKET_OVERROUND, d);
         for (const side of ['over', 'under']) {
           const p = side === 'over' ? over : 1 - over;
           bets.push({
@@ -401,11 +394,12 @@ function lineBets(game, base, matchup) {
             marketLabel: `${teamName(game[team])} ${line}`,
             chip: t(side),
             fairMargin: line === posted ? 0.03 : 0.04,
-            errKey: line === posted ? 'mlbTeamTotal' : 'mlbTeamTotalExtra',
+            errKey: !mlb ? errKeyOf(game.sport) : line === posted ? 'mlbTeamTotal' : 'mlbTeamTotalExtra',
             label: `${teamName(game[team])} ${t(side)} ${line}`,
             shortLabel: `${teamName(game[team])} ${t(side)} ${line}`,
             fairChance: p,
-            estOdds: estimateLineOdds(p, MLB_MARKET_OVERROUND)
+            cut: k,
+            estOdds: estimateLineOdds(p, k)
           });
         }
       }
@@ -431,12 +425,14 @@ function marketBets(game, base, matchup, probs) {
     const model = pointsModel(game.sport, { homeWin, spread: game.spread, total: game.total });
     if (model) markets = pointsMarkets(model, { spreadLine: game.spread?.awayLine ?? null, totalLine: game.total?.line ?? null });
   } else if (family === 'hockey') markets = goalMarkets(fitHockey(homeWin, game.total), { family, totalLine: game.total?.line ?? null });
+  else if (family === 'sets') markets = setsMarkets({ homeWin, bestOf: LEAGUES[game.sport]?.sets?.bestOf });
   else if (family === 'soccer' && probs.draw != null) {
     // Totals come from lineBets; the rest from each team's mean goals.
     markets = goalMarkets(fitGoals(probs.home, probs.away), { family }).filter(m => m.kind !== 'total');
   }
   const bets = [];
   for (const m of markets) {
+    const k = houseCut({ base: m.cut, sport: game.sport, steps: m.steps ?? 0 });
     for (const pick of m.picks) {
       const name = pickName(game, m, pick);
       const bet = {
@@ -445,7 +441,7 @@ function marketBets(game, base, matchup, probs) {
         kind: m.kind,
         side: pick.side,
         market: m.market,
-        marketLabel: m.kind === 'runline' || m.kind === 'total' ? null : t(SECTIONS.find(sec => sec.kind === m.kind)?.title ?? m.kind),
+        marketLabel: marketLabelOf(game, m),
         posted: m.posted ?? false,
         chip: name,
         label: `${matchup} ${name}`,
@@ -453,8 +449,9 @@ function marketBets(game, base, matchup, probs) {
         fairChance: pick.fair,
         fairMargin: null,
         errKey: 'extra',
-        estOdds: marketOdds(m, pick.fair),
-        settle: { lo: pick.lo, hi: pick.hi, score: pick.score, listed: m.listed, team: pick.team }
+        cut: k,
+        estOdds: marketOdds(m, pick.fair, k),
+        settle: { lo: pick.lo, hi: pick.hi, score: pick.score, listed: m.listed, team: pick.team, ht: pick.ht, ft: pick.ft, ...(m.line != null && m.kind !== 'total' ? { line: m.line } : {}), ...(pick.line != null && m.kind === 'sethcap' ? { line: pick.line } : {}) }
       };
       if (m.kind === 'runline') Object.assign(bet, { runLine: pick.line, awayLine: m.awayLine, giver: m.giver, label: name, shortLabel: `${t('runLine')} ${name}` });
       if (m.kind === 'total') Object.assign(bet, { totalLine: m.line, mainLine: m.main, chip: t(pick.side), label: `${matchup} ${t(pick.side)} ${m.line}`, shortLabel: `${t(pick.side)} ${m.line}` });
@@ -464,10 +461,25 @@ function marketBets(game, base, matchup, probs) {
   return bets;
 }
 
+// A market's heading inside its section, when it needs one.
+function marketLabelOf(game, m) {
+  const t = state.t;
+  if (m.kind === 'runline' || m.kind === 'total') return null;
+  if (m.kind === 'totalsets') return `${t('secTotalSets')} ${m.line}`;
+  if (m.kind === 'sethcap') return `${teamName(game[m.giver])} ${fmtLine(-Math.abs(m.awayLine))}`;
+  if (m.kind === 'nextrun') return t('firstScore');
+  return t(SECTIONS.find(sec => sec.kind === m.kind)?.title ?? m.kind);
+}
+
+const RESULT_SHORT = { home: 'homeShort', draw: 'drawShort', away: 'awayShort' };
+
 // What a pick is called: a team, a line, a band, a score …
 function pickName(game, market, pick) {
   const t = state.t;
-  if (market.kind === 'runline') return `${teamName(game[pick.side])} ${fmtLine(pick.line)}`;
+  if (market.kind === 'runline' || market.kind === 'sethcap') return `${teamName(game[pick.side])} ${fmtLine(pick.line)}`;
+  if (market.kind === 'htft') return `${t(RESULT_SHORT[pick.ht])}/${t(RESULT_SHORT[pick.ft])}`;
+  if (market.kind === 'goalbands') return pick.hi == null ? `${pick.lo}+` : `${pick.lo}-${pick.hi}`;
+  if (market.kind === 'sets') return `${t('homeShort')} ${pick.score.replace('-', ':')} ${t('awayShort')}`;
   if (market.kind === 'margin') return `${teamName(game[pick.team])} ${pick.hi == null ? `${pick.lo}+` : pick.lo === pick.hi ? pick.lo : `${pick.lo}-${pick.hi}`}`;
   if (market.kind === 'score') return pick.score === 'other' ? t('scoreOther') : pick.score.replace('-', ':');
   if (pick.side === 'away' || pick.side === 'home') return teamName(game[pick.side]);
@@ -483,6 +495,10 @@ function buildBets(data) {
     const matchup = matchupText(game);
     const base = { gameId: game.id, game, sport: game.sport, matchup, start: game.startUtc };
     const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : ['away', 'home'];
+    // The house's cut on the winner: its measured one for the source, more for
+    // a league it knows less or sources that disagree.
+    const gap = game.draftKings && game.polymarket ? Math.max(...sides.map(side => Math.abs(game.draftKings[side] - game.polymarket[side]) / 2)) : null;
+    const mlCut = houseCut({ base: blend.k, sport: game.sport, fairMargin: gap });
     for (const side of sides) {
       const p = blend.probs[side];
       const name = side === 'draw' ? t('draw') : teamName(game[side]);
@@ -501,13 +517,18 @@ function buildBets(data) {
         label: side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`,
         shortLabel: name,
         fairChance: p,
-        estOdds: estimateLotteryOdds(p, blend.k)
+        cut: mlCut,
+        estOdds: estimateLotteryOdds(p, mlCut)
       });
     }
     const family = familyOf(game.sport);
+    // Kambi's own lines in games or points (tennis 讓局數 and 總局數; points in
+    // badminton, table tennis and volleyball), at the two-way cut.
+    if (family === 'sets') bets.push(...unitLineBets(game, base, matchup));
     // Baseball and soccer totals (and MLB's run lines and team totals) are the
     // lottery-checked models; the rest of every sport's markets come from markets.mjs.
     if (family === 'baseball' || family === 'soccer') bets.push(...lineBets(game, base, matchup));
+
     bets.push(...marketBets(game, base, matchup, blend.probs));
     // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed.
     if (game.sport === 'mlb') {
@@ -532,6 +553,9 @@ function buildBets(data) {
     }
   }
   if (data.f1) {
+    // Before qualifying the lottery prices the race on its own curve.
+    const phase = f1Phase(new Date(), { qualifyingUtc: data.f1.qualifyingUtc, raceUtc: data.f1.startUtc });
+    data.f1.phase = phase;
     for (const d of data.f1.drivers) {
       const driver = f1Driver(d.name);
       const name = state.locale === 'zh' ? driver.zh : d.name;
@@ -548,8 +572,8 @@ function buildBets(data) {
         driver,
         fairChance: d.fair,
         fairMargin: null,
-        errKey: d.fair < 0.01 ? 'f1Longshot' : 'f1',
-        estOdds: estimateF1LotteryOdds(d.fair)
+        errKey: `${phase === 'pre' ? 'f1Pre' : 'f1'}${d.fair < 0.01 ? 'Longshot' : ''}`,
+        estOdds: estimateF1LotteryOdds(d.fair, phase)
       });
     }
   }
@@ -559,14 +583,52 @@ function buildBets(data) {
     const typical = median(gaps) ?? 0.02;
     for (const b of bets) if (b.sport === sport && b.fairMargin == null && (b.kind === 'ml' || b.kind === 'total')) Object.assign(b, { fairMargin: typical, typicalMargin: true });
   }
+  return withHouseRules(bets);
+}
+
+// The lottery's locks and parlay-only rules (rules.mjs), on every pick.
+function withHouseRules(bets) {
+  for (const b of bets) Object.assign(b, houseRule(b.kind, b.estOdds));
   return bets;
+}
+
+// Kambi's handicap and total in games or points, for matches played in sets.
+function unitLineBets(game, base, matchup) {
+  const t = state.t;
+  const unit = LEAGUES[game.sport]?.sets?.unit ?? 'points';
+  const k = houseCut({ base: 'twoWay', sport: game.sport });
+  const bets = [];
+  if (game.spread) {
+    const { awayLine, awayFair } = game.spread;
+    const giver = awayLine < 0 ? 'away' : 'home';
+    for (const side of ['away', 'home']) {
+      const line = side === 'away' ? awayLine : -awayLine;
+      const p = side === 'away' ? awayFair : 1 - awayFair;
+      const text = `${teamName(game[side])} ${fmtLine(line)}`;
+      bets.push({ ...base, id: `${game.id}|gh|${line}|${side}`, kind: 'gamehcap', side, market: `gh|${awayLine}`, marketLabel: `${teamName(game[giver])} ${fmtLine(-Math.abs(awayLine))} ${t(`unit_${unit}`)}`, chip: text, label: text, shortLabel: `${t('secGameHcap')} ${text}`, line, posted: true, fairChance: p, fairMargin: null, errKey: errKeyOf(game.sport), cut: k, estOdds: estimateLineOdds(p, k), settle: { line } });
+    }
+  }
+  if (game.total) {
+    const { line, overFair } = game.total;
+    for (const side of ['over', 'under']) {
+      const p = side === 'over' ? overFair : 1 - overFair;
+      bets.push({ ...base, id: `${game.id}|gt|${line}|${side}`, kind: 'gametotal', side, market: `gt|${line}`, marketLabel: `${line} ${t(`unit_${unit}`)}`, chip: t(side), label: `${matchup} ${t(side)} ${line}`, shortLabel: `${t(side)} ${line} ${t(`unit_${unit}`)}`, posted: true, fairChance: p, fairMargin: null, errKey: errKeyOf(game.sport), cut: k, estOdds: estimateLineOdds(p, k), settle: { line } });
+    }
+  }
+  return bets;
+}
+
+// A championship pick's name: drivers as the lottery writes them.
+function futureName(market, team) {
+  if (market.key === 'f1drivers' && state.locale === 'zh') return f1Driver(team.name.en).zh;
+  return teamName(team.name);
 }
 
 // One bet per team of every championship market.
 function buildFutures(data) {
   const t = state.t;
   return (data.futures || []).flatMap(market => {
-    const odds = estimateFuturesOdds(market.teams.map(team => team.fair), FUTURES_OVERROUND[market.sport]);
+    const odds = estimateFuturesOdds(market.teams.map(team => team.fair), FUTURES_OVERROUND[market.key] ?? FUTURES_OVERROUND[market.sport] ?? FUTURES_OVERROUND.other);
     const title = t(`future_${market.key}`, { season: market.season });
     return market.teams.map((team, i) => ({
       id: `fut|${market.key}|${team.name.en}`,
@@ -575,34 +637,29 @@ function buildFutures(data) {
       market: market.key,
       sport: market.sport,
       matchup: title,
-      label: `${title} ${teamName(team.name)}`,
-      shortLabel: teamName(team.name),
+      label: `${title} ${futureName(market, team)}`,
+      shortLabel: futureName(market, team),
       teamEn: team.name.en,
       eventSlug: market.slug,
       fairChance: team.fair,
       fairMargin: null,
-      errKey: team.fair < 0.004 && market.sport !== 'nba' ? 'futureLongshot' : `future_${market.key}`,
+      errKey: ODDS_ERROR[`future_${market.key}`] ? (team.fair < 0.004 && market.sport !== 'nba' ? 'futureLongshot' : `future_${market.key}`) : 'futureOther',
       estOdds: odds[i]
     }));
   });
 }
 
 function effectiveOdds(bet) {
-  const user = Number(state.userOdds[bet.id]);
-  return user >= 1.01 ? user : bet.estOdds;
+  return bet.estOdds;
 }
 
 function betReturn(bet) {
   return expectedReturn(bet.fairChance, effectiveOdds(bet), STAKE);
 }
 
-function hasRealOdds(bet) {
-  return Number(state.userOdds[bet.id]) >= 1.01;
-}
-
 // Relative margin of the odds used: none once real odds are typed in.
 function oddsError(bet) {
-  return hasRealOdds(bet) ? 0 : ODDS_ERROR[bet.errKey]?.rel ?? 0;
+  return ODDS_ERROR[bet.errKey]?.rel ?? 0;
 }
 
 function betBackMargin(bet) {
@@ -618,23 +675,33 @@ function dayKey(iso) {
   return taipeiDayKey(iso);
 }
 
+// The sport filter: everything, a kind of sport (g:<group>), or one league.
+const SPORT_GROUPS = {
+  baseball: { icon: '⚾', leagues: ['mlb', 'npb', 'kbo', 'cpbl'] },
+  basketball: { icon: '🏀', leagues: ['nba', 'wnba', 'euroleague', 'bleague'] },
+  soccer: { icon: '⚽', leagues: Object.keys(LEAGUES).filter(key => LEAGUES[key].family === 'soccer') },
+  football: { icon: '🏈', leagues: ['nfl', 'ncaaf'] },
+  hockey: { icon: '🏒', leagues: ['nhl'] },
+  tennis: { icon: '🎾', leagues: ['tennis', 'wta'] },
+  net: { icon: '🏸', leagues: ['badminton', 'tabletennis', 'volleyball'] },
+  snooker: { icon: '🎱', leagues: ['snooker'] },
+  f1: { icon: '🏎️', leagues: ['f1'] }
+};
+const groupOfSport = sport => Object.keys(SPORT_GROUPS).find(g => SPORT_GROUPS[g].leagues.includes(sport));
+
 function inSport(sport) {
-  return state.sport === 'all' || state.sport === sport;
+  if (state.sport === 'all' || state.sport === sport) return true;
+  return state.sport.startsWith('g:') && SPORT_GROUPS[state.sport.slice(2)]?.leagues.includes(sport);
 }
 
 function visibleBets() {
   return state.bets.filter(b => inSport(b.sport) && dayKey(b.start) === state.day);
 }
 
-function rankedBets() {
-  return visibleBets().sort((a, b) => betReturn(b) - betReturn(a));
-}
-
 function rerenderFiltered() {
   renderSportFilter();
   renderTabs();
   renderDayFilter();
-  renderRanking();
   renderGames();
   renderLive();
   renderFutures();
@@ -649,29 +716,48 @@ function chip({ pressed, icon, text, count, onclick }) {
   ]);
 }
 
-// Sports as tiles: the league's logo, its name and how many games are listed.
+// Kinds of sport as tiles (an icon, the name, games listed), and once one
+// with several leagues is picked, its leagues as small chips underneath.
 function renderSportFilter() {
   const t = state.t;
   const present = new Set([...state.bets, ...state.futures].map(b => b.sport));
-  const sports = ['all', ...Object.keys(LEAGUES), 'f1'].filter(s => s === 'all' || present.has(s));
-  if (!sports.includes(state.sport)) state.sport = 'all';
-  const games = sport => (sport === 'f1' ? (state.data.f1 ? 1 : 0) : state.data.games.filter(g => sport === 'all' || g.sport === sport).length);
+  const groups = Object.keys(SPORT_GROUPS).filter(g => SPORT_GROUPS[g].leagues.some(l => present.has(l)));
+  const valid = state.sport === 'all' || (state.sport.startsWith('g:') && groups.includes(state.sport.slice(2))) || present.has(state.sport);
+  if (!valid) state.sport = 'all';
+  const games = inside => state.data.games.filter(g => inside(g.sport)).length;
+  const countText = (n, f1) => (f1 ? t('f1Race') : n > 0 ? t('gamesN', { n }) : t('futuresOnly'));
+  const current = state.sport === 'all' ? null : state.sport.startsWith('g:') ? state.sport.slice(2) : groupOfSport(state.sport);
+  const pick = value => () => {
+    state.sport = value;
+    rerenderFiltered();
+  };
+  const tile = (value, icon, name, count, pressed) =>
+    el('button', { class: 'sport-tile', type: 'button', 'aria-pressed': String(pressed), onclick: pick(value) }, [icon, el('span', { class: 'tile-name', text: name }), el('span', { class: 'tile-count', text: count })]);
+  const groupIcon = g => (SPORT_GROUPS[g].leagues.length === 1 && leagueLogo(SPORT_GROUPS[g].leagues[0]) ? leagueImg(SPORT_GROUPS[g].leagues[0], 'logo-tile') : el('span', { class: 'league-badge logo-tile' }, el('span', { class: 'league-img league-icon', 'aria-hidden': 'true', text: SPORT_GROUPS[g].icon })));
   $('sport-filter').replaceChildren(
-    ...sports.map(sport =>
-      el('button', {
-        class: 'sport-tile',
-        type: 'button',
-        'aria-pressed': String(sport === state.sport),
-        onclick: () => {
-          state.sport = sport;
-          rerenderFiltered();
-        }
-      }, [
-        sport === 'all' ? allIcon() : leagueImg(sport, 'logo-tile'),
-        el('span', { class: 'tile-name', text: t(`sport_${sport}`) }),
-        el('span', { class: 'tile-count', text: sport === 'f1' ? t('f1Race') : games(sport) > 0 ? t('gamesN', { n: games(sport) }) : t('futuresOnly') })
-      ])
-    )
+    tile('all', allIcon(), t('sport_all'), countText(games(() => true)), state.sport === 'all'),
+    ...groups.map(g => {
+      const leagues = SPORT_GROUPS[g].leagues.filter(l => present.has(l));
+      const value = leagues.length === 1 ? leagues[0] : `g:${g}`;
+      return tile(value, groupIcon(g), t(`group_${g}`), countText(games(sp => SPORT_GROUPS[g].leagues.includes(sp)), g === 'f1'), current === g);
+    })
+  );
+  // Keep the picked tile in view in the scrolling row.
+  {
+    const row = $('sport-filter');
+    const on = row.querySelector('[aria-pressed="true"]');
+    if (on && (on.offsetLeft < row.scrollLeft || on.offsetLeft + on.offsetWidth > row.scrollLeft + row.clientWidth)) row.scrollLeft = on.offsetLeft - 16;
+  }
+  // The picked kind's leagues.
+  const leagues = current ? SPORT_GROUPS[current].leagues.filter(l => present.has(l)) : [];
+  $('league-filter').hidden = leagues.length < 2;
+  $('league-filter').replaceChildren(
+    ...(leagues.length < 2
+      ? []
+      : [
+          chip({ pressed: state.sport === `g:${current}`, text: t('leagueAll'), onclick: pick(`g:${current}`) }),
+          ...leagues.map(l => chip({ pressed: state.sport === l, icon: leagueImg(l, 'logo-xs'), text: t(`sport_${l}`), count: games(sp => sp === l) || null, onclick: pick(l) }))
+        ])
   );
 }
 
@@ -750,7 +836,8 @@ function logoImg(sport, enName, label, size = '') {
 // light and dark mode (as Match-Find shows them), so no logo ever vanishes
 // into a dark background and none stands out.
 function leagueImg(sport, size = '') {
-  const fallback = () => el('span', { class: 'league-img league-missing', 'aria-hidden': 'true' });
+  const icon = LEAGUES[sport]?.icon;
+  const fallback = () => (icon ? el('span', { class: 'league-img league-icon', 'aria-hidden': 'true', text: icon }) : el('span', { class: 'league-img league-missing', 'aria-hidden': 'true' }));
   return el('span', { class: `league-badge ${size}` }, logoPicture(leagueLogo(sport), null, 'league-img', fallback));
 }
 
@@ -773,7 +860,6 @@ function renderStatic() {
   $('refresh').title = t('refresh');
   $('footer').textContent = t('footer');
   for (const [id, key] of [
-    ['ranking-title', 'rankingTitle'],
     ['games-title', 'gamesTitle'],
     ['live-title', 'liveTitle'],
     ['futures-title', 'futuresTitle'],
@@ -789,7 +875,6 @@ function renderStatic() {
   for (const node of document.querySelectorAll('[data-t]')) node.textContent = t(node.dataset.t);
   for (const tab of TABS) $(`tab-${tab}`).querySelector('.tab-label').textContent = t(`tab_${tab}`);
   renderPeriods();
-  renderStakeMode();
   // The guide: reading the numbers, the odds math, then every habit, kind of fan, kind of bet, how
   // the simulators work, the rules and the data, each group folded.
   const groups = [[t('guideReadTitle'), t('guideRead')], [t('guideMathTitle'), t('mathSteps')], ...t('guide')];
@@ -807,8 +892,9 @@ function renderStatic() {
 }
 
 // One icon per guide group, in order: reading the numbers, the odds math,
-// habits, fans, kinds of bet, the simulators, rules and tax, data and margins.
-const GUIDE_ICONS = ['🔎', '🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '🎲', '⚖️', '📡'];
+// traits, fans, kinds of bet, the lottery's rules, recommendations, the
+// simulator, data and margins.
+const GUIDE_ICONS = ['🔎', '🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '⚖️', '👍', '🎲', '📡'];
 
 function renderStatus(kind) {
   const t = state.t;
@@ -831,88 +917,6 @@ function betIcon(bet) {
   if (bet.game && side) return logoImg(bet.sport, bet.game[side].en, teamName(bet.game[side]), 'logo-sm');
   return leagueImg(bet.sport, 'logo-sm');
 }
-
-// The day's bets by average back per NT$100: the top three as cards, then
-// every bet in a folded list.
-function renderRanking() {
-  const t = state.t;
-  const ranked = rankedBets();
-  $('ranking').hidden = ranked.length === 0;
-  if (ranked.length === 0) return;
-  const best = betReturn(ranked[0]);
-  const context = rankingContext;
-  const medals = ['🥇', '🥈', '🥉'];
-  $('ranking-podium').replaceChildren(
-    ...ranked.slice(0, 3).map((bet, i) => {
-      const back = betReturn(bet);
-      const inSlip = state.parlay.includes(bet.id);
-      return el('li', { class: `podium-card ${inSlip ? 'in-slip' : ''}` }, [
-        el('span', { class: 'podium-medal', 'aria-hidden': 'true', text: medals[i] }),
-        betIcon(bet),
-        el('div', { class: 'podium-body' }, [el('p', { class: 'podium-pick', text: bet.shortLabel }), el('p', { class: 'podium-game', text: context(bet) })]),
-        el('div', { class: 'podium-side' }, [
-          el('p', { class: `podium-back ${backClass(back)}` }, [
-            el('small', { text: t('perHundred') }),
-            el('strong', { text: fmtMoney(back, { sign: false }) })
-          ]),
-          el('button', {
-            class: `podium-odds ${inSlip ? 'in-slip' : ''}`,
-            type: 'button',
-            'aria-pressed': String(inSlip),
-            'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}`,
-            onclick: () => toggleLeg(bet)
-          }, [document.createTextNode(fmtOdds(effectiveOdds(bet))), el('span', { text: inSlip ? ' ✓' : ' +' })])
-        ])
-      ]);
-    })
-  );
-  // The full list (hundreds of rows with MLB) is built only while it's open.
-  const more = document.querySelector('.ranking-more');
-  if (more.open) fillRankingList(ranked);
-  else $('ranking-list').replaceChildren();
-  $('ranking-more-label').textContent = t('rankingMore', { n: ranked.length });
-  // With estimated odds only, nearly every bet ties: say so rather than rank noise.
-  const tied = ranked.filter(b => best - betReturn(b) <= TIE_BAND).length;
-  const notes = [];
-  if (!ranked.some(hasRealOdds)) notes.push(t('rankingEstimateNote'));
-  else if (tied > 1) notes.push(`#1–#${tied}: ${t('tie')}`);
-  $('ranking-notes').replaceChildren(
-    ...notes.map(text => el('details', { class: 'info' }, [el('summary', { text: t(ranked.some(hasRealOdds) ? 'tieTitle' : 'rankingEstimateTitle') }), el('p', { text })]))
-  );
-}
-
-function rankingContext(bet) {
-  return bet.label.includes(bet.matchup) ? hhmm(bet.start) : `${bet.matchup} · ${hhmm(bet.start)}`;
-}
-
-function fillRankingList(ranked) {
-  const t = state.t;
-  if (!ranked.length) return $('ranking-list').replaceChildren();
-  const context = rankingContext;
-  const scaleMax = Math.max(100, betReturn(ranked[0])) * 1.04;
-  $('ranking-list').replaceChildren(
-    ...ranked.map((bet, i) => {
-      const back = betReturn(bet);
-      return el('li', { class: 'ranking-item' }, [
-        el('span', { class: 'rank', text: String(i + 1) }),
-        betIcon(bet),
-        el('span', { class: 'rank-label' }, [
-          document.createTextNode(`${bet.label} @ ${fmtOdds(effectiveOdds(bet))} `),
-          hasRealOdds(bet) ? el('span', { class: 'tag tag-real', text: t('tagReal') }) : null,
-          el('small', { text: ` ${context(bet)}` })
-        ]),
-        el('span', { class: `rank-value ${backClass(back)}` }, fmtMoney(back, { sign: false })),
-        el('div', { class: 'bar-track', 'aria-hidden': 'true' }, [
-          el('div', { class: 'bar', style: `width:${(back / scaleMax) * 100}%` }),
-          el('div', { class: 'bar-even', style: `left:${(100 / scaleMax) * 100}%` })
-        ])
-      ]);
-    })
-  );
-}
-document.querySelector('.ranking-more').addEventListener('toggle', event => {
-  if (event.target.open && state.data) fillRankingList(rankedBets());
-});
 
 // ---- Games --------------------------------------------------------------------
 
@@ -938,7 +942,6 @@ function gameCard(game, bets) {
   const t = state.t;
   const rerender = game.live ? renderLive : renderGames;
   const open = state.open.has(game.id);
-  const editing = state.editing.has(game.id);
   const ml = bets.filter(b => b.kind === 'ml');
   const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : ['away', 'home'];
   const rows = sides.map(side => {
@@ -951,7 +954,7 @@ function gameCard(game, bets) {
             el('span', { class: 'team-name' }, [document.createTextNode(teamName(game[side])), el('small', { text: t(side === 'home' ? 'homeTag' : 'awayTag') })])
           ];
     const score = game.live && side !== 'draw' ? el('span', { class: 'live-score', text: String(game.live[`${side}Score`]) }) : null;
-    return el('div', { class: 'team-row' }, [...who, score, bet ? pickButton(bet, '', editing) : null]);
+    return el('div', { class: 'team-row' }, [...who, score, bet ? pickButton(bet, '') : null]);
   });
   const others = bets.filter(b => b.kind !== 'ml');
   const toggle = () => {
@@ -967,7 +970,7 @@ function gameCard(game, bets) {
         : el('span', { class: 'game-time', text: hhmm(game.startUtc) })
     ]),
     el('div', { class: 'team-rows' }, rows),
-    open ? gameMore(game, others, editing) : null,
+    open ? gameMore(game, others) : null,
     others.length === 0 ? null : el('button', { class: 'more-toggle', type: 'button', 'aria-expanded': String(open), onclick: toggle }, [
       document.createTextNode(open ? t('lessMarkets') : t('moreMarkets'))
     ])
@@ -975,14 +978,16 @@ function gameCard(game, bets) {
 }
 
 // Every other market of a game, one small card each, then the game's details.
-function gameMore(game, bets, editing) {
+function gameMore(game, bets) {
   const t = state.t;
   const kinds = SECTIONS.filter(sec => sec.kind !== 'ml' && bets.some(b => b.kind === sec.kind));
   const current = kinds.find(sec => sec.kind === state.marketTab.get(game.id)) ?? kinds[0];
-  const sourceKey = game.live ? (game.live.pmWin != null ? 'liveSourcePm' : 'liveSource') : game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
+  const sourceKey = game.live ? (game.live.pmWin != null ? 'liveSourcePm' : 'liveSource') : game.book === 'kambi' ? 'sourceKambi' : game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
   const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
   const notes = [];
   if (game.live) notes.push(t(game.sport === 'mlb' ? 'liveNote' : 'liveNoteSoccer'));
+  if (game.book === 'kambi') notes.push(t('kambiNote'));
+  if (LEAGUES[game.sport]?.kambi && !LEAGUES[game.sport]?.results) notes.push(t('handSettleNote'));
   if (isSoccer(game.sport)) notes.push(t('soccerUnverified'));
   if (['football', 'basketball', 'hockey'].includes(familyOf(game.sport))) notes.push(t('otherSportNote'));
   if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) notes.push(t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }));
@@ -1005,9 +1010,8 @@ function gameMore(game, bets, editing) {
           )
         )
       : null,
-    current ? marketPanel(game, current, bets.filter(b => b.kind === current.kind), editing) : null,
+    current ? marketPanel(game, current, bets.filter(b => b.kind === current.kind)) : null,
     el('div', { class: 'game-foot' }, [
-      editToggle(game.id, game.live ? renderLive : renderGames),
       el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), el('p', { text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }), ...notes.map(text => el('p', { text }))])
     ])
   ]);
@@ -1015,7 +1019,7 @@ function gameMore(game, bets, editing) {
 
 // One line of a two-way market: the line (tagged when the lottery posts it)
 // and its two picks.
-function lineRow(label, pair, editing, { posted = false, main = false } = {}) {
+function lineRow(label, pair, { posted = false, main = false } = {}) {
   const t = state.t;
   // Outside MLB the tagged line is DraftKings' main line, not a checked lottery line.
   if (posted && pair[0]?.sport !== 'mlb') main = true;
@@ -1024,7 +1028,7 @@ function lineRow(label, pair, editing, { posted = false, main = false } = {}) {
       el('strong', { text: label }),
       posted ? el('small', { class: 'line-tag', text: t(main ? 'lineMain' : 'lineLottery') }) : null
     ]),
-    ...pair.map(b => pickButton(b, '', editing))
+    ...pair.map(b => (b ? pickButton(b, '') : el('span')))
   ]);
 }
 
@@ -1038,14 +1042,14 @@ function lineTable(heads, rows, title = null) {
 }
 
 // Each kind of market laid out as a table of its lines.
-function marketPanel(game, section, bets, editing) {
+function marketPanel(game, section, bets) {
   const t = state.t;
   const by = (list, side) => list.find(b => b.side === side);
   let body;
   if (section.kind === 'total') {
     const rows = [...groupBy(bets, b => b.totalLine).values()]
       .sort((a, b) => a[0].totalLine - b[0].totalLine)
-      .map(pair => lineRow(String(pair[0].totalLine), [by(pair, 'over'), by(pair, 'under')], editing, { posted: pair[0].posted, main: pair[0].mainLine }));
+      .map(pair => lineRow(String(pair[0].totalLine), [by(pair, 'over'), by(pair, 'under')], { posted: pair[0].posted, main: pair[0].mainLine }));
     body = [lineTable([t('colLine'), t('over'), t('under')], rows)];
   } else if (section.kind === 'runline') {
     // One block per team giving the runs: "遊騎兵 讓分" -1.5, -2.5, …
@@ -1054,7 +1058,7 @@ function marketPanel(game, section, bets, editing) {
         const taker = giver === 'away' ? 'home' : 'away';
         const markets = [...groupBy(bets.filter(b => b.giver === giver), b => b.market).values()].sort((a, b) => Math.abs(a[0].awayLine) - Math.abs(b[0].awayLine));
         if (!markets.length) return null;
-        const rows = markets.map(pair => lineRow(fmtLine(-Math.abs(pair[0].awayLine)), [by(pair, giver), by(pair, taker)], editing, { posted: pair[0].posted }));
+        const rows = markets.map(pair => lineRow(fmtLine(-Math.abs(pair[0].awayLine)), [by(pair, giver), by(pair, taker)], { posted: pair[0].posted }));
         return lineTable([t('colLine'), teamName(game[giver]), teamName(game[taker])], rows, t(isSoccer(game.sport) ? 'giveGoals' : 'giveRuns', { team: teamName(game[giver]) }));
       })
       .filter(Boolean);
@@ -1063,7 +1067,7 @@ function marketPanel(game, section, bets, editing) {
       .map(team => {
         const lines = [...groupBy(bets.filter(b => b.team === team), b => b.teamLine).values()].sort((a, b) => a[0].teamLine - b[0].teamLine);
         if (!lines.length) return null;
-        const rows = lines.map(pair => lineRow(String(pair[0].teamLine), [by(pair, 'over'), by(pair, 'under')], editing, { posted: pair[0].posted, main: pair[0].posted }));
+        const rows = lines.map(pair => lineRow(String(pair[0].teamLine), [by(pair, 'over'), by(pair, 'under')], { posted: pair[0].posted, main: pair[0].posted }));
         return lineTable([t('colLine'), t('over'), t('under')], rows, teamName(game[team]));
       })
       .filter(Boolean);
@@ -1071,29 +1075,13 @@ function marketPanel(game, section, bets, editing) {
     // One block per market (最高單局 has one; 第N分 one per run).
     body = [...groupBy(bets, b => b.market).values()].flatMap(list => [
       el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: list[0].marketLabel ?? t(section.title) })]),
-      el('div', { class: 'market-picks' }, list.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)))
+      el('div', { class: 'market-picks' }, list.map(b => pickButton(b, b.chip ?? b.shortLabel)))
     ]);
   }
   const extra = bets.some(b => b.posted === false);
   // Only MLB's lines were compared with the lottery; elsewhere the main line is DraftKings'.
   const note = game.sport === 'mlb' ? (extra ? t('linesNote') : null) : ['total', 'runline', 'teamtotal'].includes(section.kind) ? t('linesNoteOther') : null;
   return el('div', { class: `market-panel ${section.kind}` }, [...body, note ? el('p', { class: 'note', text: note }) : null]);
-}
-
-// Shows or hides the real-odds boxes of one card.
-function editToggle(id, rerender) {
-  const on = state.editing.has(id);
-  return el('button', {
-    class: 'ghost-button',
-    type: 'button',
-    'aria-pressed': String(on),
-    text: state.t(on ? 'editOddsDone' : 'editOdds'),
-    onclick: () => {
-      if (on) state.editing.delete(id);
-      else state.editing.add(id);
-      rerender();
-    }
-  });
 }
 
 // One section per kind of bet, each market of it with its own take. The
@@ -1112,7 +1100,16 @@ const SECTIONS = [
   { kind: 'firstinning', title: 'secFirstInning' },
   { kind: 'btts', title: 'secBtts' },
   { kind: 'score', title: 'secScore' },
-  { kind: 'oddeven', title: 'secOddEven' }
+  { kind: 'oddeven', title: 'secOddEven' },
+  { kind: 'htft', title: 'secHtft' },
+  { kind: 'goalbands', title: 'secGoalBands' },
+  { kind: 'q1', title: 'secQ1' },
+  { kind: 'firstset', title: 'secFirstSet' },
+  { kind: 'sets', title: 'secSets' },
+  { kind: 'totalsets', title: 'secTotalSets' },
+  { kind: 'sethcap', title: 'secSetHcap' },
+  { kind: 'gamehcap', title: 'secGameHcap' },
+  { kind: 'gametotal', title: 'secGameTotal' }
 ];
 
 function fmtPctShort(p) {
@@ -1124,56 +1121,45 @@ function pickTitle(bet) {
   const err = ODDS_ERROR[bet.errKey] ?? ODDS_ERROR.extra;
   return [
     bet.label,
-    `${t('legendOdds')} ${fmtOdds(effectiveOdds(bet))}${hasRealOdds(bet) ? ` (${t('tagReal')})` : ` ±${fmtOdds(bet.estOdds * err.rel)}${err.checked ? '' : '?'}`}`,
+    `${t('legendOdds')} ${fmtOdds(effectiveOdds(bet))} ±${fmtOdds(bet.estOdds * err.rel)}${err.checked ? '' : '?'}`,
+    bet.cut ? `${t('takeTitle')} ${fmtPct(1 - 1 / bet.cut)}` : null,
     `${t('colFair')} ${fmtPct(bet.fairChance)}${bet.fairMargin ? ` ${fmtMarginPts(bet.fairMargin)}${bet.typicalMargin ? '*' : ''}` : ''}`,
-    `${t('legendBack')} ${fmtMoney(betReturn(bet), { sign: false })} ±${Math.round(betBackMargin(bet))}`
-  ].join('\n');
-}
-
-function canAddToSlip() {
-  return true;
+    `${t('legendBack')} ${fmtMoney(betReturn(bet), { sign: false })} ±${Math.round(betBackMargin(bet))}`,
+    bet.lock ? t(`lock_${bet.lock}`) : bet.minLegs > 1 ? t('minLegsNote', { n: bet.minLegs }) : null
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 // A pick: tap to put it on the bet slip (or take it off). The big number is
 // the estimated lottery odds; its colour, whether it pays back more or less
-// than most (the numbers behind it are in its tooltip and in 說明).
-function pickButton(bet, name, editing) {
+// than most (the numbers behind it are in its tooltip and in 說明). A locked
+// pick (the house doesn't sell it) shows a lock; one sold only in parlays
+// shows its minimum (2關, 3關).
+function pickButton(bet, name) {
   const t = state.t;
   const back = betReturn(bet);
   const inSlip = state.parlay.includes(bet.id);
-  const add = canAddToSlip(bet);
+  const locked = Boolean(bet.lock);
+  const rec = !locked && (bet.live ? state.liveRecs : state.recs)?.get(bet.id);
   const body = [
+    rec ? el('span', { class: `rec rec-${rec.tag}`, text: t(`rec_${rec.tag}`) }) : null,
     name ? el('span', { class: 'pick-name', text: name }) : null,
     el('span', { class: 'pick-odds' }, [
-      document.createTextNode(fmtOdds(effectiveOdds(bet))),
-      hasRealOdds(bet) ? el('small', { text: t('tagReal') }) : null
+      locked ? el('span', { class: 'lock', 'aria-hidden': 'true', text: '🔒' }) : null,
+      document.createTextNode(locked ? t('lockedShort') : fmtOdds(effectiveOdds(bet))),
+      !locked && bet.minLegs > 1 ? el('small', { class: 'min-legs', text: t('minLegsTag', { n: bet.minLegs }) }) : null
     ])
   ];
-  const pick = el(add ? 'button' : 'div', {
-    class: `pick ${backClass(back)} ${inSlip ? 'in-slip' : ''}`,
-    'data-back': bet.id,
-    type: add ? 'button' : null,
-    title: pickTitle(bet),
-    'aria-pressed': add ? String(inSlip) : null,
-    'aria-label': add ? `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}` : null,
-    onclick: add ? () => toggleLeg(bet) : null
+  return el('button', {
+    class: `pick ${locked ? 'locked' : backClass(back)} ${rec ? 'has-rec' : ''} ${inSlip ? 'in-slip' : ''}`,
+    type: 'button',
+    title: [rec ? t(`recWhy_${rec.tag}`, { back: Math.round(rec.back), beats: Math.round(rec.beats * 100) }) : null, pickTitle(bet)].filter(Boolean).join('\n'),
+    disabled: locked ? true : null,
+    'aria-pressed': String(inSlip),
+    'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${locked ? t(`lock_${bet.lock}`) : inSlip ? t('removeLeg') : t('addLeg')}`,
+    onclick: locked ? null : () => toggleLeg(bet)
   }, body);
-  if (!editing) return pick;
-  return el('div', { class: 'pick-wrap' }, [pick, realOddsInput(bet, 'pick-real')]);
-}
-
-function realOddsInput(bet, cls) {
-  return el('input', {
-    class: cls,
-    type: 'number',
-    inputmode: 'decimal',
-    step: '0.01',
-    min: '1.01',
-    placeholder: state.t('realOddsShort'),
-    'aria-label': `${bet.label} ${state.t('colReal')}`,
-    value: state.userOdds[bet.id] ?? null,
-    oninput: event => onUserOdds(bet, event.target.value)
-  });
 }
 
 function groupBy(items, key) {
@@ -1184,27 +1170,6 @@ function groupBy(items, key) {
     map.get(k).push(item);
   }
   return map;
-}
-
-function onUserOdds(bet, raw) {
-  const value = Number(raw);
-  if (raw === '' || !(value >= 1.01)) delete state.userOdds[bet.id];
-  else state.userOdds[bet.id] = value;
-  saveUserOdds();
-  // Update the numbers in place: redrawing the card would drop the typing focus.
-  for (const cell of document.querySelectorAll(`[data-back="${CSS.escape(bet.id)}"]`)) {
-    const back = betReturn(bet);
-    if (cell.classList.contains('pick')) {
-      cell.classList.remove('back-high', 'back-low');
-      if (backClass(back)) cell.classList.add(backClass(back));
-      cell.querySelector('.pick-odds').firstChild.textContent = fmtOdds(effectiveOdds(bet));
-    } else {
-      cell.replaceChildren(document.createTextNode(fmtOdds(effectiveOdds(bet))));
-    }
-  }
-  renderRanking();
-  renderParlay();
-  renderSim();
 }
 
 // ---- Live (場中) --------------------------------------------------------------------
@@ -1278,7 +1243,7 @@ function buildLiveBets(data) {
       }
     }
   }
-  return { games, bets };
+  return { games, bets: withHouseRules(bets) };
 }
 
 function renderLive() {
@@ -1300,6 +1265,7 @@ async function refreshLive() {
   try {
     const data = await loadLive(new Date(), LIVE_MIN_LIQUIDITY);
     const { games, bets } = buildLiveBets(data);
+    state.liveRecs = recommend(bets);
     state.liveGames = games;
     state.liveBets = bets;
     state.liveAt = data.loadedAt;
@@ -1329,32 +1295,26 @@ function driverBadge(bet, size = '') {
 
 // One row per team or driver: picture, name, chance, then the estimated odds
 // and average back as a button that puts the pick on the slip.
-function entryRow(bet, i, editing, picture, sub) {
+function entryRow(bet, i, picture, sub) {
   const t = state.t;
   const inSlip = state.parlay.includes(bet.id);
   return el('div', { class: `entry ${inSlip ? 'in-slip' : ''}`, title: pickTitle(bet) }, [
     el('span', { class: 'entry-rank', text: String(i + 1) }),
     picture,
     el('span', { class: 'entry-name' }, [document.createTextNode(bet.shortLabel), el('small', { text: [fmtPctShort(bet.fairChance), sub].filter(Boolean).join(' · ') })]),
-    editing
-      ? realOddsInput(bet, 'entry-real')
-      : el('button', {
-          class: `entry-odds ${inSlip ? 'in-slip' : ''}`,
-          type: 'button',
-          'data-back': bet.id,
-          'aria-pressed': String(inSlip),
-          'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}`,
-          onclick: () => toggleLeg(bet)
-        }, [
-          document.createTextNode(fmtOdds(effectiveOdds(bet)))
-        ])
+    el('button', {
+      class: `entry-odds ${inSlip ? 'in-slip' : ''}`,
+      type: 'button',
+      'aria-pressed': String(inSlip),
+      'aria-label': `${bet.label} ${fmtOdds(effectiveOdds(bet))} · ${inSlip ? t('removeLeg') : t('addLeg')}`,
+      onclick: () => toggleLeg(bet)
+    }, [document.createTextNode(fmtOdds(effectiveOdds(bet)))])
   ]);
 }
 
 function board({ emblem, title, sub, bets, rows, id, notes = [], shown = Infinity }) {
   const t = state.t;
-  const editing = state.editing.has(id);
-  const entries = bets.map((b, i) => rows(b, i, editing));
+  const entries = bets.map((b, i) => rows(b, i));
   const rest = entries.slice(shown);
   return el('article', { class: 'board' }, [
     el('div', { class: 'board-head' }, [
@@ -1363,10 +1323,7 @@ function board({ emblem, title, sub, bets, rows, id, notes = [], shown = Infinit
     ]),
     el('div', { class: 'entries' }, entries.slice(0, shown)),
     rest.length ? el('details', { class: 'board-more' }, [el('summary', { text: t('futureMore', { n: rest.length }) }), el('div', { class: 'entries' }, rest)]) : null,
-    el('div', { class: 'board-foot' }, [
-      editToggle(id, () => (renderFutures(), renderF1())),
-      notes.length ? el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
-    ])
+    notes.length ? el('div', { class: 'board-foot' }, [el('details', { class: 'info' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))])]) : null
   ]);
 }
 
@@ -1380,6 +1337,7 @@ function renderFutures() {
       const notes = [];
       if (sport === 'nba') notes.push(t('futureNbaNote'));
       if (sport === 'epl') notes.push(t('futureEplNote'));
+      if (bets[0].errKey === 'futureOther') notes.push(t('futureOtherNote'));
       return board({
         emblem: sport,
         title: matchup,
@@ -1388,7 +1346,7 @@ function renderFutures() {
         id: `fut|${market}`,
         notes,
         shown: FUTURES_SHOWN,
-        rows: (b, i, editing) => entryRow(b, i, editing, logoImg(b.sport, b.teamEn, b.shortLabel))
+        rows: (b, i) => entryRow(b, i, market === 'f1drivers' ? driverBadge({ driverEn: b.teamEn, driver: f1Driver(b.teamEn) }) : logoImg(b.sport, b.teamEn, b.shortLabel))
       });
     })
   );
@@ -1397,6 +1355,7 @@ function renderFutures() {
 // ---- Bet slip -----------------------------------------------------------------
 
 function toggleLeg(bet) {
+  if (bet.lock && !state.parlay.includes(bet.id)) return;
   if (state.parlay.includes(bet.id)) {
     state.parlay = state.parlay.filter(id => id !== bet.id);
   } else {
@@ -1410,7 +1369,6 @@ function toggleLeg(bet) {
   renderLive();
   renderF1();
   renderFutures();
-  renderRanking();
   renderParlay();
 }
 
@@ -1741,7 +1699,7 @@ function renderParlay() {
   const chosen = [...state.slipSizes].map(k => (k === 'all' ? n : k));
   const sizes = slipSizes(mode, n, chosen);
   const stake = state.slipStake;
-  const slip = legs.map(b => ({ gameId: b.gameId, odds: effectiveOdds(b), fairChance: b.fairChance }));
+  const slip = legs.map(b => ({ gameId: b.gameId, odds: effectiveOdds(b), fairChance: b.fairChance, minLegs: b.minLegs ?? 1, lock: b.lock ?? null }));
   const errors = slipErrors({ mode, legs: slip, sizes, stake });
   const rerender = () => renderParlay();
 
@@ -1771,8 +1729,7 @@ function renderParlay() {
           renderLive();
           renderF1();
           renderFutures();
-          renderRanking();
-          renderParlay();
+                  renderParlay();
         }
       })
     ]),
@@ -1855,7 +1812,7 @@ function renderParlay() {
     ])
   );
   if (errors.length) {
-    ticket.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit }) }))));
+    ticket.push(el('ul', { class: 'slip-errors' }, errors.map(e => el('li', { text: t(`slipError_${e}`, { max: SLIP_RULES.maxLegs, min: fmtMoney(SLIP_RULES.minTicket, { sign: false }), maxTicket: fmtMoney(SLIP_RULES.maxTicket, { sign: false }), unit: SLIP_RULES.unit, need: minLegsProblem(slip, sizes) }) }))));
   }
   const cost = sizes.reduce((sum, k) => sum + choose(n, k), 0) * stake;
   if (sizes.length && !errors.includes('stakeUnit')) ticket.push(payoutBox(slip, sizes, stake, mode));
@@ -2112,6 +2069,7 @@ function legRecord(bet) {
     driver: bet.driverEn ?? null,
     eventSlug: bet.eventSlug ?? null,
     live: bet.live ? true : undefined,
+    kambiId: bet.game?.kambiId ?? undefined,
     ...(bet.settle ?? {}),
     team: bet.kind === 'future' ? bet.teamEn : bet.settle?.team ?? bet.team ?? null,
     logo: legLogo(bet)
@@ -2141,8 +2099,7 @@ function placeButton(legs, sizes, cost, errors) {
         renderLive();
         renderF1();
         renderFutures();
-        renderRanking();
-        renderParlay();
+              renderParlay();
         showTab('history');
       }
     }),
@@ -2320,7 +2277,8 @@ function savedSlipCard(slip) {
           el('span', { class: 'leg-result', 'aria-label': t(`legState_${states[k]}`), title: t(`legState_${states[k]}`), text: LEG_ICON[states[k]] }),
           legIcon(leg),
           legMain(leg),
-          el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(leg.odds))])
+          el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(leg.odds))]),
+          needsHandSettle(leg, now) ? handSettle(slip, k) : null
         ])
       )
     ),
@@ -2337,6 +2295,31 @@ function savedSlipCard(slip) {
           payCell(decided ? t('slipMost') : t('payAll'), fmtMoney(range.most, { sign: false }), dead ? 'back-low' : '')
         ]),
     slipInsight(slip)
+  ]);
+}
+
+// Sports with no automatic result (only Kambi's odds, and the live score
+// didn't show the end): a few hours after the start, the pick can be settled
+// by hand. Anything left after 3 days is refunded, as the lottery does with
+// a result it can't confirm.
+const HAND_SETTLE_AFTER_MS = 3 * 3_600_000;
+function needsHandSettle(leg, now) {
+  const league = LEAGUES[leg.sport];
+  return !leg.result && league?.kambi && !league.results && leg.start && now - Date.parse(leg.start) > HAND_SETTLE_AFTER_MS;
+}
+
+function handSettle(slip, k) {
+  const t = state.t;
+  const settle = result => {
+    const results = slip.legs.map((leg, i) => (i === k ? result : leg.result ?? null));
+    const next = applyResults(state.account, slip.id, results);
+    if (next.slips.find(s => s.id === slip.id).status === 'settled') state.freshSlips.add(slip.id);
+    commitAccount(next);
+    renderSaved();
+  };
+  return el('span', { class: 'hand-settle', role: 'group', 'aria-label': t('handSettle') }, [
+    el('small', { class: 'muted', text: t('handSettle') }),
+    ...['won', 'lost', 'void'].map(result => el('button', { class: 'ghost-button tiny', type: 'button', text: t(`handSettle_${result}`), onclick: () => settle(result) }))
   ]);
 }
 
@@ -2641,13 +2624,51 @@ function funCard() {
   return el('div', { class: 'card' }, [el('h3', { class: 'card-title', text: t('funTitle') }), el('ul', { class: 'facts' }, items.map(text => el('li', { text })))]);
 }
 
+// One person's betting in numbers (profile.mjs), the same card for you and
+// for anyone in the simulated crowd: what they bought, how it went, their
+// streaks and best and worst moments, and the traits their tickets show.
+function profileCard(p, { weekLabel = w => state.t('simWeekN', { n: fmtCount(w + 1) }) } = {}) {
+  const t = state.t;
+  if (!p) return null;
+  const money = v => fmtMoney(v, { sign: false });
+  const line = (label, value, cls = '', note = null) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { class: cls, text: value }), note ? el('small', { text: note }) : null]);
+  return el('div', { class: 'profile' }, [
+    el('div', { class: 'player-lines' }, [
+      line(t('profTickets'), t('profTicketsV', { n: fmtCount(p.tickets), won: fmtCount(p.won) }), '', t('profHit', { v: fmtShare(p.hitRate) })),
+      line(t('profBack'), p.back == null ? '–' : money(p.back), p.back != null && p.back < 100 ? 'back-low' : 'back-high', t('profPer100')),
+      line(t('profStake'), money(p.avgStake), '', t('profMaxStake', { v: money(p.maxStake) })),
+      line(t('profLegs'), p.avgLegs.toFixed(1), '', t('profSingles', { v: fmtShare(p.singleShare) })),
+      line(t('profOdds'), `×${fmtOdds(p.avgOdds)}`, '', t('profChance', { v: fmtPctShort(p.avgChance) })),
+      line(t('profBigWin'), p.biggestWin ? fmtMoney(p.biggestWin.net) : t('playerNoWin'), p.biggestWin ? 'back-high' : '', p.biggestWin ? t('profBigWinNote', { odds: fmtOdds(p.biggestWin.odds), legs: p.biggestWin.legs, week: weekLabel(p.biggestWin.w) }) : null),
+      line(t('profStreaks'), t('profStreaksV', { won: fmtCount(p.longestWin), lost: fmtCount(p.longestLose) })),
+      line(t('profNearMiss'), t('timesN', { n: fmtCount(p.nearMisses) })),
+      p.bestWeek ? line(t('profBestWeek'), fmtMoney(p.bestWeek.net), 'back-high', weekLabel(p.bestWeek.w)) : null,
+      p.worstWeek ? line(t('profWorstWeek'), fmtMoney(p.worstWeek.net), 'back-low', weekLabel(p.worstWeek.w)) : null,
+      line(t('profPace'), t('profPaceV', { n: p.perWeek.toFixed(1) }), '', t('profWeeksPlayed', { n: fmtCount(p.weeksPlayed), of: fmtCount(p.weeks) }))
+    ]),
+    p.traits.length ? el('div', { class: 'player-tags' }, [el('small', { class: 'muted', text: t('profSeen') }), ...p.traits.map(key => el('span', { class: 'habit-tag trait-tag', title: t(`traitDesc_${key}`), text: `${TRAIT_ICON[key]} ${t(`trait_${key}`)}` }))]) : null
+  ]);
+}
+
+// Your betting in the same numbers as the crowd's people.
+function youCard() {
+  const t = state.t;
+  const p = ticketProfile(accountTickets(state.account));
+  if (!p) return null;
+  const first = state.account.slips.filter(s => s.status === 'settled').map(s => s.t).sort()[0];
+  const weekLabel = w => fmtTime(new Date(Date.parse(first) + w * 7 * 86_400_000).toISOString()).split(' ')[0];
+  return el('div', { class: 'card' }, [el('h3', { class: 'card-title', text: t('youProfileTitle') }), profileCard(p, { weekLabel })]);
+}
+
 // The account against the simulated crowd, over the same length of time.
 // The crowd is simulated only here or on the simulator tab, never at start-up.
 function crowdCard(s) {
   const t = state.t;
-  const profile = bettingProfile(state.account);
-  if (!profile || !state.data) return null;
-  const months = PERIOD_MONTHS.find(m => m >= Math.min(60, Math.ceil((profile.weeks * 12) / 52))) ?? 60;
+  const slips = state.account.slips;
+  if (!slips.length || !state.data) return null;
+  const firstMs = Math.min(...slips.map(x => Date.parse(x.t)));
+  const accountWeeks = Math.max(1, (Date.now() - firstMs) / (7 * 86_400_000));
+  const months = PERIOD_MONTHS.find(m => m >= Math.min(60, Math.ceil((accountWeeks * 12) / 52))) ?? 60;
   const weeks = monthWeeks(months);
   const sportBets = simSportBets();
   const crowd = crowdCache.get(crowdKey(sportBets, weeks));
@@ -2662,16 +2683,17 @@ function crowdCard(s) {
   const mine = s.net;
   const beat = crowdPercentile(crowd.finalQuantiles, mine);
   const crowdBack = crowd.totals.staked ? ((crowd.totals.staked + crowd.totals.net) / crowd.totals.staked) * 100 : null;
-  const habit = closestHabit(profile, HABITS);
-  const summary = crowd.summaries.find(x => x.habit.key === habit.key);
+  const profile = ticketProfile(accountTickets(state.account));
   const perPerson = { tickets: crowd.totals.tickets / crowd.players, staked: crowd.totals.staked / crowd.players };
   const rows = [
     [t('crowdColNet'), fmtMoney(mine), fmtMoney(quantile(crowd.finalQuantiles, 0.5))],
     [t('crowdColBack'), s.settled ? fmtBack(s.back) : '–', fmtBack(crowdBack)],
     [t('crowdColSlips'), fmtInt(s.placed), fmtCount(perPerson.tickets)],
-    [t('crowdColStaked'), fmtMoney(state.account.slips.reduce((x, y) => x + y.cost, 0), { sign: false }), fmtMoney(perPerson.staked, { sign: false })],
-    [t('crowdColLegs'), profile.legs.toFixed(1), '–']
+    [t('crowdColStaked'), fmtMoney(slips.reduce((x, y) => x + y.cost, 0), { sign: false }), fmtMoney(perPerson.staked, { sign: false })],
+    [t('crowdColLegs'), profile ? profile.avgLegs.toFixed(1) : '–', crowd.crowd.avgLegs ? crowd.crowd.avgLegs.toFixed(1) : '–']
   ];
+  // People in the crowd with the traits your tickets show.
+  const like = (profile?.traits ?? []).map(key => crowd.traitSummaries.find(x => x.trait.key === key)).filter(Boolean);
   return el('div', { class: 'card crowd-card' }, [
     title,
     el('div', { class: 'crowd-hero' }, [
@@ -2681,15 +2703,12 @@ function crowdCard(s) {
     el('div', { class: 'crowd-bar', role: 'img', 'aria-label': t('crowdBeat', { n: fmtCount(SIM_PLAYERS_SHOWN), period: periodName(weeks) }) }, [el('span', { class: 'crowd-you', style: `left:${(beat * 100).toFixed(1)}%` })]),
     el('p', { class: 'crowd-scale muted' }, [el('span', { text: t('crowdWorst') }), el('span', { text: t('crowdBest') })]),
     table([t('crowdColWhat'), t('crowdColYou'), t('crowdColCrowd')], rows),
-    el('p', { class: 'crowd-like' }, [
-      el('span', { class: 'crowd-like-icon', 'aria-hidden': 'true', text: HABIT_ICON[habit.key] }),
-      el('span', { text: t('crowdLike', { habit: t(`habit_${habit.key}`), ahead: summary ? fmtPctShort(summary.aheadShare) : '–', back: summary ? fmtBack(summary.back) : '–', period: periodName(weeks) }) })
-    ]),
+    like.length
+      ? el('ul', { class: 'facts crowd-like-list' }, like.map(x => el('li', {}, [el('span', { class: 'crowd-like-icon', 'aria-hidden': 'true', text: TRAIT_ICON[x.trait.key] }), document.createTextNode(t('crowdLikeTrait', { trait: t(`trait_${x.trait.key}`), ahead: fmtPctShort(x.aheadShare), final: fmtMoney(x.avgFinal), period: periodName(weeks) }))])))
+      : null,
     el('ul', { class: 'facts' }, [
-      // A trait that shows in the slips: raising the stake after a losing slip.
-      profile.chase >= 0.5 && crowd.traitSummaries ? el('li', { text: t('crowdTilt', { final: fmtMoney(crowd.traitSummaries.find(x => x.trait.key === 'tilt').avgFinal), none: fmtMoney(crowd.traitSummaries.find(x => x.trait.key === 'none').avgFinal), period: periodName(weeks) }) }) : null,
       el('li', { text: t('crowdAhead', { share: fmtPctShort(crowd.totals.aheadShare), period: periodName(weeks) }) }),
-      el('li', { text: t('crowdNote', { weeks: fmtCount(Math.max(1, Math.round(profile.weeks))) }) })
+      el('li', { text: t('crowdNote', { weeks: fmtCount(Math.max(1, Math.round(accountWeeks))) }) })
     ])
   ]);
 }
@@ -2712,7 +2731,7 @@ function renderStats() {
   ]);
   const cards = [el('div', { class: 'card' }, [kpis, el('p', { class: 'note', text: t('kpiNote') })])];
   if (s.timeline.length > 1) cards.push(balanceChart(s.timeline));
-  cards.push(crowdCard(s), funCard());
+  cards.push(youCard(), crowdCard(s), funCard());
   if (s.settled) cards.push(el('div', { class: 'two-col' }, [luckCard(s), recordsCard(s)]), picksCard(s), breakdownCard(s), weeksCard(s));
   else cards.push(el('p', { class: 'muted', text: t('statsWait') }));
   $('stats-body').replaceChildren(...cards.filter(Boolean));
@@ -2721,23 +2740,48 @@ function renderStats() {
 // ---- Simulator ----------------------------------------------------------------
 
 // Bets per sport that stand in for that sport's games in any week of the
-// year: the real ones on the board (win lines and each game's main total),
-// or a typical week when a sport has none (always for the NBA). Every sport
-// is simulated, whatever the sport filter shows.
+// year: every market on the board a person can buy (locked ones dropped,
+// each with the house's parlay-only rule), or a typical week when a sport
+// has nothing on (the simulated crowd bets by the same rules as you).
+// Each option carries its slice of its game's shared result, so markets of
+// one game agree: the winner and every handicap line share one draw (the
+// away side's slice first), every total line another (under first).
 function simSportBets() {
+  if (state.simBets?.bets === state.bets) return state.simBets.pools;
+  const slice = b => {
+    const game = `${b.sport}|${b.gameId}`;
+    if (b.kind === 'ml' && b.side !== 'draw' && !isSoccer(b.sport)) {
+      const away = b.side === 'away' ? b.fairChance : 1 - b.fairChance;
+      return { key: `${game}|side`, outLo: b.side === 'away' ? 0 : away, outHi: b.side === 'away' ? away : 1 };
+    }
+    if (b.kind === 'ml') {
+      const probs = Object.fromEntries(state.bets.filter(x => x.gameId === b.gameId && x.kind === 'ml').map(x => [x.side, x.fairChance]));
+      const lo = { away: 0, draw: probs.away ?? 0, home: (probs.away ?? 0) + (probs.draw ?? 0) }[b.side];
+      return { key: `${game}|side`, outLo: lo, outHi: lo + b.fairChance };
+    }
+    if (b.kind === 'runline' || b.kind === 'sethcap' || b.kind === 'gamehcap') {
+      const away = b.side === 'away' ? b.fairChance : 1 - b.fairChance;
+      return { key: `${game}|${b.kind === 'runline' ? 'side' : b.kind}`, outLo: b.side === 'away' ? 0 : away, outHi: b.side === 'away' ? away : 1 };
+    }
+    if (b.kind === 'total' || b.kind === 'teamtotal' || b.kind === 'totalsets' || b.kind === 'gametotal') {
+      const over = b.side === 'over' ? b.fairChance : 1 - b.fairChance;
+      return { key: `${game}|${b.kind}${b.kind === 'teamtotal' ? `|${b.team}` : ''}`, outLo: b.side === 'under' ? 0 : 1 - over, outHi: b.side === 'under' ? 1 - over : 1 };
+    }
+    return { key: `${game}|${b.market ?? b.kind}` };
+  };
   const real = sport =>
     state.bets
-      .filter(b => b.sport === sport && (b.kind === 'ml' || b.kind === 'f1' || (b.kind === 'total' && b.mainLine)))
-      // `key`: the market (a game's win market, its total, the race) whose one
-      // shared result decides every bet on it.
-      .map(b => ({ gameId: b.gameId, key: `${sport}|${b.gameId}|${b.kind === 'total' ? 'total' : 'win'}`, fairChance: b.fairChance, odds: effectiveOdds(b) }));
-  return Object.fromEntries(
+      .filter(b => b.sport === sport && !b.lock && !b.live && b.fairChance > 0)
+      .map(b => ({ gameId: b.gameId, kind: b.kind, market: b.market ?? b.kind, fairChance: b.fairChance, odds: effectiveOdds(b), minLegs: b.minLegs ?? 1, ...slice(b) }));
+  const pools = Object.fromEntries(
     SPORTS.map(sport => {
       const bets = real(sport);
       const games = new Set(bets.map(b => b.gameId)).size;
       return [sport, games >= (SIM_SPORTS[sport].family === 'racing' ? 1 : 2) ? bets : sportTemplate(sport)];
     })
   );
+  state.simBets = { bets: state.bets, pools };
+  return pools;
 }
 
 function niceStep(range, target) {
@@ -2774,8 +2818,11 @@ const crowdCache = new Map();
 let crowdJob = null;
 let worker = null;
 
+// A short key for a pool and period (the pool itself is large).
+const poolKeys = new WeakMap();
 function crowdKey(sportBets, weeks) {
-  return JSON.stringify([weeks, state.simBig, sportBets]);
+  if (!poolKeys.has(sportBets)) poolKeys.set(sportBets, String(hashString(JSON.stringify(sportBets))));
+  return `${weeks}|${poolKeys.get(sportBets)}`;
 }
 
 // Loading screen progress. At start-up it spans both stages, odds (first 35%)
@@ -2840,15 +2887,15 @@ function crowdStats(sportBets, weeks, { quiet = false } = {}) {
       worker = null;
       runHere();
     };
-    worker.postMessage({ id: key, sportBets, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED, big: state.simBig });
+    worker.postMessage({ id: key, sportBets, startWeek, weeks, perGroup: PER_GROUP, seed: SIM_SEED });
   } catch {
     runHere();
   }
   // No worker (very old browser): run here after the loading screen paints.
   function runHere() {
-    const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
+    const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, crowdPools(bets)]));
     const checkpoints = [...MONTH_WEEKS.filter(w => w <= weeks), weeks];
-    setTimeout(() => done(simulateCrowd({ sportPools, startWeek, weeks, checkpoints, perGroup: PER_GROUP, seed: SIM_SEED, big: state.simBig }).results), 30);
+    setTimeout(() => done(simulateCrowd({ sportPools, startWeek, weeks, checkpoints, perGroup: PER_GROUP, seed: SIM_SEED }).results), 30);
   }
   return promise;
 }
@@ -2884,7 +2931,7 @@ function renderSim() {
 function drawSim(stats, weeks) {
   const t = state.t;
   const period = periodName(weeks);
-  const { bands, summaries, totals } = stats;
+  const { bands, totals } = stats;
   const characters = CHARACTERS.map(c => ({ ...c, player: stats.characters[c.key] }));
 
   renderSimHeadline(totals, period);
@@ -2905,10 +2952,8 @@ function drawSim(stats, weeks) {
   renderLapse(bands, weeks);
   renderBuys(totals, period);
   renderPlayers(characters);
-  renderHabits(summaries);
-  renderFans(stats.fanSummaries);
-  renderTraits(stats.traitSummaries);
-  renderFacts(stats, totals, characters, summaries, period);
+  renderGroups(stats);
+  renderFacts(stats, totals, characters, period);
   renderFlow(stats, period);
   renderStories(stats, period);
   renderSurplus(stats, period);
@@ -2947,29 +2992,34 @@ function renderSimHeadline(totals, period) {
   );
 }
 
+// A person's tale in one line.
+function taleOf(p) {
+  const t = state.t;
+  if (p.final > 0) return t('taleAheadTraits');
+  if (!p.everAhead) return t('taleNever');
+  return t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
+}
+
+// Who a simulated person is: their kind of fan and their traits.
+function personTags(p) {
+  const fan = p.fan?.key ?? p.fan;
+  return [fan ? el('span', { class: 'habit-tag', text: state.t(`fan_${fan}`) }) : null, ...traitTags(p)];
+}
+
 function renderPlayers(characters) {
   const t = state.t;
   $('sim-players').replaceChildren(
-    ...characters.map(({ name, rank, color, icon, player: p }) => {
-      let tale;
-      if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
-      else if (!p.everAhead) tale = t('taleNever');
-      else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
-      const line = (label, value) => el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { text: value })]);
-      return el('article', { class: 'player', style: `--player:${color}` }, [
+    ...characters.map(({ name, rank, color, icon, player: p }) =>
+      el('article', { class: 'player', style: `--player:${color}` }, [
         el('div', { class: 'player-head' }, [
           el('span', { class: 'avatar', 'aria-hidden': 'true', text: icon }),
           el('div', {}, [el('p', { class: 'player-name', text: t(name) }), el('p', { class: 'player-rank', text: t(rank) })])
         ]),
         el('p', { class: `player-final ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
-        el('p', { class: 'player-tale', text: tale }),
-        el('div', { class: 'player-tags' }, [
-          p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null,
-          ...traitTags(p),
-          el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) })
-        ])
-      ]);
-    })
+        el('p', { class: 'player-tale', text: taleOf(p) }),
+        el('div', { class: 'player-tags' }, personTags(p))
+      ])
+    )
   );
 }
 
@@ -2987,72 +3037,54 @@ function barItem({ icon, name, desc, back, margin, meta, scaleMax }) {
   ]);
 }
 
-function renderHabits(summaries) {
-  const t = state.t;
-  const sorted = [...summaries].sort((a, b) => b.back - a.back);
-  const scaleMax = Math.max(100, sorted[0].back) * 1.04;
-  $('sim-habits').replaceChildren(
-    ...sorted.map(h =>
-      barItem({
-        icon: badge(HABIT_ICON[h.habit.key], HABIT_COLOR[h.habit.key], 'emoji'),
-        name: t(`habit_${h.habit.key}`),
-        desc: t(`habitDesc_${h.habit.key}`),
-        back: h.back,
-        margin: h.backMargin,
-        scaleMax,
-        meta: t('habitMeta', { ahead: fmtShare(h.aheadShare), staked: fmtMoney(h.avgStaked, { sign: false }), final: fmtMoney(h.avgFinal) })
-      })
-    )
-  );
-}
+// Every trait's icon; people with no trait of a kind for comparison.
+const TRAIT_ICON = {
+  favorite: '📣', underdog: '🎯', value: '🧮', exotic: '🎲', single: '1️⃣', parlay: '🎰', whale: '🐋', small: '🪙', daily: '📅', rare: '🌙',
+  tilt: '🔥', chaser: '🔁', cashOut: '💰', streaky: '🍀', pressOn: '🚀', revenge: '😤', heartbroken: '💔', soClose: '😣', jackpot: '🌠',
+  rider: '⛄', guardian: '🛡️', stopLoss: '🛑', content: '😊', moody: '🎭', bored: '🥱', hailMary: '🙏', loyal: '❤️', hopper: '🦘', plainStyle: '😐', plainReact: '😐'
+};
 
-// Personality traits, from the most money back to the least; people with no
-// trait at all for comparison.
-const TRAIT_ICON = { tilt: '🔥', cashOut: '💰', streaky: '🍀', revenge: '😤', heartbroken: '💔', jackpot: '🌠', guardian: '🛡️', moody: '🎭', bored: '🥱', none: '😐' };
-function renderTraits(traits) {
+// The crowd three ways, one tab each: how people bet (the traits of pick,
+// picks per ticket, stake and pace), their reactions, and what they bet on.
+// Ranked by the average result: traits change how much people stake, so
+// money back per NT$100 alone would hide the big losers.
+const GROUP_TABS = ['style', 'react', 'fan'];
+function renderGroups(stats) {
   const t = state.t;
-  if (!traits?.length) return;
-  // By the average result: traits change how much people stake, not the cut.
-  const sorted = [...traits].sort((a, b) => b.avgFinal - a.avgFinal);
-  const scaleMax = Math.max(100, ...sorted.map(x => x.back)) * 1.04;
-  $('sim-traits').replaceChildren(
-    ...sorted.map(x =>
-      barItem({
-        icon: badge(TRAIT_ICON[x.trait.key], 'var(--accent)', 'emoji'),
-        name: t(`trait_${x.trait.key}`),
-        desc: t(`traitDesc_${x.trait.key}`),
-        back: x.back,
-        margin: x.backMargin,
-        scaleMax,
-        meta: t('traitMeta', { share: fmtShare(x.share), ahead: fmtShare(x.aheadShare), final: fmtMoney(x.avgFinal) }) + (x.quitShare >= 0.05 ? ` · ${t('traitQuit', { v: fmtShare(x.quitShare) })}` : '')
+  const tab = GROUP_TABS.includes(state.groupTab) ? state.groupTab : 'style';
+  let rows;
+  if (tab === 'fan') {
+    rows = stats.fanSummaries.map(f => ({ icon: f.fan.key === 'all' ? badge('🌐', 'var(--accent)', 'emoji') : leagueImg(f.fan.sports[0], 'logo-sm'), name: t(`fan_${f.fan.key}`), desc: t(`fanDesc_${f.fan.key}`), x: f, meta: t('fanMeta', { ahead: fmtShare(f.aheadShare), tickets: fmtCount(f.avgTickets), final: fmtMoney(f.avgFinal) }) }));
+  } else {
+    const groupOf = key => TRAITS.find(x => x.key === key)?.group ?? null;
+    rows = stats.traitSummaries
+      .filter(x => (tab === 'style' ? x.trait.key === 'plainStyle' || groupOf(x.trait.key) : x.trait.key === 'plainReact' || (!groupOf(x.trait.key) && x.trait.key !== 'plainStyle')))
+      .map(x => ({ icon: badge(TRAIT_ICON[x.trait.key], 'var(--accent)', 'emoji'), name: t(`trait_${x.trait.key}`), desc: t(`traitDesc_${x.trait.key}`), x, meta: t('traitMeta', { share: fmtShare(x.share), ahead: fmtShare(x.aheadShare), final: fmtMoney(x.avgFinal) }) + (x.quitShare >= 0.05 ? ` · ${t('traitQuit', { v: fmtShare(x.quitShare) })}` : '') }));
+  }
+  rows.sort((a, b) => b.x.avgFinal - a.x.avgFinal);
+  const scaleMax = Math.max(100, ...rows.map(r => r.x.back)) * 1.04;
+  $('sim-group-tabs').replaceChildren(
+    ...GROUP_TABS.map(key =>
+      el('button', {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(key === tab),
+        'aria-pressed': String(key === tab),
+        text: t(`groupTab_${key}`),
+        onclick: () => {
+          state.groupTab = key;
+          renderGroups(stats);
+        }
       })
     )
   );
+  $('sim-group-note').textContent = t(`groupNote_${tab}`);
+  $('sim-groups').replaceChildren(...rows.map(r => barItem({ icon: r.icon, name: r.name, desc: r.desc, back: r.x.back, margin: r.x.backMargin, scaleMax, meta: r.meta })));
 }
 
 // A person's trait tags.
 function traitTags(p) {
-  return traitKeys(p.traits ?? 0).map(key => el('span', { class: 'habit-tag trait-tag', text: `${TRAIT_ICON[key]} ${state.t(`trait_${key}`)}` }));
-}
-
-// The same crowd by what they bet on: one sport all year, or everything.
-function renderFans(fans) {
-  const t = state.t;
-  const sorted = [...fans].sort((a, b) => b.back - a.back);
-  const scaleMax = Math.max(100, sorted[0].back) * 1.04;
-  $('sim-fans').replaceChildren(
-    ...sorted.map(f =>
-      barItem({
-        icon: f.fan.key === 'all' ? badge('🌐', 'var(--accent)', 'emoji') : leagueImg(f.fan.sports[0], 'logo-sm'),
-        name: t(`fan_${f.fan.key}`),
-        desc: t(`fanDesc_${f.fan.key}`),
-        back: f.back,
-        margin: f.backMargin,
-        scaleMax,
-        meta: t('fanMeta', { ahead: fmtShare(f.aheadShare), tickets: fmtCount(f.avgTickets), final: fmtMoney(f.avgFinal) })
-      })
-    )
-  );
+  return traitKeys(p.traits ?? 0).map(key => el('span', { class: 'habit-tag trait-tag', title: state.t(`traitDesc_${key}`), text: `${TRAIT_ICON[key]} ${state.t(`trait_${key}`)}` }));
 }
 
 // A fact: one plain sentence with its numbers highlighted inside it
@@ -3105,20 +3137,21 @@ function renderFlow(stats, period) {
   );
 }
 
-function renderFacts(stats, totals, characters, summaries, period) {
+function renderFacts(stats, totals, characters, period) {
   const t = state.t;
   const money = v => fmtMoney(v, { sign: false });
   const facts = [];
-  const by = key => summaries.find(h => h.habit.key === key);
+  const by = key => stats.traitSummaries.find(x => x.trait.key === key);
   // Everyone plays by the practice account's rules.
   const grants = SIM_WEEKLY_GRANT * Math.max(0, stats.weeks - 1);
   facts.push(factItem(t('factBankroll', { period }), { cash: money(SIM_START_BALANCE + grants + totals.net / stats.players), grants: money(grants), short: fmtShare(stats.crowd.shortShare) }, t('factBankrollWhy', { start: money(SIM_START_BALANCE), grant: money(SIM_WEEKLY_GRANT), spend: money(totals.staked / stats.players / Math.max(1, stats.weeks)) })));
-  facts.push(factItem(t('factParlay'), { a: money(by('casual').back), b: money(by('dreamer').back) }, t('factParlayWhy')));
+  facts.push(factItem(t('factParlay'), { a: money(by('single').back), b: money(by('parlay').back) }, t('factParlayWhy')));
   if (totals.everAheadShare > totals.aheadShare) facts.push(factItem(t('factEverAhead'), { a: fmtShare(totals.everAheadShare), b: fmtShare(totals.aheadShare) }, t('factEverAheadWhy')));
   const chaser = by('chaser');
-  if (chaser.capShare > 0) {
-    facts.push(factItem(t('factChaser'), { v: fmtShare(chaser.capShare), cap: money(chaser.habit.chaseCap) }, t('factChaserWhy', { staked: money(chaser.avgStaked), final: fmtMoney(chaser.avgFinal) })));
-  }
+  const none = by('plainReact');
+  if (chaser && none) facts.push(factItem(t('factChaser'), { a: fmtMoney(chaser.avgFinal), b: fmtMoney(none.avgFinal) }, t('factChaserWhy', { staked: money(chaser.avgStaked), plain: money(none.avgStaked) })));
+  if (stats.crowd.avgLegs) facts.push(factItem(t('factMix'), { legs: stats.crowd.avgLegs.toFixed(1), singles: fmtShare(stats.crowd.singleShare) }, t('factMixWhy')));
+  if (stats.crowd.nearMisses) facts.push(factItem(t('factNearMiss'), { v: fmtCount(stats.crowd.nearMisses * (SIM_PLAYERS_SHOWN / stats.players)) }, t('factNearMissWhy')));
   const lucky = characters[0].player;
   if (lucky.biggestWin > 0) facts.push(factItem(t('factLucky'), { v: fmtCount(lucky.longestLosing) }, t('factLuckyWhy', { win: money(lucky.biggestWin) })));
   const avgLoss = -totals.net / SIM_PLAYERS;
@@ -3379,43 +3412,38 @@ function renderBuys(totals, period) {
   );
 }
 
-// How the group of people with one habit and one kind of fan did.
+// How the people with one trait and one kind of fan did.
 function renderYou() {
   const t = state.t;
   const stats = state.simStats;
   if (!stats?.groupStats) return;
-  const habitSelect = $('you-habit');
+  const traitSelect = $('you-trait');
   const fanSelect = $('you-fan');
-  if (!habitSelect.options.length || habitSelect.dataset.locale !== state.locale) {
-    habitSelect.replaceChildren(...HABITS.map(h => el('option', { value: h.key, text: t(`habit_${h.key}`) })));
+  if (!traitSelect.options.length || traitSelect.dataset.locale !== state.locale) {
+    traitSelect.replaceChildren(...TRAIT_ROWS.map(x => el('option', { value: x.key, text: `${TRAIT_ICON[x.key]} ${t(`trait_${x.key}`)}` })));
     fanSelect.replaceChildren(...FANS.map(f => el('option', { value: f.key, text: t(`fan_${f.key}`) })));
-    habitSelect.value = state.youHabit ?? 'casual';
+    traitSelect.value = state.youTrait ?? 'parlay';
     fanSelect.value = state.youFan ?? 'all';
-    habitSelect.dataset.locale = state.locale;
+    traitSelect.dataset.locale = state.locale;
   }
-  const g = stats.groupStats.find(x => x.habit === habitSelect.value && x.fan === fanSelect.value);
-  if (!g) return;
+  const g = stats.groupStats.find(x => x.trait === traitSelect.value && x.fan === fanSelect.value);
+  if (!g || !g.players) return $('you-result').replaceChildren(el('p', { class: 'muted', text: t('youNone') }));
   const money = v => fmtMoney(v, { sign: false });
   const period = periodName(stats.weeks);
   $('you-result').replaceChildren(
     el('p', { class: 'you-headline' }, [
-      document.createTextNode(t('youAheadPre', { n: fmtCount(g.players), period })),
+      document.createTextNode(t('youAheadPre', { n: fmtCount(g.players * (SIM_PLAYERS_SHOWN / stats.players)), period })),
       el('strong', { class: g.aheadShare >= 0.5 ? 'back-high' : 'back-low', text: fmtShare(g.aheadShare) }),
       document.createTextNode(t('youAheadPost'))
     ]),
     el('div', { class: 'kpis' }, [
-      statTile(t('youMedian'), fmtMoney(g.median), g.median < 0 ? 'back-low' : 'back-high', '🧍'),
+      statTile(t('youAvg'), fmtMoney(g.avgFinal), g.avgFinal < 0 ? 'back-low' : 'back-high', '🧍'),
       statTile(t('simBackPer100'), money(g.back), g.back < 100 ? 'back-low' : '', '💸'),
       statTile(t('youTickets'), fmtCount(g.avgTickets), '', '🎫'),
       statTile(t('youStaked'), money(g.avgStaked), '', '💰')
     ]),
-    el('div', { class: 'you-range' }, [
-      el('span', { class: 'you-end back-low', text: fmtMoney(g.worst) }),
-      el('span', { class: 'you-bar' }, [el('span', { class: 'you-mid', style: `left:${rangePos(g.median, g.worst, g.best)}%` }), el('span', { class: 'you-zero', style: `left:${rangePos(0, g.worst, g.best)}%` })]),
-      el('span', { class: 'you-end back-high', text: fmtMoney(g.best) })
-    ]),
-    el('p', { class: 'fact-why', text: t('youRange', { lo: fmtMoney(g.q10), hi: fmtMoney(g.q90) }) }),
-    g.median < 0 ? el('p', { class: 'fact-why', text: t('youBoba', { cups: fmtCount(-g.median / BOBA_PRICE) }) }) : null
+    el('p', { class: 'fact-why', text: t(`traitDesc_${traitSelect.value}`) }),
+    g.avgFinal < 0 ? el('p', { class: 'fact-why', text: t('youBoba', { cups: fmtCount(-g.avgFinal / BOBA_PRICE) }) }) : null
   );
 }
 
@@ -3423,11 +3451,12 @@ function rangePos(v, lo, hi) {
   return hi > lo ? Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100)) : 50;
 }
 
-$('you-habit').addEventListener('change', event => ((state.youHabit = event.target.value), renderYou()));
+$('you-trait').addEventListener('change', event => ((state.youTrait = event.target.value), renderYou()));
 $('you-fan').addEventListener('change', event => ((state.youFan = event.target.value), renderYou()));
 
-// Replays one player of the crowd, by number, on this device (one player is
-// quick): their season, a small chart of it and their story.
+// Replays one person of the crowd, by number, on this device (one person is
+// quick): their season, a small chart of it, their story and their betting
+// in the same numbers as yours (profile.mjs).
 function renderLookup(serial) {
   const t = state.t;
   const stats = state.simStats;
@@ -3438,41 +3467,30 @@ function renderLookup(serial) {
   $('lookup-number').value = String(n);
   $('lookup-number').max = String(total);
   const sportBets = simSportBets();
-  const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, habitPools(bets)]));
-  const p = replayPlayer({ sportPools, startWeek: weekOfYear(new Date()), weeks: stats.weeks, perGroup: PER_GROUP, seed: SIM_SEED, index: n - 1, big: state.simBig });
+  const sportPools = Object.fromEntries(Object.entries(sportBets).map(([sport, bets]) => [sport, crowdPools(bets)]));
+  const p = replayPlayer({ sportPools, startWeek: weekOfYear(new Date()), weeks: stats.weeks, perGroup: PER_GROUP, seed: SIM_SEED, index: n - 1 });
   if (!p) return;
-  let tale;
-  if (p.final > 0) tale = t('taleAhead', { habit: t(`habit_${p.habit.key}`) });
-  else if (!p.everAhead) tale = t('taleNever');
-  else tale = t('taleGaveBack', { peak: fmtMoney(p.peak, { sign: false }), at: fmtCount(p.peakWeek + 1) });
-  const line = (label, value, cls = '', note = null) =>
-    el('div', { class: 'player-line' }, [el('span', { text: label }), el('strong', { class: cls, text: value }), note ? el('small', { text: note }) : null]);
-  // Their highest and lowest running total, and the week of each.
-  let hi = 0;
-  let lo = 0;
-  p.path.forEach((v, i) => (v > p.path[hi] && (hi = i), v < p.path[lo] && (lo = i)));
-  // The amount, with its week on a small line underneath.
-  const point = (label, i, cls) => line(label, fmtMoney(p.path[i]), cls, t('simWeekN', { n: fmtCount(i + 1) }));
-  // 百分位 (PR): the share of the crowd this player finished ahead of.
+  // 百分位 (PR): the share of the crowd this person finished ahead of.
   const qs = stats.finalQuantiles;
   const pr = qs ? Math.max(1, Math.min(99, Math.floor((qs.filter(v => v < p.final).length / qs.length) * 100))) : null;
+  const profile = ticketProfile(p.log, { weeks: stats.weeks });
   $('lookup-result').replaceChildren(
     el('div', { class: 'lookup-card' }, [
       el('div', { class: 'story-head' }, [
         el('span', { class: 'story-icon', 'aria-hidden': 'true', text: p.final > 0 ? '😎' : p.everAhead ? '😬' : '😶' }),
-        el('div', {}, [el('p', { class: 'story-serial' }, [document.createTextNode(`#${fmtCount(n)}`), pr ? el('span', { class: 'serial-pr', text: t('playerPR', { n: pr }) }) : null, p.final > 0 && stats.surplus?.total > 0 ? el('span', { class: 'serial-pr share', text: t('playerSurplus', { v: fmtChance(p.final / stats.surplus.total) }) }) : null]), el('div', { class: 'player-tags' }, [p.fan ? el('span', { class: 'habit-tag', text: t(`fan_${p.fan.key}`) }) : null, el('span', { class: 'habit-tag', text: t(`habit_${p.habit.key}`) }), ...traitTags(p)])])
+        el('div', {}, [
+          el('p', { class: 'story-serial' }, [
+            document.createTextNode(`#${fmtCount(n)}`),
+            pr ? el('span', { class: 'serial-pr', text: t('playerPR', { n: pr }) }) : null,
+            p.final > 0 && stats.surplus?.total > 0 ? el('span', { class: 'serial-pr share', text: t('playerSurplus', { v: fmtChance(p.final / stats.surplus.total) }) }) : null
+          ]),
+          el('div', { class: 'player-tags' }, personTags(p))
+        ])
       ]),
       el('p', { class: `story-big ${p.final < 0 ? 'back-low' : 'back-high'}`, text: fmtMoney(p.final) }),
       sparkline(p.path),
-      el('p', { class: 'story-text', text: tale }),
-      el('div', { class: 'player-lines' }, [
-        line(t('playerTickets'), `${fmtCount(p.wonTickets)} / ${fmtCount(p.tickets)}`),
-        line(t('playerStaked'), fmtMoney(p.staked, { sign: false })),
-        point(t('playerPeak'), hi, p.path[hi] > 0 ? 'back-high' : 'back-low'),
-        point(t('playerLow'), lo, p.path[lo] < 0 ? 'back-low' : 'back-high'),
-        line(t('playerBiggestWin'), p.biggestWin > 0 ? fmtMoney(p.biggestWin) : t('playerNoWin')),
-        line(t('playerStreak'), t('inARow', { n: p.longestLosing }))
-      ])
+      el('p', { class: 'story-text', text: taleOf(p) }),
+      profile ? profileCard(profile) : el('p', { class: 'muted', text: t('lookupNoTickets') })
     ])
   );
 }
@@ -3537,13 +3555,16 @@ function renderSurplus(stats, period) {
 
 // Top 10s: one board at a time, picked from a row of chips; tap a number to
 // open that player below.
-const LEADER_ICON = { best: '🏆', biggestWin: '🎯', longshot: '🦄', hotStreak: '🔥', mostTickets: '🧾', taxman: '🏛️', worst: '💸', fall: '🎢', worstWeek: '🌪️', drought: '🧊' };
+const LEADER_ICON = { best: '🏆', biggestWin: '🎯', longshot: '🦄', comeback: '🦸', bestWeek: '🚀', biggestParlay: '🧩', hotStreak: '🔥', mostTickets: '🧾', taxman: '🏛️', nearMisses: '😣', worst: '💸', fall: '🎢', worstWeek: '🌪️', drought: '🧊', broke: '🪫' };
 function leaderValue(key, x) {
   const t = state.t;
   if (key === 'longshot') return `@ ${fmtOdds(x.value)}`;
   if (key === 'hotStreak') return t('inARowWon', { n: fmtCount(x.value) });
   if (key === 'drought') return t('inARow', { n: fmtCount(x.value) });
   if (key === 'mostTickets') return t('ticketsN', { n: fmtCount(x.value) });
+  if (key === 'biggestParlay') return t('legsWon', { n: fmtCount(x.value) });
+  if (key === 'nearMisses' || key === 'broke') return t('timesN', { n: fmtCount(x.value) });
+  if (key === 'comeback') return `+${fmtMoney(x.value, { sign: false })}`;
   if (key === 'fall') return `${fmtMoney(x.value)} → ${fmtMoney(x.final)}`;
   if (key === 'taxman') return fmtMoney(x.value, { sign: false });
   return fmtMoney(x.value);
@@ -3557,7 +3578,7 @@ function renderLeaders(stats) {
   const list = stats.leaders[key];
   const total = stats.surplus?.total ?? 0;
   const medals = ['🥇', '🥈', '🥉'];
-  const bad = ['worst', 'fall', 'worstWeek', 'drought', 'taxman'].includes(key);
+  const bad = ['worst', 'fall', 'worstWeek', 'drought', 'taxman', 'nearMisses', 'broke'].includes(key);
   $('sim-leaders').replaceChildren(
     el('div', { class: 'segmented leader-tabs', role: 'tablist', 'aria-label': t('leadersTitle') },
       boards.map(([k]) =>
@@ -3589,7 +3610,7 @@ function renderLeaders(stats) {
                 $('lookup-result').scrollIntoView({ behavior: 'smooth', block: 'center' });
               }
             }),
-            el('small', { text: [x.fan && t(`fan_${x.fan}`), t(`habit_${x.habit}`), traitKeys(x.traits ?? 0).map(k => TRAIT_ICON[k]).join('')].filter(Boolean).join(' · ') })
+            el('small', { text: [x.fan && t(`fan_${x.fan}`), traitKeys(x.traits ?? 0).map(k => TRAIT_ICON[k]).join('')].filter(Boolean).join(' · ') })
           ]),
           el('span', { class: 'leader-value' }, [
             el('strong', { class: key === 'best' || key === 'biggestWin' ? 'back-high' : bad ? 'back-low' : '', text: leaderValue(key, x) }),
@@ -3610,9 +3631,8 @@ function renderStories(stats, period) {
   const money = v => fmtMoney(v, { sign: false });
   const stories = [];
   // `tone`: how the big figure reads (good, bad or neutral); money by its sign.
-  // A record held only within the player's habit says so in its title.
   const add = (icon, titleKey, p, big, textKey, vars, tone = null) =>
-    p && stories.push({ icon, title: p.overall ? t(titleKey) : t('storyAmong', { title: t(titleKey), habit: t(`habit_${p.habit.key}`) }), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), t(`habit_${p.habit.key}`), ...traitKeys(p.traits ?? 0).map(key => `${TRAIT_ICON[key]} ${t(`trait_${key}`)}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
+    p && stories.push({ icon, title: t(titleKey), serial: `#${fmtCount(p.serial)}`, index: p.serial - 1, big, tone: tone ?? (big.startsWith('−') ? 'back-low' : 'back-high'), tags: [p.fan && t(`fan_${p.fan.key}`), ...traitKeys(p.traits ?? 0).map(key => `${TRAIT_ICON[key]} ${t(`trait_${key}`)}`)].filter(Boolean), text: t(textKey, { period, ...vars }) });
   const w = notable.biggestWin;
   if (w) add('🎯', 'storyBigWinTitle', w, fmtMoney(w.biggestWin), 'storyBigWin', { week: w.biggestWinWeek + 1, stake: money(w.biggestWinStake), legs: w.biggestWinLegs, odds: fmtOdds(w.biggestWinOdds), final: fmtMoney(w.final) });
   const best = notable.best;
@@ -3634,8 +3654,10 @@ function renderStories(stats, period) {
   if (bad?.worstWeek < 0) add('🌪️', 'storyBadWeekTitle', bad, fmtMoney(bad.worstWeek), 'storyBadWeek', { week: bad.worstWeekAt + 1, final: fmtMoney(bad.final) });
   const busy = notable.mostTickets;
   if (busy) add('🧾', 'storyBusyTitle', busy, t('ticketsN', { n: fmtCount(busy.tickets) }), 'storyBusy', { perWeek: (busy.tickets / stats.weeks).toFixed(1), staked: money(busy.staked), final: fmtMoney(busy.final) }, 'neutral');
-  const even = notable.closest;
-  if (even) add('⚖️', 'storyEvenTitle', even, fmtMoney(even.final), 'storyEven', { tickets: fmtCount(even.tickets), staked: money(even.staked) }, 'neutral');
+  const back = notable.comeback;
+  if (back) add('🦸', 'storyComebackTitle', back, `${fmtMoney(back.trough)} → ${fmtMoney(back.final)}`, 'storyComeback', { week: back.troughWeek + 1, low: fmtMoney(back.trough), final: fmtMoney(back.final) }, 'back-high');
+  const close = notable.nearMisses;
+  if (close?.nearMisses > 0) add('😣', 'storyNearMissTitle', close, t('timesN', { n: fmtCount(close.nearMisses) }), 'storyNearMiss', { n: fmtCount(close.nearMisses), tickets: fmtCount(close.tickets), final: fmtMoney(close.final) }, 'back-low');
   const tax = notable.taxman;
   if (tax?.taxPaid > 0) add('🏛️', 'storyTaxTitle', tax, money(tax.taxPaid), 'storyTax', { final: fmtMoney(tax.final) }, 'back-low');
   $('sim-stories').replaceChildren(
@@ -3830,11 +3852,11 @@ function renderF1() {
     board({
       emblem: 'f1',
       title: f1.title,
-      sub: fmtTime(f1.startUtc),
+      sub: `${fmtTime(f1.startUtc)} · ${t(f1.phase === 'pre' ? 'f1PhasePre' : 'f1PhasePost')}`,
       bets: drivers,
       id: 'f1',
-      notes: [t('f1Intro')],
-      rows: (b, i, editing) => entryRow(b, i, editing, driverBadge(b), b.driver.team)
+      notes: [t('f1Intro'), t('f1PhaseNote')],
+      rows: (b, i) => entryRow(b, i, driverBadge(b), b.driver.team)
     })
   );
 }
@@ -3846,12 +3868,12 @@ function renderAll() {
   if (!state.data) return;
   state.bets = buildBets(state.data);
   state.futures = buildFutures(state.data);
+  state.recs = recommend(state.bets);
   state.parlay = state.parlay.filter(id => slipCandidates().some(b => b.id === id));
   renderStatus('ok');
   renderTabs();
   renderSportFilter();
   renderDayFilter();
-  renderRanking();
   renderGames();
   renderFutures();
   renderParlay();
@@ -3880,11 +3902,17 @@ async function load() {
     if (state.wantedTab && state.tab !== state.wantedTab && tabAvailable(state.wantedTab)) state.tab = state.wantedTab;
     state.wantedTab = null;
     renderAll();
-    // The other leagues join once they arrive.
+    // The other leagues and championships join once they arrive.
     loadExtraLeagues(new Date()).then(games => {
       if (!games.length || !state.data) return;
       const ids = new Set(state.data.games.map(g => g.id));
       state.data.games = [...state.data.games, ...games.filter(g => !ids.has(g.id))].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+      renderAll();
+    }, error => console.error(error));
+    loadExtraFutures().then(futures => {
+      if (!futures.length || !state.data) return;
+      const keys = new Set(state.data.futures.map(f => f.key));
+      state.data.futures = [...state.data.futures, ...futures.filter(f => !keys.has(f.key))];
       renderAll();
     }, error => console.error(error));
     // Opened on the simulator: the page opens once its simulation is ready.
@@ -3944,30 +3972,6 @@ const PERIOD_PRESETS = [1, 6, 12, 24, 36, 60];
 
 // The period: a slider by the month up to 5 years, and a few quick picks.
 // The label follows the slider as it moves; the simulation runs on release.
-// 大手筆 / 真實: how big the simulated people bet.
-function renderStakeMode() {
-  const t = state.t;
-  $('sim-stake').replaceChildren(
-    ...[true, false].map(big =>
-      el('button', {
-        type: 'button',
-        'aria-pressed': String(state.simBig === big),
-        text: t(big ? 'simStakeBig' : 'simStakeReal'),
-        onclick: () => {
-          if (state.simBig === big) return;
-          state.simBig = big;
-          try {
-            localStorage.setItem('oddsStudy.simBig', big ? '1' : '0');
-          } catch {}
-          renderStakeMode();
-          renderSim();
-        }
-      })
-    )
-  );
-  $('sim-stake-note').textContent = t(state.simBig ? 'simStakeBigNote' : 'simStakeRealNote');
-}
-
 function renderPeriods() {
   const weeks = Number($('sim-weeks').value);
   const months = PERIOD_MONTHS[MONTH_WEEKS.indexOf(weeks)];
