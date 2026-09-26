@@ -1133,3 +1133,6 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .leg-now.losing { background: color-mix(in srgb, #c62828 14%, var(--surface)); color: #c62828; }
 .leg-now.level { background: var(--surface-sunken); color: var(--text-secondary); }
 .slip-now { margin: 4px 0 0; font-size: 0.84rem; font-weight: 600; }
+.sort-ask { margin: 0; text-align: center; font-weight: 700; }
+.sort-ticket.clue-nick .sort-team strong { font-size: 1.6rem; }
+.sort-ticket.clue-logo .sort-team .logo-lg, .sort-ticket.clue-logo .sort-team .logo.logo-lg { width: 76px; height: 76px; }

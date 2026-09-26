@@ -257,12 +257,10 @@ function teamBadge(sport, name) {
 export function teamLogo(sport, name, dark = false) {
   const base = 'https://a.espncdn.com/i/teamlogos';
   const size = dark ? '500-dark' : '500';
-  if (sport === 'mlb') return MLB_ABBR[name] ? `${base}/mlb/${size}/${MLB_ABBR[name]}.png` : null;
-  if (sport === 'nba') return NBA_ABBR[name] ? `${base}/nba/${size}/${NBA_ABBR[name]}.png` : null;
-  if (sport === 'epl') {
-    const id = EPL_ESPN_ID[normalizeTeamName(name)];
-    return id ? `${base}/soccer/${size}/${id}.png` : null;
-  }
+  if (sport === 'mlb' && MLB_ABBR[name]) return `${base}/mlb/${size}/${MLB_ABBR[name]}.png`;
+  if (sport === 'nba' && NBA_ABBR[name]) return `${base}/nba/${size}/${NBA_ABBR[name]}.png`;
+  if (sport === 'epl' && EPL_ESPN_ID[normalizeTeamName(name)]) return `${base}/soccer/${size}/${EPL_ESPN_ID[normalizeTeamName(name)]}.png`;
+  // Otherwise a logo ESPN gave us for the club (scoreboards, team lists).
   const seen = seenLogos.get(`${sport}|${normalizeTeamName(name)}`);
   if (!seen) return dark ? null : teamBadge(sport, name);
   return dark ? seen.replace('/500/', '/500-dark/') : seen;
@@ -339,20 +337,30 @@ export function f1Driver(name) {
 // Every club of a league we have a logo for, one name each (aliases dropped):
 // English names as the feeds write them. For games that show a team.
 const titleCase = key => key.replace(/\b[a-z]/g, c => c.toUpperCase());
-// Clubs of other leagues, from ESPN's team lists (rememberTeams).
+// Clubs from ESPN's team lists (rememberTeams): every league the quiz uses,
+// MLB and the NBA included (ESPN gives each club's nickname).
 const fetchedTeams = new Map();
+const nicknames = new Map();
 export function rememberTeams(sport, teams) {
-  for (const { name, logo } of teams) rememberLogo(sport, name, logo);
+  for (const { name, logo, nick } of teams) {
+    rememberLogo(sport, name, logo);
+    if (nick) nicknames.set(`${sport}|${name}`, nick);
+  }
   fetchedTeams.set(sport, teams.map(t => t.name));
 }
-export const hasTeams = sport => leagueTeams(sport).length > 0;
+export const hasTeams = sport => (fetchedTeams.get(sport)?.length ?? 0) > 0 || Boolean(TEAM_BADGES[sport]);
+// A club's name without its city ("Packers", "Tigers"): ESPN's nickname, or
+// the last word of the name for the Asian leagues' clubs.
+export function teamNick(sport, name) {
+  return nicknames.get(`${sport}|${name}`) ?? (TEAM_BADGES[sport] ? name.split(' ').at(-1) : name);
+}
 export function leagueTeams(sport) {
   let names = [];
-  if (sport === 'mlb') names = Object.keys(MLB_ABBR);
+  if (fetchedTeams.get(sport)?.length) names = fetchedTeams.get(sport);
+  else if (sport === 'mlb') names = Object.keys(MLB_ABBR);
   else if (sport === 'nba') names = Object.keys(NBA_ABBR);
   else if (sport === 'epl') names = Object.keys(EPL_ESPN_ID).map(titleCase);
   else if (TEAM_BADGES[sport]) names = Object.keys(TEAM_BADGES[sport]);
-  else names = fetchedTeams.get(sport) ?? [];
   const seen = new Set();
   return names.filter(name => {
     const logo = teamLogo(sport, name);

@@ -10,7 +10,7 @@
 // 'game'), so they sync and merge across devices the same way. The account's
 // betting result leaves them out, like the weekly grants.
 import { taipeiDayKey } from './sources.mjs';
-import { leagueTeams } from './teams.mjs';
+import { leagueTeams, teamNick, familyOf, normalizeTeamName } from './teams.mjs';
 
 export const ARCADE = {
   dailyCap: 1500,
@@ -31,14 +31,14 @@ export const ARCADE = {
 // 'bad' for the work games). Better players earn more, up to about 4 times.
 
 // Streaks and penalties by how hard each game really is. Typing is easy
-// work: it punishes carelessness and pays little for keeping it up. Sorting
-// teams takes knowing them and free throws a steady hand: in between. The
-// derby's 40 ms window is hard enough that a miss costs nothing and a run of
-// hits pays the most.
+// work: it punishes carelessness and pays little for keeping it up. The team
+// quiz takes knowing hundreds of teams and free throws a steady hand: in
+// between. The derby's 30 ms window is hard enough that a miss costs nothing
+// and a run of hits pays the most.
 // `every`: right in a row for a bonus of `bonus`; `penalty`: what a mistake costs.
 export const STREAK = {
   typing: { every: 5, bonus: 2, penalty: 2 },
-  sort: { every: 5, bonus: 2, penalty: 1 },
+  sort: { every: 4, bonus: 2, penalty: 1 },
   freethrow: { every: 3, bonus: 2, penalty: 1 },
   derby: { every: 3, bonus: 3, penalty: 0 }
 };
@@ -102,7 +102,7 @@ export function scoreRound(game, events) {
 }
 export const PACE = {
   typing: { seconds: 140, events: [...run(8, 'ok'), 'bad', ...run(7, 'ok'), 'bad', ...run(5, 'ok')] },
-  sort: { seconds: 85, events: [...run(6, 'ok'), 'bad', ...run(5, 'ok'), 'bad', 'bad', ...run(7, 'ok'), 'bad', ...run(4, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok')] },
+  sort: { seconds: 105, events: [...run(5, 'ok'), 'bad', ...run(4, 'ok'), 'bad', 'bad', ...run(6, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(4, 'ok'), 'bad', 'bad', ...run(3, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok')] },
   derby: { seconds: 33, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'miss', 'miss', 'hit', 'miss', 'miss'] },
   freethrow: { seconds: 32, events: ['swish', 'make', 'make', 'miss', 'make', 'miss', 'miss', 'make', 'miss', 'miss'] }
 };
@@ -186,36 +186,86 @@ export const typedRight = (typed, code) => typed.replace(/\D/g, '') === code;
 
 export const typingPayout = right => right * TYPING.pay;
 
-// ---- 整理彩券 (sorting tickets by team) -------------------------------------------------
+// ---- 整理彩券 (the team quiz) ----------------------------------------------------------
 //
-// Work that takes knowing your teams: each ticket shows a team (its logo and
-// name); put it in its league's box before its clock runs out (a ticket
-// left too long counts as a mistake). A round uses one set of four boxes,
-// chosen to be confusable: the four baseball leagues (NPB or KBO?), four
-// basketball leagues, the four big American leagues (the New York Rangers,
-// Giants, Mets or Knicks?), Europe's big four soccer leagues, or four more
-// soccer leagues. Teams come from our own tables and ESPN's team lists:
-// about 20-30 a league, so 80-120 a set.
-export const SORT = { tickets: 30, pay: 1.2, seconds: 5 };
+// Work that takes knowing your teams, and a new question every ticket, so
+// nothing can be learnt by rote:
+// - `group`: which of four easily confused leagues (MLB, NPB, KBO or CPBL?);
+// - `sport`: which sport, from the nickname alone ("Rangers": hockey or
+//   baseball?);
+// - `mixed`: which of any four leagues, across sports.
+// The clue is the logo alone, the nickname alone (no city to give it away),
+// or now and then both. The boxes come in a new order every ticket. A
+// nickname is only shown when it fits one box alone (two "Tigers" in the
+// boxes would be a coin toss, and nothing here is left to luck). Answer
+// before the clock runs out or it counts as wrong.
+export const SORT = { tickets: 30, pay: 1.4, seconds: 6 };
+// Leagues easily confused with each other.
 export const SORT_SETS = {
   baseball: ['mlb', 'npb', 'kbo', 'cpbl'],
   basketball: ['nba', 'wnba', 'euroleague', 'bleague'],
   usa: ['nfl', 'nhl', 'mlb', 'nba'],
   soccer: ['epl', 'laliga', 'seriea', 'bundesliga'],
-  soccer2: ['ligue1', 'eredivisie', 'primeira', 'mls']
+  soccer2: ['ligue1', 'mls', 'epl', 'bundesliga']
 };
+export const SORT_LEAGUES = [...new Set(Object.values(SORT_SETS).flat())];
+export const SORT_SPORTS = ['baseball', 'basketball', 'football', 'hockey', 'soccer'];
+const KINDS = [['group', 0.35], ['sport', 0.35], ['mixed', 0.3]];
+const CLUES = { group: [['logo', 0.4], ['nick', 0.4], ['full', 0.2]], sport: [['nick', 0.65], ['logo', 0.35]], mixed: [['logo', 0.5], ['nick', 0.5]] };
 
-export const sortSet = (random = Math.random) => Object.keys(SORT_SETS)[Math.floor(random() * Object.keys(SORT_SETS).length)];
+const pickFrom = (list, random) => list[Math.floor(random() * list.length)];
+const weighted = (pairs, random) => {
+  let r = random();
+  for (const [x, w] of pairs) if ((r -= w) < 0) return x;
+  return pairs.at(-1)[0];
+};
+function shuffled(list, random) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
-// A ticket: a league of the set, then one of its teams, never the team just
-// shown (`last`).
-export function sortTicket(set, random = Math.random, last = null) {
-  const leagues = SORT_SETS[set];
-  for (let tries = 0; tries < 20; tries++) {
-    const league = leagues[Math.floor(random() * leagues.length)];
-    const teams = leagueTeams(league);
-    const team = teams[Math.floor(random() * teams.length)];
-    if (team && team !== last) return { league, team };
+// One question: { kind, clue, boxes: [{ key, type: 'league' | 'sport' }],
+// answer (a box key), league, team, nick }. `leagues` limits it to leagues
+// with teams loaded; `last` is the team just shown (never twice running).
+export function sortQuestion({ random = Math.random, leagues = SORT_LEAGUES, last = null } = {}) {
+  const has = new Set(leagues.filter(l => leagueTeams(l).length));
+  for (let tries = 0; tries < 40; tries++) {
+    const kind = weighted(KINDS, random);
+    let boxes;
+    let boxOf;
+    if (kind === 'group') {
+      const group = pickFrom(Object.values(SORT_SETS), random).filter(l => has.has(l));
+      if (group.length < 4) continue;
+      boxes = shuffled(group, random).map(key => ({ key, type: 'league' }));
+      boxOf = league => league;
+    } else if (kind === 'sport') {
+      boxes = shuffled(SORT_SPORTS, random).slice(0, 4).map(key => ({ key, type: 'sport' }));
+      boxOf = league => familyOf(league);
+    } else {
+      const pool = shuffled([...has], random).slice(0, 4);
+      if (pool.length < 4) continue;
+      boxes = pool.map(key => ({ key, type: 'league' }));
+      boxOf = league => league;
+    }
+    const keys = new Set(boxes.map(b => b.key));
+    const candidates = [...has].filter(l => keys.has(boxOf(l)));
+    if (!candidates.length) continue;
+    const league = pickFrom(candidates, random);
+    const team = pickFrom(leagueTeams(league), random);
+    if (!team || team === last) continue;
+    const clue = weighted(CLUES[kind], random);
+    const nick = teamNick(league, team);
+    // A nickname must point to one box only.
+    if (clue !== 'logo') {
+      const same = normalizeTeamName(clue === 'nick' ? nick : team);
+      const clash = candidates.some(l => boxOf(l) !== boxOf(league) && leagueTeams(l).some(t => normalizeTeamName(clue === 'nick' ? teamNick(l, t) : t) === same));
+      if (clash) continue;
+    }
+    return { kind, clue, boxes, answer: boxOf(league), league, team, nick };
   }
   return null;
 }

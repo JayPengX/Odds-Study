@@ -68,7 +68,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
-import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_SETS, sortSet, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult } from './lib/arcade.mjs';
+import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_LEAGUES, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -4418,34 +4418,45 @@ function freeThrowView() {
   ]);
 }
 
-// 整理彩券: each ticket shows a team; put it in its league's box (keys 1-4
-// too) before the ticket's clock runs out. The set's team lists load first.
+// 整理彩券: a team quiz with a new question every ticket: which league or
+// which sport, from its logo or its nickname; the boxes change and reshuffle
+// each time (keys 1-4 pick them in order). Every league's teams load first.
+const SPORT_ICON = { baseball: '⚾', basketball: '🏀', football: '🏈', hockey: '🏒', soccer: '⚽' };
 function sortView() {
   const t = state.t;
   const hud = gameHud();
   const box = el('div', { class: 'arcade-actions' });
+  const ask = el('p', { class: 'sort-ask' });
   const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' }, el('p', { class: 'muted', text: t('sortLoading') }));
   const clock = el('div', { class: 'value-timer', 'aria-hidden': 'true' }, el('div'));
   const binRow = el('div', { class: 'sort-bins' });
-  const view = el('div', { class: 'arcade-game', tabindex: '0' }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.tickets, s: SORT.seconds, total: fmtMoney(sortPayout(SORT.tickets), { sign: false }) })} ${streakRule('sort')}` }), hud.node, clock, slot, binRow, box]);
+  const view = el('div', { class: 'arcade-game', tabindex: '0' }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.tickets, s: SORT.seconds, total: fmtMoney(sortPayout(SORT.tickets), { sign: false }) })} ${streakRule('sort')}` }), hud.node, clock, ask, slot, binRow, box]);
   const score = scorer('sort');
-  let set = sortSet();
-  let bins = SORT_SETS[set];
-  let ticket = null;
+  let leagues = SORT_LEAGUES;
+  let q = null;
   let right = 0;
   let wrong = 0;
   let began = 0;
   let deadline = null;
   let buttons = [];
   const update = () => hud.set({ done: right, of: SORT.tickets, earned: score.total, run: score.run });
-  const card = tk => {
-    const team = { en: tk.team, zh: teamZh(tk.league, tk.team) };
-    return el('div', { class: 'lotto-ticket sort-ticket' }, [
+  // The ticket: the logo, the nickname, or both, as the question says.
+  const card = question => {
+    const full = teamName({ en: question.team, zh: teamZh(question.league, question.team) });
+    const logo = question.clue !== 'nick' ? logoImg(question.league, question.team, full, 'logo-lg') : null;
+    const text = question.clue === 'logo' ? null : el('strong', { text: question.clue === 'nick' ? question.nick : full });
+    return el('div', { class: `lotto-ticket sort-ticket clue-${question.clue}` }, [
       el('span', { class: 'lotto-head', text: t('lottoHead') }),
-      el('span', { class: 'sort-team' }, [logoImg(tk.league, tk.team, teamName(team), 'logo-lg'), el('strong', { text: teamName(team) })]),
+      el('span', { class: 'sort-team' }, [logo, text]),
       el('small', { class: 'lotto-serial', text: groupCode(ticketCode()) })
     ]);
   };
+  const boxButton = (b, i) =>
+    el('button', { class: 'sort-bin', type: 'button', onclick: event => place(b.key, event.currentTarget) }, [
+      b.type === 'league' ? leagueImg(b.key, 'logo-tile') : el('span', { class: 'sort-bin-icon', 'aria-hidden': 'true', text: SPORT_ICON[b.key] }),
+      el('span', { text: t(b.type === 'league' ? `sport_${b.key}` : `group_${b.key}`) }),
+      el('small', { class: 'muted', text: String(i + 1) })
+    ]);
   // Each ticket's clock: the bar empties over SORT.seconds; at zero it's a mistake.
   const startClock = () => {
     clearTimeout(deadline);
@@ -4457,37 +4468,38 @@ function sortView() {
       if (!began || right >= SORT.tickets) return startClock();
       wrong++;
       hud.flash(score.bad(), false);
-      ticket = sortTicket(set, Math.random, ticket.team);
-      show();
+      next();
     }, SORT.seconds * 1000);
     gameTimers.push(deadline);
   };
-  const show = () => {
-    slot.replaceChildren(card(ticket));
+  const next = () => {
+    q = sortQuestion({ leagues, last: q?.team });
+    ask.textContent = t(`sortAsk_${q.kind}`);
+    slot.replaceChildren(card(q));
+    buttons = q.boxes.map(boxButton);
+    binRow.replaceChildren(...buttons);
     update();
     startClock();
   };
-  const place = (league, button) => {
-    if (!ticket || right >= SORT.tickets) return;
+  const place = (key, button) => {
+    if (!q || right >= SORT.tickets) return;
     began ||= performance.now();
     const current = slot.firstChild;
-    if (league === ticket.league) {
+    if (key === q.answer) {
       right++;
       hud.flash(score.good(SORT.pay), true);
-      button.classList.remove('flash');
-      void button.offsetWidth;
       button.classList.add('flash');
-      current?.classList.add('fly', `fly-${bins.indexOf(league)}`);
-      ticket = sortTicket(set, Math.random, ticket.team);
+      current?.classList.add('fly', `fly-${q.boxes.findIndex(b => b.key === key)}`);
       if (right === SORT.tickets) {
         clearTimeout(deadline);
         update();
         binRow.remove();
         clock.remove();
+        ask.remove();
         later(() => finishRound('sort', score.total, box, t('sortDone', { n: right, wrong }), performance.now() - began, score), 250);
         return;
       }
-      later(show, 140);
+      later(next, 160);
     } else {
       wrong++;
       hud.flash(score.bad(), false);
@@ -4499,25 +4511,11 @@ function sortView() {
   };
   view.addEventListener('keydown', e => {
     const i = Number(e.key) - 1;
-    if (i >= 0 && i < bins.length) place(bins[i], buttons[i]);
+    if (q && i >= 0 && i < q.boxes.length) place(q.boxes[i].key, buttons[i]);
   });
-  // Load the set's teams (ESPN's lists for the leagues without our own);
-  // a set that can't load falls back to baseball, which needs none.
-  Promise.all(bins.map(loadLeagueTeams)).then(ok => {
-    if (!ok.every(Boolean)) {
-      set = 'baseball';
-      bins = SORT_SETS[set];
-    }
-    buttons = bins.map((league, i) =>
-      el('button', { class: 'sort-bin', type: 'button', onclick: event => place(league, event.currentTarget) }, [
-        leagueImg(league, 'logo-tile'),
-        el('span', { text: t(`sport_${league}`) }),
-        el('small', { class: 'muted', text: String(i + 1) })
-      ])
-    );
-    binRow.replaceChildren(...buttons);
-    ticket = sortTicket(set);
-    show();
+  Promise.all(SORT_LEAGUES.map(league => loadLeagueTeams(league).catch(() => false))).then(ok => {
+    leagues = SORT_LEAGUES.filter((_, i) => ok[i]);
+    next();
   });
   update();
   return view;

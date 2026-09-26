@@ -811,15 +811,18 @@ export async function loadExtraLeagues(now = new Date()) {
   return lotteryGames([...mergeGames(ok(espn), []), ...ok(kambi)], now);
 }
 
-// A league's clubs and their logos from ESPN's team list (for the ticket
-// sorting game), remembered in teams.mjs. Leagues with their own tables
-// (MLB, NBA, EPL, the Asian leagues) need none.
+// A league's clubs, logos and nicknames from ESPN's team list (for the
+// ticket sorting quiz), remembered in teams.mjs. The Asian leagues use our
+// own tables.
 export async function loadLeagueTeams(sport) {
   if (hasTeams(sport)) return true;
   const path = LEAGUES[sport]?.path;
   if (!path) return false;
   const data = await getJson(`${ESPN}/${path}/teams`).catch(() => null);
-  const teams = (data?.sports?.[0]?.leagues?.[0]?.teams ?? []).map(x => x.team).filter(t => t?.displayName && t.logos?.[0]?.href).map(t => ({ name: t.displayName, logo: t.logos[0].href }));
+  const teams = (data?.sports?.[0]?.leagues?.[0]?.teams ?? [])
+    .map(x => x.team)
+    .filter(t => t?.displayName && t.logos?.[0]?.href)
+    .map(t => ({ name: t.displayName, logo: t.logos[0].href, nick: t.name || t.shortDisplayName || t.displayName }));
   if (teams.length) rememberTeams(sport, teams);
   return teams.length > 0;
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCADE, PACE, STREAK, scorer, scoreRound, bestRound, typicalPerMinute, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_SETS, sortSet, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
-import { leagueTeams, rememberTeams, normalizeTeamName } from '../public/lib/teams.mjs';
+import { ARCADE, PACE, STREAK, scorer, scoreRound, bestRound, typicalPerMinute, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_SETS, SORT_LEAGUES, SORT_SPORTS, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
+import { leagueTeams, rememberTeams, normalizeTeamName, teamNick, familyOf } from '../public/lib/teams.mjs';
 import { newAccount, balance, mergeAccounts } from '../public/lib/account.mjs';
 
 test('mini games pay into the ledger, at most the daily cap, and merge like any entry', () => {
@@ -60,26 +60,39 @@ test('every round is measured against the minimum wage and the lottery\'s take',
 });
 
 
-test('ticket sorting: sets of four confusable leagues, a team from one of them, never the same twice running', () => {
-  // Leagues without our own tables get ESPN's lists at play time; stand-ins here.
-  for (const league of new Set(Object.values(SORT_SETS).flat()))
-    if (!leagueTeams(league).length) rememberTeams(league, Array.from({ length: 16 }, (_, i) => ({ name: `${league} Club ${i}`, logo: `https://a.espncdn.com/x/${league}${i}.png` })));
-  for (const [set, leagues] of Object.entries(SORT_SETS)) {
-    assert.equal(leagues.length, 4);
-    // Enough teams that a round of 30 is a real quiz.
-    assert.ok(leagues.reduce((n, l) => n + leagueTeams(l).length, 0) >= 50, set);
-    let last = null;
-    for (let i = 0; i < 40; i++) {
-      const ticket = sortTicket(set, Math.random, last?.team);
-      assert.ok(leagues.includes(ticket.league));
-      assert.ok(leagueTeams(ticket.league).includes(ticket.team));
-      assert.notEqual(ticket.team, last?.team);
-      last = ticket;
+test('team quiz: a new mixed question every ticket, one right box, never a coin toss', () => {
+  // ESPN's lists at play time; stand-ins here, with clashing nicknames on purpose.
+  const clash = { nhl: 'Rangers', mlb: 'Rangers', nfl: 'Giants' };
+  for (const league of SORT_LEAGUES)
+    if (league !== 'npb' && league !== 'kbo' && league !== 'cpbl' && league !== 'bleague' && league !== 'euroleague')
+      rememberTeams(league, Array.from({ length: 16 }, (_, i) => ({ name: `${league} City ${i}`, nick: i === 0 && clash[league] ? clash[league] : `${league}${i}s`, logo: `https://a.espncdn.com/x/${league}${i}.png` })));
+  let seed = 3;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const kinds = new Set();
+  const orders = new Set();
+  let last = null;
+  for (let i = 0; i < 400; i++) {
+    const q = sortQuestion({ random, last: last?.team });
+    assert.ok(q, 'a question');
+    kinds.add(`${q.kind}|${q.clue}`);
+    orders.add(q.boxes.map(b => b.key).join(','));
+    assert.equal(new Set(q.boxes.map(b => b.key)).size, 4);
+    assert.ok(q.boxes.some(b => b.key === q.answer));
+    assert.equal(q.kind === 'sport' ? familyOf(q.league) : q.league, q.answer);
+    assert.notEqual(q.team, last?.team);
+    // A nickname clue fits the right box alone.
+    if (q.clue === 'nick') {
+      const boxOf = l => (q.kind === 'sport' ? familyOf(l) : l);
+      const keys = new Set(q.boxes.map(b => b.key));
+      const others = SORT_LEAGUES.filter(l => keys.has(boxOf(l)) && boxOf(l) !== q.answer);
+      assert.ok(!others.some(l => leagueTeams(l).some(t => normalizeTeamName(teamNick(l, t)) === normalizeTeamName(q.nick))), `${q.nick} is ambiguous`);
     }
+    last = q;
   }
-  // Our own tables are big enough on their own.
-  for (const league of SORT_SETS.baseball) assert.ok(leagueTeams(league).length >= 6, league);
-  assert.ok(SORT_SETS[sortSet()]);
+  // Every kind of question and clue turns up, and the boxes keep moving.
+  for (const k of ['group|logo', 'group|nick', 'group|full', 'sport|nick', 'sport|logo', 'mixed|logo', 'mixed|nick']) assert.ok(kinds.has(k), k);
+  assert.ok(orders.size > 100);
+  assert.ok(SORT_SPORTS.every(sp => SORT_LEAGUES.some(l => familyOf(l) === sp)));
   assert.equal(sortPayout(SORT.tickets), Math.round(SORT.tickets * SORT.pay));
 });
 
