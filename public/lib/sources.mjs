@@ -417,7 +417,7 @@ export function parseFutures(events, sport, markets = FUTURES.filter(f => f.spor
     const teams = [];
     for (const m of event.markets || []) {
       const name = futureTeamName(m);
-      if (!name || m.closed || /^(team [a-z]|another team|other|driver [a-z])$/i.test(name)) continue;
+      if (!name || m.closed || /^(team [a-z]{1,3}|another team|other|driver [a-z]{1,3})$/i.test(name)) continue;
       const outcomes = parseJsonArray(m.outcomes);
       const prices = parseJsonArray(m.outcomePrices);
       const price = Number(prices?.[outcomes?.findIndex(o => /^yes$/i.test(o)) ?? 0]);
@@ -816,9 +816,12 @@ export async function loadExtraLeagues(now = new Date()) {
 // own tables.
 export async function loadLeagueTeams(sport) {
   if (hasTeams(sport)) return true;
-  const path = LEAGUES[sport]?.path;
+  // Our leagues by key, or any ESPN league as 'espn:<path>' (the rest of
+  // Europe's clubs, for the UEFA competitions' championship boards).
+  const path = LEAGUES[sport]?.path ?? (sport.startsWith('espn:') ? sport.slice(5) : null);
   if (!path) return false;
-  const data = await getJson(`${ESPN}/${path}/teams`).catch(() => null);
+  // Every club: ESPN's list stops at its first page (college football's is long) without a limit.
+  const data = await getJson(`${ESPN}/${path}/teams?limit=1000`).catch(() => null);
   const teams = (data?.sports?.[0]?.leagues?.[0]?.teams ?? [])
     .map(x => x.team)
     .filter(t => t?.displayName && t.logos?.[0]?.href)
@@ -836,4 +839,18 @@ export function kambiInPlay(live, sport) {
     return { status: 'pending', state: 'in', homeScore: won.home, awayScore: won.away, homeSets: live.sets.home, awaySets: live.sets.away, detail: '' };
   }
   return { status: 'pending', state: 'in', homeScore: live.score.home, awayScore: live.score.away, detail: '' };
+}
+
+// The leagues whose clubs a championship market is about, for their logos
+// (findTeamLogo): the league itself, or for the UEFA competitions every
+// European league with clubs in them.
+const EUROPE = ['epl', 'laliga', 'seriea', 'bundesliga', 'ligue1', 'eredivisie', 'primeira', ...['sco.1', 'tur.1', 'bel.1', 'aut.1', 'gre.1', 'cze.1', 'den.1', 'nor.1', 'sui.1', 'cro.1', 'srb.1', 'swe.1', 'pol.1', 'ukr.1'].map(l => `espn:soccer/${l}`)];
+// The competitions' own entrant lists first (clubs from smaller leagues too).
+export const FUTURE_TEAM_LEAGUES = { ucl: ['ucl', 'uel', ...EUROPE], uel: ['uel', 'ucl', 'espn:soccer/uefa.europa.conf', ...EUROPE] };
+export const futureTeamLeagues = sport => FUTURE_TEAM_LEAGUES[sport] ?? [sport];
+
+// Loads every team list the championship boards need; resolves when done.
+export function loadFutureTeams(futures) {
+  const leagues = [...new Set(futures.filter(f => f.sport !== 'f1').flatMap(f => futureTeamLeagues(f.sport)))];
+  return Promise.all(leagues.map(l => loadLeagueTeams(l).catch(() => false)));
 }

@@ -1161,3 +1161,7 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .money-facts dt { color: var(--text-secondary); }
 .money-facts dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
 .money-facts dd strong { font-variant-numeric: tabular-nums; }
+.badge.badge-text { font-size: 0.62rem; letter-spacing: 0.02em; }
+.logo-flag { display: grid; place-items: center; font-size: 1.2rem; line-height: 1; }
+.logo-flag.logo-sm, .logo-flag.logo-xs { font-size: 0.95rem; }
+.arcade-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 6px; font-size: 1rem; }

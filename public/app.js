@@ -42,7 +42,7 @@ import {
   replayPlayer
 } from './lib/sim.mjs';
 import { ticketProfile, accountTickets } from './lib/profile.mjs';
-import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive, loadLeagueTeams, parseInning } from './lib/sources.mjs';
+import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive, loadLeagueTeams, parseInning, loadFutureTeams, futureTeamLeagues, FUTURES, EXTRA_FUTURES } from './lib/sources.mjs';
 import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, nextRunChances, nextRunOdds, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
@@ -65,7 +65,7 @@ import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from
 import { pack, unpack } from './lib/codec.mjs';
 import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile, moneySources } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
+import { f1Driver, f1Constructor, findTeamLogo, countryFlag, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
 import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payRound, roundId, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_LEAGUES, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, ADAPT, adapt } from './lib/arcade.mjs';
@@ -577,9 +577,13 @@ function logoPicture(light, dark, cls, fallback) {
 
 // A team logo, or its initials in a circle when there's no logo (or it fails).
 function logoImg(sport, enName, label, size = '') {
-  // One character: a Chinese name's first character, or an English initial.
-  const fallback = () => el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: (label || '?').trim().slice(0, 1) });
-  return logoPicture(teamLogo(sport, enName), teamLogo(sport, enName, true), `logo ${size}`, fallback);
+  // A national team's flag; else one character: a Chinese name's first
+  // character, or an English initial.
+  const flag = countryFlag(enName);
+  const fallback = () =>
+    flag ? el('span', { class: `logo logo-flag ${size}`, 'aria-hidden': 'true', text: flag }) : el('span', { class: `logo logo-fallback ${size}`, 'aria-hidden': 'true', text: (label || '?').trim().slice(0, 1) });
+  const url = teamLogo(sport, enName) ?? findTeamLogo(futureTeamLeagues(sport), enName);
+  return logoPicture(url, url === teamLogo(sport, enName) ? teamLogo(sport, enName, true) : null, `logo ${size}`, fallback);
 }
 
 // The league's own logo on a small white disc, the same for every league in
@@ -630,7 +634,7 @@ function renderStatic() {
   renderPeriods();
   // The guide: reading the numbers, the odds math, then every habit, kind of fan, kind of bet, how
   // the simulators work, the rules and the data, each group folded.
-  const groups = [[t('guideReadTitle'), t('guideRead')], [t('guideMathTitle'), t('mathSteps')], ...t('guide')];
+  const groups = [[t('guideReadTitle'), t('guideRead')], [t('guideSportsTitle'), supportedGames()], [t('guideMathTitle'), t('mathSteps')], ...t('guide')];
   $('math-body').replaceChildren(
     ...groups.map(([title, items], i) =>
       el('details', { class: 'card fold guide-group' }, [
@@ -647,7 +651,23 @@ function renderStatic() {
 // One icon per guide group, in order: reading the numbers, the odds math,
 // traits, fans, kinds of bet, the lottery's rules, recommendations, the
 // simulator, data and margins.
-const GUIDE_ICONS = ['🔎', '🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '⚖️', '👍', '🎲', '📡'];
+const GUIDE_ICONS = ['🔎', '🗂️', '🧮', '🧑‍🤝‍🧑', '🏟️', '🎫', '⚖️', '👍', '🎲', '📡'];
+
+// Every sport and league the page covers, and every championship board,
+// built from the page's own lists, so it's always complete: one line per
+// sport (its leagues and where their odds come from), then the championships.
+function supportedGames() {
+  const t = state.t;
+  const source = league => (league === 'f1' ? 'sourceF1' : LEAGUES[league]?.kambi ? 'sourceKambiShort' : ['mlb', 'epl'].includes(league) ? 'sourceBothShort' : 'sourceEspnShort');
+  const sports = Object.entries(SPORT_GROUPS).map(([group, { icon, leagues }]) => {
+    const bySource = groupBy(leagues, source);
+    const text = [...bySource].map(([src, list]) => `${list.map(l => t(`sport_${l}`)).join('、')}（${t(src)}）`).join('；');
+    return [`${icon} ${t(`group_${group}`)}`, text];
+  });
+  // Names without their season ("{season} 西甲冠軍" → "西甲冠軍").
+  const futures = [...FUTURES, ...EXTRA_FUTURES].map(f => t(`future_${f.key}`, { season: '' }).trim());
+  return [...sports, [`🏆 ${t('guideFuturesTitle')}`, futures.join('、')], [t('guideWhenTitle'), t('guideWhen')]];
+}
 
 function renderStatus(kind) {
   const t = state.t;
@@ -1050,6 +1070,12 @@ setInterval(() => {
 
 // ---- Championships and F1: one board each -------------------------------------
 
+// An F1 constructor: its colour and a short name ("MCL").
+function constructorBadge(name, size = '') {
+  const c = f1Constructor(name);
+  return badge(c.short, c.color, `badge-text ${size}`);
+}
+
 function driverBadge(bet, size = '') {
   const initials = bet.driverEn.split(/\s+/).filter(w => !/^jr\.?$/i.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase();
   return el('span', { class: `driver-badge ${size}`, style: `--team:${bet.driver.color}`, 'aria-hidden': 'true', text: initials });
@@ -1110,7 +1136,7 @@ function renderFutures() {
         id: `fut|${market}`,
         notes,
         shown: FUTURES_SHOWN,
-        rows: (b, i) => entryRow(b, i, market === 'f1drivers' ? driverBadge({ driverEn: b.teamEn, driver: f1Driver(b.teamEn) }) : logoImg(b.sport, b.teamEn, b.shortLabel))
+        rows: (b, i) => entryRow(b, i, market === 'f1drivers' ? driverBadge({ driverEn: b.teamEn, driver: f1Driver(b.teamEn) }) : market === 'f1constructors' ? constructorBadge(b.teamEn) : logoImg(b.sport, b.teamEn, b.shortLabel))
       });
     })
   );
@@ -1806,7 +1832,7 @@ function unlinkSync() {
 // The logo of the team a pick is on (saved with the pick, so history shows
 // it whatever the board holds later), or null for picks on no one team.
 function legLogo(bet) {
-  if (bet.kind === 'future') return teamLogo(bet.sport, bet.teamEn);
+  if (bet.kind === 'future') return teamLogo(bet.sport, bet.teamEn) ?? findTeamLogo(futureTeamLeagues(bet.sport), bet.teamEn);
   const side = bet.kind === 'teamtotal' ? bet.team : bet.settle?.team ?? (['away', 'home'].includes(bet.side) ? bet.side : null);
   return side && bet.game ? teamLogo(bet.sport, bet.game[side].en) : null;
 }
@@ -2307,14 +2333,17 @@ function groupSummary(key, slips) {
   return el('span', { class: 'group-sum' }, [document.createTextNode(t('groupCountCost', { n: slips.length, cost: fmtMoney(cost, { sign: false }) })), el('strong', { text: t('groupMost', { v: fmtMoney(most, { sign: false }) }) })]);
 }
 
-// The 紀錄 tab shows either the slips or the stats.
+// The 紀錄 tab shows the slips, the stats or the mini games, one at a time
+// (the games on their own, so a running one takes no room from the rest).
 function applyHistoryView() {
   const t = state.t;
-  const any = state.accountReady && state.account.slips.length > 0;
-  const view = state.historyView;
-  $('history-tabs').hidden = !any;
+  if (!state.accountReady) return;
+  const any = state.account.slips.length > 0;
+  // No slips yet: the games instead of an empty list.
+  const view = !any && state.historyView === 'slips' ? 'games' : state.historyView;
+  $('history-tabs').hidden = false;
   $('history-tabs').replaceChildren(
-    ...['slips', 'stats'].map(key =>
+    ...['slips', 'stats', 'games'].map(key =>
       el('button', {
         type: 'button',
         'aria-pressed': String(key === view),
@@ -2327,9 +2356,9 @@ function applyHistoryView() {
       })
     )
   );
-  if (!any) return;
-  $('saved').hidden = view !== 'slips';
+  $('saved').hidden = view !== 'slips' || !any;
   $('stats').hidden = view !== 'stats';
+  $('arcade').hidden = view !== 'games';
 }
 
 function renderSaved() {
@@ -3962,18 +3991,29 @@ function renderArcade() {
       ])
     );
     const slot = el('div', { class: 'arcade-slot' });
+    const lede = el('p', { class: 'lede', text: t('arcadeIntro', { cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) });
+    const tileRow = el('div', { class: 'arcade-tiles' }, Object.values(tiles));
+    // While a game is open: its name and 收起 (fold it away) instead of the list.
+    const headName = el('strong');
+    const head = el('div', { class: 'arcade-head', hidden: '' }, [headName, el('button', { class: 'ghost-button', type: 'button', text: t('arcadeClose'), onclick: closeGame })]);
     const card = el('div', { class: 'card arcade' }, [
-      el('p', { class: 'lede', text: t('arcadeIntro', { cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) }),
+      lede,
       el('div', { class: 'arcade-cap' }, [el('div', { class: 'arcade-cap-bar', 'aria-hidden': 'true' }, capFill), capText]),
-      el('div', { class: 'arcade-tiles' }, Object.values(tiles)),
+      head,
+      tileRow,
       slot
     ]);
-    shell = state.arcadeShell = { locale: state.locale, card, capFill, capText, tiles, slot };
+    shell = state.arcadeShell = { locale: state.locale, card, capFill, capText, tiles, slot, lede, tileRow, head, headName };
     $('arcade-body').replaceChildren(card);
   }
   shell.capFill.style.width = `${Math.min(100, (earned / ARCADE.dailyCap) * 100)}%`;
   shell.capText.textContent = room > 0 ? t('arcadeEarned', { v: fmtMoney(earned, { sign: false }), cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) : t('arcadeCapped');
   for (const [game, tile] of Object.entries(shell.tiles)) tile.setAttribute('aria-pressed', String(state.arcadeGame === game));
+  const open = Boolean(state.arcadeGame);
+  shell.lede.hidden = open;
+  shell.tileRow.hidden = open;
+  shell.head.hidden = !open;
+  if (open) shell.headName.textContent = `${ARCADE_ICON[state.arcadeGame]} ${t(`arcade_${state.arcadeGame}`)}`;
   // The game's own view goes in once; it's never moved while it runs.
   if (shell.slot.firstChild !== state.arcadeView) shell.slot.replaceChildren(...(state.arcadeView ? [state.arcadeView] : []));
 }
@@ -3985,6 +4025,16 @@ function openGame(game) {
   state.arcadeView = state.arcadeGame ? { typing: typingView, sort: sortView, derby: derbyView, freethrow: freeThrowView }[game]() : null;
   renderArcade();
   state.arcadeView?.focus({ preventScroll: true });
+}
+
+// Folds the open game away, back to the list (money earned so far stays).
+function closeGame() {
+  stopGame();
+  state.arcadeGame = null;
+  state.arcadeView = null;
+  state.roundLive = false;
+  renderArcade();
+  renderAccount();
 }
 
 // Timers and the animation of the running game, all stopped when it closes.
@@ -4972,6 +5022,8 @@ async function load() {
       const keys = new Set(state.data.futures.map(f => f.key));
       state.data.futures = [...state.data.futures, ...futures.filter(f => !keys.has(f.key))];
       renderAll();
+      // The clubs' logos: ESPN's team lists for the boards' leagues, then the boards again.
+      loadFutureTeams(state.data.futures).then(() => renderFutures());
     }, error => console.error(error));
     // Opened on the simulator: the page opens once its simulation is ready.
     if (state.booting && state.tab === 'sim') await renderSim();

@@ -369,3 +369,64 @@ export function leagueTeams(sport) {
     return true;
   });
 }
+
+// ---- Finding a club's logo by a name that isn't ESPN's -------------------------------
+//
+// Championship markets write clubs their own way ("Betis", "Inter Milan",
+// "1. FC Köln"); ESPN's team lists another ("Real Betis", "Internazionale",
+// "FC Cologne"). A name finds its club in the given leagues' lists: the same
+// name, one name inside the other, else the club sharing the most words
+// (only when one club clearly shares the most). Names with no word in
+// common go through TEAM_ALIASES (both sides as normalizeTeamName writes them).
+const TEAM_ALIASES = {
+  'inter milan': 'internazionale',
+  inter: 'internazionale',
+  rennes: 'stade rennais',
+  'hamburger sv': 'hamburg sv',
+  '1 koln': 'cologne',
+  koln: 'cologne',
+  'los angeles': 'lafc',
+  psg: 'paris saint germain',
+  'mississippi rebels': 'ole miss rebels',
+  'athletic bilbao': 'athletic club',
+  'bayern munchen': 'bayern munich',
+  'sporting cp': 'sporting',
+  'sporting lisbon': 'sporting'
+};
+const logoIndex = new Map();
+export function findTeamLogo(sports, name) {
+  if (!name) return null;
+  let norm = normalizeTeamName(name);
+  norm = TEAM_ALIASES[norm] ?? norm;
+  const clubs = sports.flatMap(sport => {
+    const key = `${sport}|${leagueTeams(sport).length}`;
+    if (!logoIndex.has(key)) logoIndex.set(key, leagueTeams(sport).map(team => ({ sport, team, norm: normalizeTeamName(team), words: new Set(normalizeTeamName(team).split(' ').filter(w => w.length >= 3)) })));
+    return logoIndex.get(key);
+  });
+  const logo = c => teamLogo(c.sport, c.team);
+  const exact = clubs.find(c => c.norm === norm);
+  if (exact) return logo(exact);
+  const inside = clubs.filter(c => ` ${c.norm} `.includes(` ${norm} `) || ` ${norm} `.includes(` ${c.norm} `));
+  if (inside.length) return logo(inside.sort((a, b) => Math.abs(a.norm.length - norm.length) - Math.abs(b.norm.length - norm.length))[0]);
+  const words = norm.split(' ').filter(w => w.length >= 3);
+  const scored = clubs.map(c => ({ c, n: words.filter(w => c.words.has(w)).length })).filter(x => x.n > 0).sort((a, b) => b.n - a.n);
+  if (scored.length && (scored.length === 1 || scored[0].n > scored[1].n)) return logo(scored[0].c);
+  return null;
+}
+
+// F1 constructors: their colour and a short name, for a badge like the drivers'.
+export function f1Constructor(name) {
+  const plain = normalizeTeamName(name);
+  const team = Object.values(F1_TEAMS).find(t => plain.includes(normalizeTeamName(t.name)) || normalizeTeamName(t.name).includes(plain));
+  return { color: team?.color ?? '#8a8f98', short: (team?.name ?? name).replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() };
+}
+
+// National teams (volleyball, and any sport's national sides): a flag.
+const COUNTRY_CODES = {
+  argentina: 'AR', australia: 'AU', austria: 'AT', belgium: 'BE', brazil: 'BR', bulgaria: 'BG', canada: 'CA', chile: 'CL', china: 'CN', 'chinese taipei': 'TW', taiwan: 'TW', colombia: 'CO', croatia: 'HR', cuba: 'CU', 'czech republic': 'CZ', czechia: 'CZ', denmark: 'DK', egypt: 'EG', england: 'GB', estonia: 'EE', finland: 'FI', france: 'FR', germany: 'DE', greece: 'GR', hungary: 'HU', india: 'IN', indonesia: 'ID', iran: 'IR', ireland: 'IE', israel: 'IL', italy: 'IT', japan: 'JP', kazakhstan: 'KZ', 'south korea': 'KR', korea: 'KR', latvia: 'LV', lithuania: 'LT', mexico: 'MX', montenegro: 'ME', netherlands: 'NL', 'new zealand': 'NZ', norway: 'NO', poland: 'PL', portugal: 'PT', 'puerto rico': 'PR', qatar: 'QA', romania: 'RO', russia: 'RU', serbia: 'RS', slovakia: 'SK', slovenia: 'SI', spain: 'ES', sweden: 'SE', switzerland: 'CH', thailand: 'TH', tunisia: 'TN', turkey: 'TR', turkiye: 'TR', ukraine: 'UA', usa: 'US', 'united states': 'US', uruguay: 'UY', vietnam: 'VN', 'dominican republic': 'DO', philippines: 'PH', hongkong: 'HK', 'hong kong': 'HK', singapore: 'SG', malaysia: 'MY'
+};
+// The flag emoji of a national team's name, or null.
+export function countryFlag(name) {
+  const code = COUNTRY_CODES[normalizeTeamName(name).replace(/\s+(women|men|u\d+)$/, '')];
+  return code ? String.fromCodePoint(...[...code].map(c => 0x1f1e6 + c.charCodeAt(0) - 65)) : null;
+}
