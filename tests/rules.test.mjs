@@ -226,3 +226,14 @@ test('F1 podium chances add up to three and pay what the winner board does', asy
   assert.ok(podium.every((p, i) => p.fair >= fair[i] && p.odds >= 1.01));
   assert.ok(podium[0].odds < podium.at(-1).odds);
 });
+
+test('no price is ever under 1.01, even a runaway championship favourite', async () => {
+  const { estimateFuturesOdds, FUTURES_OVERROUND } = await import('../public/lib/odds.mjs');
+  for (const fav of [0.6, 0.8, 0.9, 0.97, 0.995]) {
+    const rest = (1 - fav) / 9;
+    const odds = estimateFuturesOdds([fav, ...Array(9).fill(rest)], FUTURES_OVERROUND.other);
+    assert.ok(odds.every(o => o >= 1.01), `${fav}: ${odds[0]}`);
+    // Never more than halfway to certain.
+    assert.ok(1 / odds[0] <= fav + (1 - fav) / 2 + 0.005, `${fav}: ${odds[0]}`);
+  }
+});

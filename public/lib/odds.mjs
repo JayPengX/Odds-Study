@@ -107,7 +107,12 @@ export function estimateFuturesOdds(fairChances, overround) {
   return fairChances.map(p => {
     const [, step] = FUTURES_LONGSHOT_STEPS.find(([min]) => p >= min);
     if (step) return step;
-    return Math.min(LOTTERY_MAX_ODDS, round2(total / (overround * p ** FUTURES_EXPONENT)));
+    // A runaway favourite: the market's margin shared out by chance would
+    // price it under even money, so, like every other market, its implied
+    // chance goes no more than halfway to certain, and it never pays under
+    // 1.01.
+    const implied = Math.min((overround * p ** FUTURES_EXPONENT) / total, p + (1 - p) / 2);
+    return Math.min(LOTTERY_MAX_ODDS, Math.max(1.01, round2(1 / implied)));
   });
 }
 
