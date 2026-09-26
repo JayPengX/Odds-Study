@@ -16,6 +16,8 @@ export const ARCADE = {
   dailyCap: 1500,
   // What every game pays for a minute of typical play (NT$).
   perMinute: 25,
+  // About how long a round of any game takes (s).
+  roundSeconds: 60,
   games: ['typing', 'sort', 'derby', 'freethrow'],
   // Taiwan's minimum hourly wage in 2026 (NT$).
   minWage: 196,
@@ -23,8 +25,9 @@ export const ARCADE = {
   take: 0.22
 };
 
-// Balanced pay: every game pays about ARCADE.perMinute for a minute of
-// typical play, streaks and penalties included, so none is the one to farm.
+// Balanced pay and length: every round takes about a minute (ARCADE.roundSeconds)
+// and pays about ARCADE.perMinute for typical play, streaks and penalties
+// included, so none is the one to farm.
 // PACE is each game's typical round: how long it takes (typing about 7 s a
 // number on a phone, sorting 1.5 s a ticket, a pitch or a shot about 3.5 s
 // with the wait and the replay) and how an ordinary player does ('ok' and
@@ -103,10 +106,10 @@ export function scoreRound(game, events) {
   return score;
 }
 export const PACE = {
-  typing: { seconds: 140, events: [...run(8, 'ok'), 'bad', ...run(7, 'ok'), 'bad', ...run(5, 'ok')] },
-  sort: { seconds: 105, events: [...run(5, 'ok'), 'bad', ...run(4, 'ok'), 'bad', 'bad', ...run(6, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(4, 'ok'), 'bad', 'bad', ...run(3, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok')] },
-  derby: { seconds: 33, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'miss', 'miss', 'hit', 'miss', 'miss'] },
-  freethrow: { seconds: 32, events: ['swish', 'make', 'make', 'miss', 'make', 'miss', 'miss', 'make', 'miss', 'miss'] }
+  typing: { seconds: 63, events: [...run(5, 'ok'), 'bad', ...run(3, 'ok')] },
+  sort: { seconds: 60, events: [...run(4, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok'), 'bad', ...run(3, 'ok'), 'bad', 'bad', ...run(2, 'ok'), 'bad'] },
+  derby: { seconds: 60, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'miss', 'miss', 'hit', 'hit', 'hr', 'miss', 'miss', 'hit', 'miss', 'miss', 'hit', 'miss', 'miss'] },
+  freethrow: { seconds: 60, events: ['swish', 'make', 'make', 'miss', 'make', 'miss', 'swish', 'make', 'make', 'miss', 'miss', 'make', 'miss', 'swish', 'miss', 'make', 'miss', 'miss'] }
 };
 function run(n, x) {
   return Array(n).fill(x);
@@ -146,14 +149,16 @@ export function payGame(account, game, amount, now = new Date()) {
 // Ten pitches a round, each faster than the last, some of them change-ups
 // that slow down halfway. Swing as the ball crosses the plate: within
 // DERBY.hr of its middle a home run, within DERBY.hit a base hit, else a miss.
-export const DERBY = { pitches: 10, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 5, hit: 3 } };
+export const DERBY = { pitches: 18, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 5, hit: 3 } };
 
-// How long pitch i (0-based) takes to reach the end of the track, in ms;
-// whether it's a change-up (from the third pitch); and how much it breaks
-// sideways (from the fifth: it looks different, the timing is the same).
-export function pitchPlan(i, random = Math.random) {
-  const base = 1000 - i * 60;
-  return { ms: Math.round(base * (0.85 + random() * 0.3)), changeUp: i >= 2 && random() < 0.35, breakX: i >= 4 ? random() * 2 - 1 : 0 };
+// How long pitch i (0-based) of a round takes to reach the end of the
+// track, in ms (faster and faster through the round); whether it's a
+// change-up (after the first fifth); and how much it breaks sideways (from
+// about halfway: it looks different, the timing is the same).
+export function pitchPlan(i, random = Math.random, pitches = DERBY.pitches) {
+  const k = i / Math.max(1, pitches - 1);
+  const base = 1000 - 540 * k;
+  return { ms: Math.round(base * (0.85 + random() * 0.3)), changeUp: k >= 0.2 && random() < 0.35, breakX: k >= 0.45 ? random() * 2 - 1 : 0 };
 }
 
 // Where the ball is (0-1 along the track) `elapsed` ms into a pitch: a
@@ -176,7 +181,7 @@ export const derbyPayout = results => scoreRound('derby', results).total;
 // Plain work: type each ticket number exactly as shown. Every one typed right
 // pays the same; a typo pays nothing and the number stays until it's right.
 // Nothing is left to chance: the more you type, the more you earn.
-export const TYPING = { codes: 20, digits: 10, pay: 2.5 };
+export const TYPING = { codes: 8, digits: 10, pay: 3 };
 
 // A ticket number: ten digits, shown in groups of four ("4829 1735 06").
 export function ticketCode(random = Math.random) {
@@ -202,7 +207,8 @@ export const typingPayout = right => Math.round(right * TYPING.pay);
 // nickname is only shown when it fits one box alone (two "Tigers" in the
 // boxes would be a coin toss, and nothing here is left to luck). Answer
 // before the clock runs out or it counts as wrong.
-export const SORT = { tickets: 30, pay: 1.4, seconds: 6 };
+// Questions a round: right or wrong, each counts.
+export const SORT = { questions: 20, pay: 2, seconds: 6 };
 // Leagues easily confused with each other.
 export const SORT_SETS = {
   baseball: ['mlb', 'npb', 'kbo', 'cpbl'],
@@ -280,10 +286,13 @@ export const sortPayout = right => Math.round(right * SORT.pay);
 // Ten shots. A marker sweeps back and forth across the aim bar, faster each
 // shot, while the green zone in the middle narrows: stop it in the zone's
 // middle half for a swish, anywhere in the zone for a make.
-export const FREE_THROW = { shots: 10, pay: { swish: 5, make: 4 } };
+export const FREE_THROW = { shots: 18, pay: { swish: 5, make: 3 } };
 
-export function shotPlan(i) {
-  return { period: 1300 - i * 70, zone: 0.13 - i * 0.008 };
+// Shot i of a round: the arrow's sweep (ms there and back) and the green's
+// size, faster and narrower through the round.
+export function shotPlan(i, shots = FREE_THROW.shots) {
+  const k = i / Math.max(1, shots - 1);
+  return { period: 1300 - 630 * k, zone: 0.13 - 0.072 * k };
 }
 
 // The marker's place (0-1) `elapsed` ms into a shot: there and back each
@@ -307,6 +316,6 @@ export function typicalPerMinute(game) {
   return (scoreRound(game, PACE[game].events).total / PACE[game].seconds) * 60;
 }
 export function bestRound(game) {
-  const best = { typing: ['ok', TYPING.codes], sort: ['ok', SORT.tickets], derby: ['hr', DERBY.pitches], freethrow: ['swish', FREE_THROW.shots] }[game];
+  const best = { typing: ['ok', TYPING.codes], sort: ['ok', SORT.questions], derby: ['hr', DERBY.pitches], freethrow: ['swish', FREE_THROW.shots] }[game];
   return scoreRound(game, Array(best[1]).fill(best[0])).total;
 }

@@ -1136,5 +1136,4 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .sort-ask { margin: 0; text-align: center; font-weight: 700; }
 .sort-ticket.clue-nick .sort-team strong { font-size: 1.6rem; }
 .sort-ticket.clue-logo .sort-team .logo-lg, .sort-ticket.clue-logo .sort-team .logo.logo-lg { width: 76px; height: 76px; }
-.sort-bin.answer { border-color: var(--good); box-shadow: 0 0 0 2px var(--good) inset; }
 .sort-bin.wrong { border-color: #c62828; box-shadow: 0 0 0 2px #c62828 inset; }

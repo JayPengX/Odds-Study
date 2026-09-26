@@ -30,14 +30,14 @@ test('home run derby: timing decides, faster pitches, change-ups slow down', () 
   assert.equal(swingResult(DERBY.plate + DERBY.hr + 0.01), 'hit');
   assert.equal(swingResult(DERBY.plate - DERBY.hit - 0.01), 'miss');
   const fixed = () => 0.5;
-  assert.ok(pitchPlan(9, fixed).ms < pitchPlan(0, fixed).ms);
+  assert.ok(pitchPlan(DERBY.pitches - 1, fixed).ms < pitchPlan(0, fixed).ms && pitchPlan(DERBY.pitches - 1, fixed).ms > 400);
   const change = { ms: 1000, changeUp: true };
   assert.equal(ballAt(change, 500), 0.5);
   assert.ok(ballAt(change, 900) < 0.9);
   // The home run window is a few tens of milliseconds even on the slowest pitch.
   assert.ok(2 * DERBY.hr * pitchPlan(0, () => 1).ms < 70);
-  // Ten home runs: their pay and a streak bonus every 3.
-  assert.equal(derbyPayout(Array(10).fill('hr')), 10 * DERBY.pay.hr + 3 * STREAK.derby.bonus);
+  // All home runs: their pay and a streak bonus every 3.
+  assert.equal(derbyPayout(Array(DERBY.pitches).fill('hr')), DERBY.pitches * DERBY.pay.hr + Math.floor(DERBY.pitches / 3) * STREAK.derby.bonus);
   assert.equal(derbyPayout(['hit', 'miss']), DERBY.pay.hit - STREAK.derby.penalty);
 });
 
@@ -56,7 +56,7 @@ test('every round is measured against the minimum wage and the lottery\'s take',
   assert.equal(wageMinutes(49), 15);
   assert.equal(Math.round(stakeToLose(60)), 273);
   // Effort pays modestly: a whole round of any game stays small.
-  for (const game of ARCADE.games) assert.ok(bestRound(game) <= 100, game);
+  for (const game of ARCADE.games) assert.ok(bestRound(game) <= 110, game);
 });
 
 
@@ -93,7 +93,7 @@ test('team quiz: a new mixed question every ticket, one right box, never a coin 
   for (const k of ['group|logo', 'group|nick', 'group|full', 'sport|nick', 'sport|logo', 'mixed|logo', 'mixed|nick']) assert.ok(kinds.has(k), k);
   assert.ok(orders.size > 100);
   assert.ok(SORT_SPORTS.every(sp => SORT_LEAGUES.some(l => familyOf(l) === sp)));
-  assert.equal(sortPayout(SORT.tickets), Math.round(SORT.tickets * SORT.pay));
+  assert.equal(sortPayout(SORT.questions), Math.round(SORT.questions * SORT.pay));
 });
 
 test('risk by kind of game: typing is the safe earn, the skill games high risk, high pay', () => {
@@ -101,8 +101,9 @@ test('risk by kind of game: typing is the safe earn, the skill games high risk, 
   assert.equal(STREAK.typing.penalty, 0);
   assert.ok(bestRound('typing') <= 1.1 * scoreRound('typing', PACE.typing.events).total);
   // The skill games: misses cost money, a bad round pays about nothing, a good one two to three times typical, a perfect one never more than about four and a half.
-  const bad = { derby: ['hit', 'miss', 'miss', 'hit', 'miss', 'miss', 'miss', 'miss', 'miss', 'miss'], freethrow: ['make', 'miss', 'miss', 'make', 'miss', 'miss', 'miss', 'miss', 'miss', 'miss'] };
-  const good = { derby: ['hr', 'hr', 'hit', 'hr', 'hit', 'hit', 'miss', 'hr', 'hit', 'hit'], freethrow: ['swish', 'make', 'swish', 'make', 'make', 'miss', 'swish', 'make', 'make', 'miss'] };
+  const n = 18;
+  const bad = { derby: ['hit', 'miss', 'miss', 'hit', ...Array(n - 4).fill('miss')], freethrow: ['make', 'miss', 'miss', 'make', ...Array(n - 4).fill('miss')] };
+  const good = { derby: ['hr', 'hr', 'hit', 'hr', 'hit', 'hit', 'miss', 'hr', 'hit', 'hit', 'hr', 'miss', 'hit', 'hr', 'hit', 'miss', 'hit', 'hit'], freethrow: ['swish', 'make', 'swish', 'make', 'make', 'miss', 'swish', 'make', 'make', 'miss', 'swish', 'swish', 'make', 'miss', 'make', 'swish', 'make', 'miss'] };
   for (const game of ['derby', 'freethrow']) {
     const typical = scoreRound(game, PACE[game].events).total;
     assert.ok(STREAK[game].penalty > 0, game);
@@ -121,7 +122,8 @@ test('risk by kind of game: typing is the safe earn, the skill games high risk, 
 });
 
 test('free throws: the arrow sweeps faster and the zone narrows; the middle swishes', () => {
-  assert.ok(shotPlan(9).period < shotPlan(0).period && shotPlan(9).zone < shotPlan(0).zone);
+  const lastShot = shotPlan(FREE_THROW.shots - 1);
+  assert.ok(lastShot.period < shotPlan(0).period && lastShot.zone < shotPlan(0).zone && lastShot.zone > 0.04);
   const plan = shotPlan(0);
   assert.equal(markerAt(plan, 0), 0);
   assert.equal(markerAt(plan, plan.period / 2), 1);
@@ -150,4 +152,13 @@ test('the pay is balanced: every game pays about the same per minute of typical 
     const rate = typicalPerMinute(game);
     assert.ok(Math.abs(rate - ARCADE.perMinute) / ARCADE.perMinute < 0.15, `${game} ${rate}`);
   }
+});
+
+test('every game takes about the same time: about a minute a round', () => {
+  for (const game of ARCADE.games) assert.ok(Math.abs(PACE[game].seconds - ARCADE.roundSeconds) <= 5, game);
+  // A round is its questions, numbers, pitches or shots, right or wrong.
+  assert.equal(PACE.sort.events.length, SORT.questions);
+  assert.equal(PACE.derby.events.length, DERBY.pitches);
+  assert.equal(PACE.freethrow.events.length, FREE_THROW.shots);
+  assert.equal(PACE.typing.events.filter(e => e === 'ok').length, TYPING.codes);
 });

@@ -4212,7 +4212,7 @@ function derbyView() {
   update();
   animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), swing()) }, [
-    el('p', { class: 'note', text: `${t('derbyRules', { hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }) })} ${streakRule('derby')}` }),
+    el('p', { class: 'note', text: `${t('derbyRules', { n: DERBY.pitches, hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }) })} ${streakRule('derby')}` }),
     hud.node,
     canvas,
     box
@@ -4411,7 +4411,7 @@ function freeThrowView() {
   update();
   animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), shoot()) }, [
-    el('p', { class: 'note', text: `${t('ftRules', { swish: fmtMoney(FREE_THROW.pay.swish, { sign: false }), make: fmtMoney(FREE_THROW.pay.make, { sign: false }) })} ${streakRule('freethrow')}` }),
+    el('p', { class: 'note', text: `${t('ftRules', { n: FREE_THROW.shots, swish: fmtMoney(FREE_THROW.pay.swish, { sign: false }), make: fmtMoney(FREE_THROW.pay.make, { sign: false }) })} ${streakRule('freethrow')}` }),
     hud.node,
     canvas,
     box
@@ -4430,7 +4430,7 @@ function sortView() {
   const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' }, el('p', { class: 'muted', text: t('sortLoading') }));
   const clock = el('div', { class: 'value-timer', 'aria-hidden': 'true' }, el('div'));
   const binRow = el('div', { class: 'sort-bins' });
-  const view = el('div', { class: 'arcade-game', tabindex: '0' }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.tickets, s: SORT.seconds, total: fmtMoney(sortPayout(SORT.tickets), { sign: false }) })} ${streakRule('sort')}` }), hud.node, clock, ask, slot, binRow, box]);
+  const view = el('div', { class: 'arcade-game', tabindex: '0' }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.questions, s: SORT.seconds, total: fmtMoney(bestRound('sort'), { sign: false }) })} ${streakRule('sort')}` }), hud.node, clock, ask, slot, binRow, box]);
   const score = scorer('sort');
   let leagues = SORT_LEAGUES;
   let q = null;
@@ -4439,11 +4439,13 @@ function sortView() {
   let began = 0;
   let deadline = null;
   let buttons = [];
-  const update = () => hud.set({ done: right, of: SORT.tickets, earned: score.total, run: score.run });
+  const update = () => hud.set({ done: right + wrong, of: SORT.questions, earned: score.total, run: score.run });
   // The ticket: the logo, the nickname, or both, as the question says.
+  const fullName = question => teamName({ en: question.team, zh: teamZh(question.league, question.team) });
+  const logoOf = question => el('img', { class: 'logo logo-lg', src: teamLogo(question.league, question.team), alt: '' });
   const card = question => {
-    const full = teamName({ en: question.team, zh: teamZh(question.league, question.team) });
-    const logo = question.clue !== 'nick' ? logoImg(question.league, question.team, full, 'logo-lg') : null;
+    const full = fullName(question);
+    const logo = question.clue !== 'nick' ? logoOf(question) : null;
     const text = question.clue === 'logo' ? null : el('strong', { text: question.clue === 'nick' ? question.nick : full });
     return el('div', { class: `lotto-ticket sort-ticket clue-${question.clue}` }, [
       el('span', { class: 'lotto-head', text: t('lottoHead') }),
@@ -4465,17 +4467,61 @@ function sortView() {
     bar.style.width = '100%';
     requestAnimationFrame(() => requestAnimationFrame(() => ((bar.style.transition = `width ${SORT.seconds}s linear`), (bar.style.width = '0%'))));
     deadline = setTimeout(() => {
-      if (!began || right >= SORT.tickets) return startClock();
+      if (!began || right + wrong >= SORT.questions) return startClock();
       wrong++;
       hud.flash(score.bad(), false);
-      buttons[q.boxes.findIndex(b => b.key === q.answer)]?.classList.add('answer');
-      q = { ...q, done: true };
-      later(next, 700);
+      slot.firstChild?.classList.add('shake');
+      moveOn();
     }, SORT.seconds * 1000);
     gameTimers.push(deadline);
   };
-  const next = () => {
-    q = sortQuestion({ leagues, last: q?.team });
+  // Every question is ready before it's asked: a deck built at the start,
+  // each logo loaded, and any question whose logo or name fails swapped for
+  // a new one. More are made in the background as the deck runs low.
+  const preload = url =>
+    new Promise(resolve => {
+      if (!url) return resolve(false);
+      const img = new Image();
+      const timer = setTimeout(() => resolve(false), 6000);
+      img.onload = () => (clearTimeout(timer), resolve(img.naturalWidth > 0));
+      img.onerror = () => (clearTimeout(timer), resolve(false));
+      img.src = url;
+    });
+  const deck = [];
+  const used = new Set();
+  const fresh = () => {
+    for (let tries = 0; tries < 30; tries++) {
+      const question = sortQuestion({ leagues, last: deck.at(-1)?.team ?? q?.team });
+      if (!question || used.has(`${question.league}|${question.team}`)) continue;
+      // A name to show when the clue needs one.
+      if (question.clue !== 'logo' && !(question.clue === 'nick' ? question.nick : question.team)?.trim()) continue;
+      used.add(`${question.league}|${question.team}`);
+      return question;
+    }
+    return null;
+  };
+  // Makes `n` ready questions (swapping failures), reporting progress.
+  const fill = async (n, onProgress) => {
+    let ready = 0;
+    const one = async () => {
+      for (let tries = 0; tries < 6; tries++) {
+        const question = fresh();
+        if (!question) return;
+        if (await preload(teamLogo(question.league, question.team))) {
+          deck.push(question);
+          onProgress?.(++ready, n);
+          return;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: n }, one));
+  };
+  let filling = null;
+  const next = async () => {
+    if (!deck.length) await (filling ?? fill(5));
+    if (deck.length < 8 && !filling) filling = fill(15).finally(() => (filling = null));
+    q = deck.shift();
+    if (!q) return;
     ask.textContent = t(`sortAsk_${q.kind}`);
     slot.replaceChildren(card(q));
     buttons = q.boxes.map(boxButton);
@@ -4483,8 +4529,24 @@ function sortView() {
     update();
     startClock();
   };
+  // After a wrong or late answer: no answer shown (it's a quiz, not a lesson),
+  // a moment to see the mistake, then the next question.
+  const moveOn = () => {
+    q = { ...q, done: true };
+    later(advance, 650);
+  };
+  // The next question, or the end of the round once every one is answered.
+  const advance = () => {
+    if (right + wrong < SORT.questions) return next();
+    clearTimeout(deadline);
+    binRow.remove();
+    clock.remove();
+    ask.remove();
+    slot.remove();
+    finishRound('sort', score.total, box, t('sortDone', { n: right, of: SORT.questions }), performance.now() - began, score);
+  };
   const place = (key, button) => {
-    if (!q || q.done || right >= SORT.tickets) return;
+    if (!q || q.done || right + wrong >= SORT.questions) return;
     began ||= performance.now();
     const current = slot.firstChild;
     if (key === q.answer) {
@@ -4494,37 +4556,29 @@ function sortView() {
       hud.flash(score.good(SORT.pay), true);
       button.classList.add('flash');
       current?.classList.add('fly', `fly-${q.boxes.findIndex(b => b.key === key)}`);
-      if (right === SORT.tickets) {
-        clearTimeout(deadline);
-        update();
-        binRow.remove();
-        clock.remove();
-        ask.remove();
-        later(() => finishRound('sort', score.total, box, t('sortDone', { n: right, wrong }), performance.now() - began, score), 250);
-        return;
-      }
-      later(next, 160);
+      update();
+      later(advance, 160);
     } else {
       // Wrong: it costs a little, the right box lights up, then the next question.
       wrong++;
       hud.flash(score.bad(), false);
       clearTimeout(deadline);
-      current?.classList.add('shake');
-      buttons[q.boxes.findIndex(b => b.key === q.answer)]?.classList.add('answer');
       button.classList.add('wrong');
-      q = { ...q, done: true };
+      current?.classList.add('shake');
+      moveOn();
       update();
-      later(next, 700);
     }
   };
   view.addEventListener('keydown', e => {
     const i = Number(e.key) - 1;
     if (q && i >= 0 && i < q.boxes.length) place(q.boxes[i].key, buttons[i]);
   });
-  Promise.all(SORT_LEAGUES.map(league => loadLeagueTeams(league).catch(() => false))).then(ok => {
-    leagues = SORT_LEAGUES.filter((_, i) => ok[i]);
-    next();
-  });
+  Promise.all(SORT_LEAGUES.map(league => loadLeagueTeams(league).catch(() => false)))
+    .then(ok => {
+      leagues = SORT_LEAGUES.filter((_, i) => ok[i]);
+      return fill(SORT.questions + 4, (done, n) => slot.replaceChildren(el('p', { class: 'muted', text: t('sortPreparing', { n: done, of: n }) })));
+    })
+    .then(next);
   update();
   return view;
 }
