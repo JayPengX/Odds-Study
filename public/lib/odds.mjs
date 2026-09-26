@@ -436,6 +436,12 @@ export function seededRandom(seed) {
 // - `stopLoss` [NT$, weeks]: weeks off after losing that much in one week.
 // Boosted stakes stay within NT$3,000.
 const RIDE_EXTRA_TICKETS = 30;
+// Every simulated player plays by the practice account's rules: NT$10,000 to
+// start, NT$5,000 more at the start of every week after the first, and never
+// a ticket costing more than what's left this week. Winnings come in at the
+// end of the week (this week's results are decided together).
+export const SIM_START_BALANCE = 10_000;
+export const SIM_WEEKLY_GRANT = 5_000;
 const BOOST_MAX = 3000;
 // `share`: how much of the crowd bets this way. Most bettors are casual:
 // in the University of Hong Kong's 2021 study the median football bettor
@@ -603,7 +609,12 @@ function freshState(habit) {
     maxStake: 0,
     peak: 0,
     peakWeek: -1,
-    maxDrop: 0
+    maxDrop: 0,
+    // Money in hand, weeks a ticket had to be cut or skipped for lack of it,
+    // and the lowest the balance went.
+    cash: SIM_START_BALANCE,
+    shortWeeks: 0,
+    lowestCash: SIM_START_BALANCE
   };
 }
 
@@ -634,7 +645,10 @@ function storyOf(st) {
     worstWeekAt: st.worstWeekAt,
     taxPaid: st.taxPaid,
     restWeeks: st.restWeeks,
-    firstWon: st.firstWon === true
+    firstWon: st.firstWon === true,
+    cash: st.cash,
+    shortWeeks: st.shortWeeks,
+    lowestCash: st.lowestCash
   };
 }
 
@@ -650,6 +664,9 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
   const legSpan = hi - lo + 1;
   const base = habit.stakes[0];
   for (let w = from; w < weeks; w++) {
+    if (w > 0) st.cash += SIM_WEEKLY_GRANT;
+    let spent = 0;
+    let short = false;
     let pick = weekPicker(w);
     if (!pick && fallback && random() < switchRate) pick = fallback(w);
     // Poisson number of tickets this week (none when there's nothing to bet on).
@@ -712,11 +729,22 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
         stake = Math.max(stake, Math.min(BOOST_MAX, stake * st.boost));
         st.boost = 1;
       }
+      // Only what's left this week can be bet.
+      const afford = Math.floor((st.cash - spent) / SLIP_RULES.unit) * SLIP_RULES.unit;
+      if (stake > afford) {
+        stake = Math.max(0, afford);
+        short = true;
+      }
       if (st.pot > 0) {
-        const ride = Math.min(Math.floor(st.pot / SLIP_RULES.unit) * SLIP_RULES.unit, SLIP_RULES.maxTicket - stake);
+        const ride = Math.max(0, Math.min(Math.floor(st.pot / SLIP_RULES.unit) * SLIP_RULES.unit, SLIP_RULES.maxTicket - stake, afford - stake));
         stake += ride;
         st.pot -= ride;
       }
+      if (stake < SLIP_RULES.minTicket) {
+        if (i < count) short = true;
+        continue;
+      }
+      spent += stake;
       const gross = stake * odds;
       const result = won ? afterTax(gross) - stake : -stake;
       st.firstWon ??= won;
@@ -753,6 +781,9 @@ function playSeason(habit, weekPicker, weeks, random, path, fallback = null, swi
       }
     }
     st.pot += winnings;
+    st.cash += week;
+    if (short) st.shortWeeks++;
+    if (st.cash < st.lowestCash) st.lowestCash = st.cash;
     if (week < st.worstWeek) {
       st.worstWeek = week;
       st.worstWeekAt = w;
@@ -997,7 +1028,7 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         sums: groups.map(emptySum),
         // Each record per habit: [player index, value].
         records: Object.fromEntries(Object.entries(RECORD_START).map(([key, start]) => [key, HABITS.map(() => [-1, start])])),
-        crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0 }
+        crowd: { winnings: 0, losses: 0, neverWon: 0, wonTickets: 0, taxTotal: 0, taxed: 0, firstWon: 0, firstWonLost: 0, short: 0, broke: 0 }
       }
     ])
   );
@@ -1025,6 +1056,8 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
     if (story.everAhead) sum.everAhead++;
     if (groups[g].habit.chaseCap && story.maxStake >= groups[g].habit.chaseCap) sum.capHits++;
     if (story.wonTickets === 0 && story.tickets > 0) c.neverWon++;
+    if (story.shortWeeks > 0) c.short++;
+    if (story.lowestCash < SLIP_RULES.minTicket) c.broke++;
     c.wonTickets += story.wonTickets;
     c.taxTotal += story.taxPaid;
     if (story.taxPaid > 0) c.taxed++;
@@ -1197,7 +1230,11 @@ export function simulateCrowd({ pools, sportPools, startWeek = 0, weeks, checkpo
         taxTotal: crowd.taxTotal,
         taxedShare: crowd.taxed / total,
         firstWonShare: crowd.firstWon / total,
-        firstWonLostShare: crowd.firstWon > 0 ? crowd.firstWonLost / crowd.firstWon : 0
+        firstWonLostShare: crowd.firstWon > 0 ? crowd.firstWonLost / crowd.firstWon : 0,
+        // Ran short of money at least once (a ticket cut or skipped), and ran
+        // out altogether (under the NT$100 minimum).
+        shortShare: crowd.short / total,
+        brokeShare: crowd.broke / total
       }
     };
   }

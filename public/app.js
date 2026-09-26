@@ -38,6 +38,8 @@ import {
   median,
   quantile,
   SLIP_RULES,
+  SIM_START_BALANCE,
+  SIM_WEEKLY_GRANT,
   afterTax,
   choose,
   seededRandom,
@@ -3111,6 +3113,9 @@ function renderFacts(stats, totals, characters, summaries, period) {
   const money = v => fmtMoney(v, { sign: false });
   const facts = [];
   const by = key => summaries.find(h => h.habit.key === key);
+  // Everyone plays by the practice account's rules.
+  const grants = SIM_WEEKLY_GRANT * Math.max(0, stats.weeks - 1);
+  facts.push(factItem(t('factBankroll', { period }), { cash: money(SIM_START_BALANCE + grants + totals.net / stats.players), grants: money(grants), short: fmtShare(stats.crowd.shortShare) }, t('factBankrollWhy', { start: money(SIM_START_BALANCE), grant: money(SIM_WEEKLY_GRANT), spend: money(totals.staked / stats.players / Math.max(1, stats.weeks)) })));
   facts.push(factItem(t('factParlay'), { a: money(by('casual').back), b: money(by('dreamer').back) }, t('factParlayWhy')));
   if (totals.everAheadShare > totals.aheadShare) facts.push(factItem(t('factEverAhead'), { a: fmtShare(totals.everAheadShare), b: fmtShare(totals.aheadShare) }, t('factEverAheadWhy')));
   const chaser = by('chaser');
@@ -3775,6 +3780,9 @@ async function load() {
   $('refresh').disabled = true;
   try {
     state.data = await loadOdds(new Date(), onProgress);
+    // A tab asked for in the address (#sim) that needed the odds opens now.
+    if (state.wantedTab && state.tab !== state.wantedTab && tabAvailable(state.wantedTab)) state.tab = state.wantedTab;
+    state.wantedTab = null;
     renderAll();
     // The other leagues join once they arrive.
     loadExtraLeagues(new Date()).then(games => {
@@ -3913,7 +3921,7 @@ $('tabs').addEventListener('keydown', event => {
 });
 {
   const fromHash = location.hash.slice(1);
-  if (TABS.includes(fromHash)) state.tab = fromHash;
+  if (TABS.includes(fromHash)) state.tab = state.wantedTab = fromHash;
 }
 
 $('refresh').addEventListener('click', load);

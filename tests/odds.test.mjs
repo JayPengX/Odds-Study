@@ -568,3 +568,18 @@ test('wider lines: team totals and run lines from the score model, odds never be
   assert.ok(estimateLineOdds(0.97, 1.158) >= 1.01);
   close(estimateLineOdds(0.5, 1.158), 1.73, 0.01);
 });
+
+test('simulated players play by the practice account rules: NT$10,000, NT$5,000 a week, no betting money they lack', async () => {
+  const { simulateHabit, habitPools, sportTemplate, SIM_START_BALANCE, SIM_WEEKLY_GRANT } = await import('../public/lib/odds.mjs');
+  const pools = habitPools(sportTemplate('mlb'));
+  // Someone who wants NT$20,000 tickets every week can only bet what they have.
+  const greedy = { key: 'greedy', share: 0, perWeek: 3, legs: [1, 1], stakes: [20_000], big: 0, pick: 'any' };
+  const story = simulateHabit({ habit: greedy, pools, weeks: 10, seed: 3 });
+  assert.ok(story.shortWeeks > 0);
+  // Never below zero, and the balance is the start, the claims and the result.
+  assert.ok(story.lowestCash >= 0, story.lowestCash);
+  assert.ok(Math.abs(story.cash - (SIM_START_BALANCE + 9 * SIM_WEEKLY_GRANT + story.final)) < 1e-6);
+  // A person who can afford every ticket bets exactly as before.
+  const casual = simulateHabit({ habit: HABITS[0], pools, weeks: 20, seed: 3 });
+  assert.equal(casual.shortWeeks, 0);
+});
