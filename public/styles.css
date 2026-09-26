@@ -1068,7 +1068,11 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .typing-code.value-count { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
 .arcade-max { font-weight: 700; color: var(--text-secondary); }
 .game-hud { display: grid; gap: 6px; }
-.hud-row { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: var(--text-secondary); }
+/* One line at any width: nothing wraps, and the bonus/penalty note floats
+   above the row instead of taking room in it. */
+.game-hud { position: relative; }
+.hud-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap; min-width: 0; }
+.hud-row > * { flex: none; }
 .hud-money { margin-left: auto; font-size: 1rem; color: var(--text); font-variant-numeric: tabular-nums; }
 .hud-streak { font-weight: 700; color: #f9a825; }
 .hud-streak.hot { color: #ef6c00; animation: hud-pulse 0.8s ease-in-out infinite alternate; }
@@ -1096,7 +1100,7 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .sort-bin.flash { animation: bin-flash 0.35s; }
 @keyframes bin-flash { from { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); transform: scale(0.96); } }
 @media (prefers-reduced-motion: reduce) { .lotto-ticket, .hud-streak.hot, .sort-bin.flash, .lotto-ticket.shake { animation: none; transition: none; } }
-.hud-note { font-weight: 800; opacity: 0; }
+.hud-note { position: absolute; right: 0; bottom: 100%; margin-bottom: 2px; font-weight: 800; opacity: 0; pointer-events: none; }
 .hud-note.bonus { color: #f9a825; }
 .hud-note.penalty { color: #c62828; }
 .hud-note.show { animation: hud-note 1.1s ease-out; }

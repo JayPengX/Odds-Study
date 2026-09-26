@@ -4032,7 +4032,10 @@ function gameHud(game) {
     if (level != null) {
       meter.hidden = false;
       const bars = 1 + Math.round(level * 4);
-      meter.textContent = `${t('hudLevel')} ${'▮'.repeat(bars)}${'▯'.repeat(5 - bars)}`;
+      // Bars only (the name for screen readers): one line even on a phone.
+      meter.textContent = `${'▮'.repeat(bars)}${'▯'.repeat(5 - bars)}`;
+      meter.setAttribute('aria-label', `${t('hudLevel')} ${bars} / 5`);
+      meter.title = t('hudLevel');
     }
     count.textContent = t('hudCount', { n: done, of });
     money.textContent = fmtMoney(earned, { sign: false });
