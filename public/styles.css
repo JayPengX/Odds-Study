@@ -1137,3 +1137,4 @@ img[src*='thesportsdb'] { object-fit: contain; }
 .sort-ticket.clue-nick .sort-team strong { font-size: 1.6rem; }
 .sort-ticket.clue-logo .sort-team .logo-lg, .sort-ticket.clue-logo .sort-team .logo.logo-lg { width: 76px; height: 76px; }
 .sort-bin.wrong { border-color: #c62828; box-shadow: 0 0 0 2px #c62828 inset; }
+.hud-level { font-size: 0.74rem; color: var(--text-secondary); letter-spacing: 0.02em; }

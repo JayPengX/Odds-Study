@@ -37,16 +37,28 @@ export const ARCADE = {
 // - typing is the safe earn: a typo costs nothing (retype it), a small bonus
 //   for keeping it up, and nearly the same pay every round;
 // - the team quiz is in between: a wrong box costs a little;
-// - the derby and free throws are high risk, high pay: misses cost money
-//   (the derby's less, it's the harder of the two), streaks pay more, so a
-//   bad round pays about nothing and a good one two to three times typical.
-// `every`: right in a row for a bonus of `bonus`; `penalty`: what a mistake costs.
+// - the derby and free throws are high risk, high pay, and paid mostly for
+//   streaks: one success pays little, each one in a row after it adds a
+//   bonus (`ladder`: the 2nd adds `ladder[0]`, the 3rd on `ladder[1]`), a
+//   miss costs a little and ends the streak. Their difficulty follows the
+//   player (see ADAPT), so a streak is always earned at the edge of your
+//   skill. A bad round pays about nothing, a good one about twice typical.
+// `every` + `bonus`: that many right in a row adds the bonus; `penalty`: what a mistake costs.
 export const STREAK = {
   typing: { every: 5, bonus: 1, penalty: 0 },
   sort: { every: 4, bonus: 2, penalty: 1 },
-  freethrow: { every: 3, bonus: 2, penalty: 2 },
-  derby: { every: 3, bonus: 2, penalty: 1 }
+  freethrow: { ladder: [3, 6], penalty: 1 },
+  derby: { ladder: [3, 6], penalty: 1 }
 };
+
+// Dynamic difficulty for the skill games: a level from 0 (easy) to 1 (the
+// hardest), starting low; up after a success (more after the best kind),
+// down after a miss, so the game settles where you hit about half.
+export const ADAPT = { start: 0.15, up: 0.1, upBest: 0.14, down: 0.16 };
+export function adapt(level, result) {
+  const step = result === 'miss' ? -ADAPT.down : result === 'hr' || result === 'swish' ? ADAPT.upBest : ADAPT.up;
+  return Math.min(1, Math.max(0, level + step));
+}
 
 // A round's running score: good(pay) for a success (returns the streak
 // bonus it earned, if any), bad() for a mistake (returns what it cost). The
@@ -61,10 +73,10 @@ export function scorer(game) {
     good(pay) {
       sum += pay;
       run++;
-      if (run % rule.every !== 0) return 0;
-      sum += rule.bonus;
-      bonus += rule.bonus;
-      return rule.bonus;
+      const extra = rule.ladder ? (run === 1 ? 0 : rule.ladder[Math.min(run - 2, rule.ladder.length - 1)]) : run % rule.every === 0 ? rule.bonus : 0;
+      sum += extra;
+      bonus += extra;
+      return extra;
     },
     bad() {
       run = 0;
@@ -108,8 +120,8 @@ export function scoreRound(game, events) {
 export const PACE = {
   typing: { seconds: 63, events: [...run(5, 'ok'), 'bad', ...run(3, 'ok')] },
   sort: { seconds: 60, events: [...run(4, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok'), 'bad', ...run(3, 'ok'), 'bad', 'bad', ...run(2, 'ok'), 'bad'] },
-  derby: { seconds: 60, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'miss', 'miss', 'hit', 'hit', 'hr', 'miss', 'miss', 'hit', 'miss', 'miss', 'hit', 'miss', 'miss'] },
-  freethrow: { seconds: 60, events: ['swish', 'make', 'make', 'miss', 'make', 'miss', 'swish', 'make', 'make', 'miss', 'miss', 'make', 'miss', 'swish', 'miss', 'make', 'miss', 'miss'] }
+  derby: { seconds: 60, events: ['hr', 'hit', 'miss', 'hit', 'hit', 'hr', 'miss', 'hit', 'miss', 'hr', 'hit', 'miss', 'hit', 'hit', 'hr', 'miss', 'hit', 'miss'] },
+  freethrow: { seconds: 60, events: ['swish', 'make', 'miss', 'make', 'make', 'swish', 'miss', 'make', 'miss', 'swish', 'make', 'miss', 'make', 'make', 'swish', 'miss', 'make', 'miss'] }
 };
 function run(n, x) {
   return Array(n).fill(x);
@@ -149,16 +161,15 @@ export function payGame(account, game, amount, now = new Date()) {
 // Ten pitches a round, each faster than the last, some of them change-ups
 // that slow down halfway. Swing as the ball crosses the plate: within
 // DERBY.hr of its middle a home run, within DERBY.hit a base hit, else a miss.
-export const DERBY = { pitches: 18, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 5, hit: 3 } };
+export const DERBY = { pitches: 18, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 1, hit: 0.5 } };
 
-// How long pitch i (0-based) of a round takes to reach the end of the
-// track, in ms (faster and faster through the round); whether it's a
-// change-up (after the first fifth); and how much it breaks sideways (from
-// about halfway: it looks different, the timing is the same).
-export function pitchPlan(i, random = Math.random, pitches = DERBY.pitches) {
-  const k = i / Math.max(1, pitches - 1);
-  const base = 1000 - 540 * k;
-  return { ms: Math.round(base * (0.85 + random() * 0.3)), changeUp: k >= 0.2 && random() < 0.35, breakX: k >= 0.45 ? random() * 2 - 1 : 0 };
+// A pitch at difficulty `level` (0-1, see adapt): how long it takes to reach
+// the end of the track, in ms (faster the harder); whether it's a change-up
+// (from level 0.25); and how much it breaks sideways (from level 0.5: it
+// looks different, the timing is the same).
+export function pitchPlan(level, random = Math.random) {
+  const base = 1000 - 540 * level;
+  return { ms: Math.round(base * (0.85 + random() * 0.3)), changeUp: level >= 0.25 && random() < 0.35, breakX: level >= 0.5 ? random() * 2 - 1 : 0 };
 }
 
 // Where the ball is (0-1 along the track) `elapsed` ms into a pitch: a
@@ -286,13 +297,12 @@ export const sortPayout = right => Math.round(right * SORT.pay);
 // Ten shots. A marker sweeps back and forth across the aim bar, faster each
 // shot, while the green zone in the middle narrows: stop it in the zone's
 // middle half for a swish, anywhere in the zone for a make.
-export const FREE_THROW = { shots: 18, pay: { swish: 5, make: 3 } };
+export const FREE_THROW = { shots: 18, pay: { swish: 1, make: 0.5 } };
 
-// Shot i of a round: the arrow's sweep (ms there and back) and the green's
-// size, faster and narrower through the round.
-export function shotPlan(i, shots = FREE_THROW.shots) {
-  const k = i / Math.max(1, shots - 1);
-  return { period: 1300 - 630 * k, zone: 0.13 - 0.072 * k };
+// A shot at difficulty `level` (0-1, see adapt): the arrow's sweep (ms there
+// and back) and the green's size, faster and narrower the harder.
+export function shotPlan(level) {
+  return { period: 1300 - 630 * level, zone: 0.13 - 0.072 * level };
 }
 
 // The marker's place (0-1) `elapsed` ms into a shot: there and back each

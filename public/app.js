@@ -68,7 +68,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
-import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_LEAGUES, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult } from './lib/arcade.mjs';
+import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_LEAGUES, sortQuestion, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, ADAPT, adapt } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -181,6 +181,11 @@ function fmtMoney(value, { sign = true } = {}) {
   const abs = fmtInt(Math.abs(Math.round(value)));
   if (!sign) return `NT$${abs}`;
   return `${value < -0.5 ? '−' : value > 0.5 ? '+' : ''}NT$${abs}`;
+}
+
+// A small amount that may be a half dollar: NT$0.5, NT$3.
+function fmtPay(value) {
+  return Number.isInteger(value) ? fmtMoney(value, { sign: false }) : `NT$${value}`;
 }
 
 function fmtAxis(value) {
@@ -3892,8 +3897,15 @@ function gameHud() {
   const money = el('strong', { class: 'hud-money' });
   const streak = el('span', { class: 'hud-streak' });
   const note = el('span', { class: 'hud-note', 'aria-live': 'polite' });
-  const node = el('div', { class: 'game-hud' }, [el('div', { class: 'hud-row' }, [count, streak, note, money]), progress]);
-  const set = ({ done, of, earned, run }) => {
+  // The skill games' difficulty: five bars.
+  const meter = el('span', { class: 'hud-level', hidden: '' });
+  const node = el('div', { class: 'game-hud' }, [el('div', { class: 'hud-row' }, [count, meter, streak, note, money]), progress]);
+  const set = ({ done, of, earned, run, level = null }) => {
+    if (level != null) {
+      meter.hidden = false;
+      const bars = 1 + Math.round(level * 4);
+      meter.textContent = `${t('hudLevel')} ${'▮'.repeat(bars)}${'▯'.repeat(5 - bars)}`;
+    }
     count.textContent = t('hudCount', { n: done, of });
     money.textContent = fmtMoney(earned, { sign: false });
     streak.textContent = run >= 2 ? t('hudStreak', { n: run }) : '';
@@ -3915,6 +3927,7 @@ function gameHud() {
 function streakRule(game) {
   const r = STREAK[game];
   const v = x => fmtMoney(x, { sign: false });
+  if (r.ladder) return state.t('streakRuleLadder', { a: v(r.ladder[0]), b: v(r.ladder[1]), penalty: v(r.penalty) });
   return r.penalty ? state.t('streakRule', { every: r.every, bonus: v(r.bonus), penalty: v(r.penalty) }) : state.t('streakRuleSafe', { every: r.every, bonus: v(r.bonus) });
 }
 
@@ -4026,8 +4039,10 @@ function derbyView() {
   let particles = [];
   let began = 0;
   const score = scorer('derby');
+  // Difficulty follows the batter: up after a hit, down after a miss.
+  let level = ADAPT.start;
   let last = performance.now();
-  const update = () => hud.set({ done: results.length, of: DERBY.pitches, earned: score.total, run: score.run });
+  const update = () => hud.set({ done: results.length, of: DERBY.pitches, earned: score.total, run: score.run, level });
   // The ball along its path: p is ballAt's 0-1, the plate at DERBY.plate.
   const ballPos = p => {
     const k = p / DERBY.plate;
@@ -4167,7 +4182,7 @@ function derbyView() {
     phase = 'wait';
     flight = null;
     later(() => {
-      plan = pitchPlan(results.length);
+      plan = pitchPlan(level);
       phase = 'pitch';
       pitchStart = performance.now();
     }, 900 + Math.random() * 700);
@@ -4182,6 +4197,7 @@ function derbyView() {
     results.push(result);
     if (result === 'miss') hud.flash(score.bad(), false);
     else hud.flash(score.good(DERBY.pay[result]), true);
+    level = adapt(level, result);
     phase = 'flight';
     const b = ballPos(Math.min(p, 1.1));
     const off = Math.abs(p - DERBY.plate);
@@ -4212,7 +4228,7 @@ function derbyView() {
   update();
   animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), swing()) }, [
-    el('p', { class: 'note', text: `${t('derbyRules', { n: DERBY.pitches, hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }) })} ${streakRule('derby')}` }),
+    el('p', { class: 'note', text: `${t('derbyRules', { n: DERBY.pitches, hr: fmtPay(DERBY.pay.hr), hit: fmtPay(DERBY.pay.hit) })} ${streakRule('derby')}` }),
     hud.node,
     canvas,
     box
@@ -4240,8 +4256,10 @@ function freeThrowView() {
   let ripple = -1e9;
   let began = 0;
   const score = scorer('freethrow');
+  // Difficulty follows the shooter: up after a make, down after a miss.
+  let level = ADAPT.start;
   let last = performance.now();
-  const update = () => hud.set({ done: results.length, of: FREE_THROW.shots, earned: score.total, run: score.run });
+  const update = () => hud.set({ done: results.length, of: FREE_THROW.shots, earned: score.total, run: score.run, level });
   const drawCourt = now => {
     const wall = ctx.createLinearGradient(0, 0, 0, 150);
     wall.addColorStop(0, '#1b2331');
@@ -4299,7 +4317,7 @@ function freeThrowView() {
     ctx.stroke();
   };
   const drawMeter = now => {
-    const zone = plan?.zone ?? shotPlan(results.length).zone;
+    const zone = plan?.zone ?? shotPlan(level).zone;
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(meter.x - 3, meter.y - 3, meter.w + 6, meter.h + 6);
     ctx.fillStyle = '#e53935';
@@ -4378,7 +4396,7 @@ function freeThrowView() {
       return;
     }
     shot = null;
-    plan = shotPlan(results.length);
+    plan = shotPlan(level);
     phase = 'aim';
     aimStart = performance.now();
   };
@@ -4389,6 +4407,7 @@ function freeThrowView() {
     const marker = markerAt(plan, now - aimStart);
     const result = shotResult(marker, plan);
     results.push(result);
+    level = adapt(level, result);
     // The money shows once the ball lands.
     later(() => (result === 'miss' ? hud.flash(score.bad(), false) : hud.flash(score.good(FREE_THROW.pay[result]), true), update()), 900);
     phase = 'flight';
@@ -4411,7 +4430,7 @@ function freeThrowView() {
   update();
   animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), shoot()) }, [
-    el('p', { class: 'note', text: `${t('ftRules', { n: FREE_THROW.shots, swish: fmtMoney(FREE_THROW.pay.swish, { sign: false }), make: fmtMoney(FREE_THROW.pay.make, { sign: false }) })} ${streakRule('freethrow')}` }),
+    el('p', { class: 'note', text: `${t('ftRules', { n: FREE_THROW.shots, swish: fmtPay(FREE_THROW.pay.swish), make: fmtPay(FREE_THROW.pay.make) })} ${streakRule('freethrow')}` }),
     hud.node,
     canvas,
     box
