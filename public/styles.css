@@ -860,13 +860,6 @@ details.market[open] > summary { margin-bottom: 6px; }
 .serial-pr { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 0.72rem; font-weight: 700; vertical-align: middle; white-space: nowrap; }
 .player-line small { color: var(--text-muted); font-size: 0.66rem; }
 
-/* Any-line stepper under a game's markets */
-.line-stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; background: var(--surface); border: 1px dashed var(--axis); border-radius: var(--radius-sm); }
-.line-stepper select { font: inherit; font-size: 0.84rem; padding: 5px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-raised); color: var(--text-primary); max-width: 100%; }
-.stepper { display: inline-flex; align-items: center; gap: 6px; }
-.stepper .ghost-button { width: 32px; height: 32px; padding: 0; font-size: 1.1rem; line-height: 1; }
-.stepper strong { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.line-stepper .primary-button { font-size: 0.82rem; padding: 7px 14px; box-shadow: none; }
 .primary-button:disabled { background: var(--axis); color: var(--text-muted); box-shadow: none; cursor: not-allowed; }
 .ghost-button:disabled { opacity: 0.55; cursor: not-allowed; }
 
@@ -927,3 +920,21 @@ details.market[open] > summary { margin-bottom: 6px; }
 .slip-insight > p { margin-top: 6px; }
 .records li::before { content: '🏅'; }
 #stats-body .table-view th { white-space: nowrap; }
+
+/* A game's other markets: one tab per kind, one row per line */
+.market-tabs { display: flex; width: 100%; margin-bottom: 10px; }
+.market-tabs button { flex: 1 1 0; min-width: 0; padding: 6px 6px; overflow: hidden; text-overflow: ellipsis; }
+.market-panel { display: grid; gap: 12px; }
+.line-table { display: grid; gap: 6px; }
+.line-head, .line-row { display: grid; grid-template-columns: minmax(4.6em, 0.8fr) 1fr 1fr; gap: 8px; align-items: center; }
+.line-head span { font-size: 0.74rem; font-weight: 600; color: var(--text-muted); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line-head span:first-child { text-align: left; color: var(--text-secondary); }
+.line-label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.line-label strong { font-variant-numeric: tabular-nums; font-size: 0.95rem; }
+.line-tag { font-size: 0.66rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--accent-wash); color: var(--accent); white-space: nowrap; }
+.line-row.main .line-tag { background: var(--accent); color: var(--accent-ink); }
+.line-row.posted { border-radius: var(--radius-sm); }
+.line-take .take-pill { font-size: 0.66rem; }
+.line-row .pick, .line-row .pick-wrap { min-width: 0; }
+.market-panel.inning .market-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.line-title { font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); }

@@ -38,7 +38,14 @@ The choice is remembered.
   - 單隊大小 (team totals): the lottery's line for each team, plus 2 either side;
   - 得分最高單局 (top-scoring inning).
 
-  Extra lines whose chance is under 3% or over 97% are left out. **自訂盤口 (any line)** under the markets adds any other line: pick the market, step the line with − / +, add it (up to 25.5 runs for totals, ±9.5 for run lines, 15.5 for team totals; not for lines under 1% or over 99%). Lines the lottery didn't post are priced by the same models at its usual cut and marked unchecked (`?`).
+  Extra lines whose chance is under 3% or over 97% are left out. Lines the lottery didn't post are priced by the same models at its usual cut and marked unchecked (`?`).
+
+  Each kind of market has its own tab (大小分, 讓分, 單隊大小, 得分最高單局), laid out as a table with one row per line:
+  - 大小分: line | 大 | 小, lowest line first;
+  - 讓分: one block per team giving the runs (−1.5 to −4.5): line | that team | the other team;
+  - 單隊大小: one block per team: line | 大 | 小.
+
+  The lottery's own lines are tagged 主盤 (the main line) or 運彩盤; the rest are the wider range. The last tab chosen is kept while the card stays open.
 
   With 詳細 on, each market shows its own house take.
 - **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.

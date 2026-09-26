@@ -116,10 +116,8 @@ const state = {
   // Game cards showing all their markets, and cards showing real-odds boxes.
   open: new Set(),
   editing: new Set(),
-  // Lines added with a game's stepper: `${gameId}|${kind}` -> Set of lines.
-  customLines: new Map(),
-  // Each game's stepper: { kind, line }.
-  stepper: new Map(),
+  // Each open game's market tab (大小分, 讓分, 單隊大小, 得分最高單局).
+  marketTab: new Map(),
   // Off: only the odds and the average back. On: margins, chances, takes, extra stats.
   detail: loadDetail(),
   // The simulated account (play money) and its sync.
@@ -244,19 +242,10 @@ function matchupText(game) {
 // ---- Lines (大小分, 讓分, 單隊大小) -------------------------------------------
 
 // Lines shown besides the lottery's own: totals and team totals this many
-// either side of the main line, run lines up to 4.5 runs either way. Any
-// other line can be added with the stepper under a game's markets.
+// either side of the main line, run lines up to 4.5 runs either way.
 const TOTAL_SPAN = 3;
 const TEAM_TOTAL_SPAN = 2;
 const RUN_LINES = [1.5, 2.5, 3.5, 4.5];
-// How far the stepper goes.
-const STEPPER = {
-  total: { min: 0.5, max: 25.5 },
-  goals: { min: 0.5, max: 9.5 },
-  runline: { min: -9.5, max: 9.5 },
-  teamtotal: { min: 0.5, max: 15.5 }
-};
-
 // Each game's run and goal models, fitted once: fitting team runs is slow.
 const modelCache = new Map();
 function gameModel(game) {
@@ -272,29 +261,12 @@ function gameModel(game) {
   return model;
 }
 
-// The chance behind one line of a game (total or team total over, the away
-// team covering a run line), or null without a model.
-function lineChance(game, kind, line) {
-  const model = gameModel(game);
-  if (kind === 'total') return model.mu == null ? null : totalOverChance(line, model.mu, game.sport === 'mlb' ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION);
-  if (kind === 'runline') return model.grid ? runLineCover(model.grid, line) : null;
-  const team = kind.split('|')[1];
-  return model.means ? teamOverChance(model.means[team], line) : null;
-}
-// A line the viewer adds must not be a near-certainty either way.
-const customOk = p => p >= 0.01 && p <= 0.99;
-
 function fmtLine(line) {
   return `${line > 0 ? '+' : line < 0 ? '−' : ''}${Math.abs(line)}`;
 }
 
-// Lines the viewer added with the stepper, per game and market.
-function customLines(gameId, kind) {
-  return [...(state.customLines.get(`${gameId}|${kind}`) ?? [])];
-}
-
 // Every line of a game's totals, run lines and team totals: the lottery's own
-// (checked against its prices), the wider range and the viewer's own lines.
+// (checked against its prices) and the wider range.
 function lineBets(game, base, matchup) {
   const t = state.t;
   const bets = [];
@@ -310,16 +282,14 @@ function lineBets(game, base, matchup) {
   if (model.mu != null) {
     const r = mlb ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION;
     const main = [...totals.values()].find(l => l.main)?.line ?? Math.floor(model.mu) + 0.5;
-    const wanted = [];
-    for (let d = -TOTAL_SPAN; d <= TOTAL_SPAN; d++) wanted.push({ line: main + d, custom: false });
-    for (const line of customLines(game.id, 'total')) wanted.push({ line, custom: true });
-    for (const { line, custom } of wanted) {
+    for (let d = -TOTAL_SPAN; d <= TOTAL_SPAN; d++) {
+      const line = main + d;
       if (line <= 0 || totals.has(line)) continue;
       const over = totalOverChance(line, model.mu, r);
-      if (custom ? customOk(over) : lineInRange(over) && lineInRange(1 - over)) totals.set(line, { line, over, main: false, posted: false, custom });
+      if (lineInRange(over) && lineInRange(1 - over)) totals.set(line, { line, over, main: false, posted: false });
     }
   }
-  for (const { line, over, main, posted, custom } of [...totals.values()].sort((a, b) => a.line - b.line)) {
+  for (const { line, over, main, posted } of [...totals.values()].sort((a, b) => a.line - b.line)) {
     for (const side of ['over', 'under']) {
       const p = side === 'over' ? over : 1 - over;
       bets.push({
@@ -329,7 +299,7 @@ function lineBets(game, base, matchup) {
         side,
         totalLine: line,
         mainLine: main,
-        custom,
+        posted,
         market: `total|${line}`,
         marketLabel: String(line),
         chip: t(side),
@@ -354,17 +324,16 @@ function lineBets(game, base, matchup) {
       for (const [i, l] of lotteryRunLines(game.spread.awayLine, game.spread.awayFair).entries()) lines.set(l.awayLine, { ...l, posted: true, first: i === 0 });
     }
     if (model.grid) {
-      const wanted = [];
-      for (const abs of RUN_LINES) for (const dir of [-1, 1]) wanted.push({ awayLine: dir * abs, custom: false });
-      for (const awayLine of customLines(game.id, 'runline')) wanted.push({ awayLine, custom: true });
-      for (const { awayLine, custom } of wanted) {
-        if (lines.has(awayLine)) continue;
-        const fair = runLineCover(model.grid, awayLine);
-        if (custom ? customOk(fair) : lineInRange(fair) && lineInRange(1 - fair)) lines.set(awayLine, { awayLine, fair, lottery: fair, posted: false, custom });
+      for (const abs of RUN_LINES) {
+        for (const awayLine of [-abs, abs]) {
+          if (lines.has(awayLine)) continue;
+          const fair = runLineCover(model.grid, awayLine);
+          if (lineInRange(fair) && lineInRange(1 - fair)) lines.set(awayLine, { awayLine, fair, lottery: fair, posted: false });
+        }
       }
     }
     const order = [...lines.values()].sort((a, b) => Math.abs(a.awayLine) - Math.abs(b.awayLine) || a.awayLine - b.awayLine);
-    for (const { awayLine, fair, lottery, posted, first, custom } of order) {
+    for (const { awayLine, fair, lottery, posted, first } of order) {
       const giver = awayLine < 0 ? 'away' : 'home';
       for (const side of ['away', 'home']) {
         const line = side === 'away' ? awayLine : -awayLine;
@@ -377,7 +346,9 @@ function lineBets(game, base, matchup) {
           kind: 'runline',
           side,
           runLine: line,
-          custom,
+          awayLine,
+          giver,
+          posted,
           market: `rl|${awayLine}`,
           marketLabel: `${teamName(game[giver])} ${fmtLine(-Math.abs(awayLine))}`,
           chip: text,
@@ -398,15 +369,11 @@ function lineBets(game, base, matchup) {
   if (model.means) {
     for (const team of ['away', 'home']) {
       const posted = lotteryTeamTotal(model.means[team]).line;
-      const wanted = [];
-      for (let d = -TEAM_TOTAL_SPAN; d <= TEAM_TOTAL_SPAN; d++) wanted.push({ line: posted + d, custom: false });
-      for (const line of customLines(game.id, `teamtotal|${team}`)) wanted.push({ line, custom: true });
-      const seen = new Set();
-      for (const { line, custom } of wanted.sort((a, b) => a.line - b.line)) {
-        if (line <= 0 || seen.has(line)) continue;
+      for (let d = -TEAM_TOTAL_SPAN; d <= TEAM_TOTAL_SPAN; d++) {
+        const line = posted + d;
+        if (line <= 0) continue;
         const over = teamOverChance(model.means[team], line);
-        if (custom ? !customOk(over) : !(lineInRange(over) && lineInRange(1 - over))) continue;
-        seen.add(line);
+        if (!(lineInRange(over) && lineInRange(1 - over))) continue;
         for (const side of ['over', 'under']) {
           const p = side === 'over' ? over : 1 - over;
           bets.push({
@@ -416,7 +383,7 @@ function lineBets(game, base, matchup) {
             side,
             team,
             teamLine: line,
-            custom,
+            posted: line === posted,
             market: `tt|${team}|${line}`,
             marketLabel: `${teamName(game[team])} ${line}`,
             chip: t(side),
@@ -947,20 +914,8 @@ function gameCard(game, bets) {
 // Every other market of a game, one small card each, then the game's details.
 function gameMore(game, bets, editing) {
   const t = state.t;
-  const markets = [];
-  for (const s of SECTIONS.filter(s => s.kind !== 'ml')) {
-    for (const options of groupBy(bets.filter(b => b.kind === s.kind), b => b.market).values()) {
-      const label = options[0].marketLabel ? `${t(s.title)} ${options[0].marketLabel}` : t(s.title);
-      const head = el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: label }), el('span', { class: 'detail-only market-take' }, takePill(options))]);
-      const picks = el('div', { class: 'market-picks' }, options.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)));
-      // The ten-way inning market folds away.
-      markets.push(
-        s.wide
-          ? el('details', { class: 'market wide' }, [el('summary', {}, head), picks])
-          : el('div', { class: 'market' }, [head, picks])
-      );
-    }
-  }
+  const kinds = SECTIONS.filter(sec => sec.kind !== 'ml' && bets.some(b => b.kind === sec.kind));
+  const current = kinds.find(sec => sec.kind === state.marketTab.get(game.id)) ?? kinds[0];
   const sourceKey = game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
   const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
   const notes = [];
@@ -968,8 +923,24 @@ function gameMore(game, bets, editing) {
   if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) notes.push(t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }));
   if (thin) notes.push(t('thin'));
   return el('div', { class: 'game-more' }, [
-    markets.length ? el('div', { class: 'markets' }, markets) : null,
-    lineStepper(game, bets),
+    kinds.length > 1
+      ? el('div', { class: 'segmented market-tabs', role: 'tablist', 'aria-label': t('moreMarkets') },
+          kinds.map(sec =>
+            el('button', {
+              type: 'button',
+              role: 'tab',
+              'aria-selected': String(sec === current),
+              'aria-pressed': String(sec === current),
+              text: t(sec.short ?? sec.title),
+              onclick: () => {
+                state.marketTab.set(game.id, sec.kind);
+                renderGames();
+              }
+            })
+          )
+        )
+      : null,
+    current ? marketPanel(game, current, bets.filter(b => b.kind === current.kind), editing) : null,
     el('div', { class: 'game-foot' }, [
       el('span', { class: 'detail-only', text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }),
       editToggle(game.id, renderGames),
@@ -978,66 +949,67 @@ function gameMore(game, bets, editing) {
   ]);
 }
 
-// Any other line: pick a market, step the line, add it to the card.
-function lineStepper(game, bets) {
+// One line of a two-way market: the line (tagged when the lottery posts it,
+// with the market's take under 詳細) and its two picks.
+function lineRow(label, pair, editing, { posted = false, main = false } = {}) {
   const t = state.t;
-  const model = gameModel(game);
-  const kinds = [];
-  if (model.mu != null) kinds.push({ key: 'total', label: t('secTotal'), range: STEPPER[game.sport === 'mlb' ? 'total' : 'goals'], shown: bets.filter(b => b.kind === 'total').map(b => b.totalLine) });
-  if (model.grid) kinds.push({ key: 'runline', label: `${t('secRunLine')} ${teamName(game.away)}`, range: STEPPER.runline, shown: bets.filter(b => b.kind === 'runline' && b.side === 'away').map(b => b.runLine) });
-  if (model.means) {
-    for (const team of ['away', 'home']) kinds.push({ key: `teamtotal|${team}`, label: `${t('secTeamTotal')} ${teamName(game[team])}`, range: STEPPER.teamtotal, shown: bets.filter(b => b.kind === 'teamtotal' && b.team === team).map(b => b.teamLine) });
-  }
-  if (!kinds.length) return null;
-  const pick = state.stepper.get(game.id) ?? {};
-  const kind = kinds.find(k => k.key === pick.kind) ?? kinds[0];
-  const next = Math.min(kind.range.max, Math.max(...kind.shown, kind.range.min - 1) + 1);
-  let line = pick.kind === kind.key && pick.line != null ? pick.line : next;
-  const set = (patch) => {
-    state.stepper.set(game.id, { kind: kind.key, line, ...patch });
-    renderGames();
-  };
-  const step = dir => {
-    let l = line + dir;
-    // Run lines skip ±0.5 (the same as the win line).
-    if (kind.key === 'runline' && Math.abs(l) < 1) l += dir;
-    if (l >= kind.range.min && l <= kind.range.max) set({ line: l });
-  };
-  const exists = kind.shown.includes(line);
-  const chance = lineChance(game, kind.key, line);
-  const extreme = !customOk(chance);
-  const valueText = kind.key === 'runline' ? `${teamName(game.away)} ${fmtLine(line)}` : String(line);
-  return el('div', { class: 'line-stepper' }, [
-    el('span', { class: 'market-title', text: t('customLine') }),
-    el('select', {
-      'aria-label': t('customLine'),
-      onchange: event => set({ kind: event.target.value, line: null })
-    }, kinds.map(k => {
-      const option = el('option', { value: k.key, text: k.label });
-      if (k.key === kind.key) option.selected = true;
-      return option;
-    })),
-    el('div', { class: 'stepper' }, [
-      el('button', { type: 'button', class: 'ghost-button', 'aria-label': '−', text: '−', onclick: () => step(-1) }),
-      el('strong', { text: valueText }),
-      el('button', { type: 'button', class: 'ghost-button', 'aria-label': '+', text: '+', onclick: () => step(1) })
+  return el('div', { class: `line-row ${posted ? 'posted' : ''} ${main ? 'main' : ''}` }, [
+    el('span', { class: 'line-label' }, [
+      el('strong', { text: label }),
+      posted ? el('small', { class: 'line-tag', text: t(main ? 'lineMain' : 'lineLottery') }) : null,
+      el('small', { class: 'detail-only line-take' }, takePill(pair))
     ]),
-    el('button', {
-      type: 'button',
-      class: 'primary-button',
-      disabled: exists || extreme ? '' : null,
-      text: exists ? t('customLineShown') : extreme ? t('customLineExtreme') : t('customLineAdd'),
-      onclick: () => {
-        const key = `${game.id}|${kind.key}`;
-        if (!state.customLines.has(key)) state.customLines.set(key, new Set());
-        state.customLines.get(key).add(line);
-        state.stepper.delete(game.id);
-        state.bets = buildBets(state.data);
-        renderGames();
-        renderRanking();
-      }
-    })
+    ...pair.map(b => pickButton(b, '', editing))
   ]);
+}
+
+// A block of lines under its own heading: [first column, pick A, pick B].
+function lineTable(heads, rows, title = null) {
+  return el('div', { class: 'line-table' }, [
+    title ? el('p', { class: 'line-title', text: title }) : null,
+    el('div', { class: 'line-head' }, heads.map(text => el('span', { text }))),
+    ...rows
+  ]);
+}
+
+// Each kind of market laid out as a table of its lines.
+function marketPanel(game, section, bets, editing) {
+  const t = state.t;
+  const by = (list, side) => list.find(b => b.side === side);
+  let body;
+  if (section.kind === 'total') {
+    const rows = [...groupBy(bets, b => b.totalLine).values()]
+      .sort((a, b) => a[0].totalLine - b[0].totalLine)
+      .map(pair => lineRow(String(pair[0].totalLine), [by(pair, 'over'), by(pair, 'under')], editing, { posted: pair[0].posted, main: pair[0].mainLine }));
+    body = [lineTable([t('colLine'), t('over'), t('under')], rows)];
+  } else if (section.kind === 'runline') {
+    // One block per team giving the runs: "遊騎兵 讓分" -1.5, -2.5, …
+    body = ['away', 'home']
+      .map(giver => {
+        const taker = giver === 'away' ? 'home' : 'away';
+        const markets = [...groupBy(bets.filter(b => b.giver === giver), b => b.market).values()].sort((a, b) => Math.abs(a[0].awayLine) - Math.abs(b[0].awayLine));
+        if (!markets.length) return null;
+        const rows = markets.map(pair => lineRow(fmtLine(-Math.abs(pair[0].awayLine)), [by(pair, giver), by(pair, taker)], editing, { posted: pair[0].posted }));
+        return lineTable([t('colLine'), teamName(game[giver]), teamName(game[taker])], rows, t('giveRuns', { team: teamName(game[giver]) }));
+      })
+      .filter(Boolean);
+  } else if (section.kind === 'teamtotal') {
+    body = ['away', 'home']
+      .map(team => {
+        const lines = [...groupBy(bets.filter(b => b.team === team), b => b.teamLine).values()].sort((a, b) => a[0].teamLine - b[0].teamLine);
+        if (!lines.length) return null;
+        const rows = lines.map(pair => lineRow(String(pair[0].teamLine), [by(pair, 'over'), by(pair, 'under')], editing, { posted: pair[0].posted, main: pair[0].posted }));
+        return lineTable([t('colLine'), t('over'), t('under')], rows, teamName(game[team]));
+      })
+      .filter(Boolean);
+  } else {
+    body = [
+      el('div', { class: 'market-head' }, [el('span', { class: 'market-title', text: t(section.title) }), el('span', { class: 'detail-only market-take' }, takePill(bets))]),
+      el('div', { class: 'market-picks' }, bets.map(b => pickButton(b, b.chip ?? b.shortLabel, editing)))
+    ];
+  }
+  const extra = bets.some(b => b.posted === false);
+  return el('div', { class: `market-panel ${section.kind}` }, [...body, extra ? el('p', { class: 'note', text: t('linesNote') }) : null]);
 }
 
 // Shows or hides the real-odds boxes of one card.
@@ -1063,7 +1035,7 @@ const SECTIONS = [
   { kind: 'total', title: 'secTotal' },
   { kind: 'runline', title: 'secRunLine' },
   { kind: 'teamtotal', title: 'secTeamTotal' },
-  { kind: 'inning', title: 'secTopInning', wide: true }
+  { kind: 'inning', title: 'secTopInning', short: 'topInningShort' }
 ];
 
 function takePill(bets) {
