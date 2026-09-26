@@ -265,22 +265,24 @@ test('every text the page builds from a key exists in both languages', async () 
   }
 });
 
-test('a typical week is priced like a real board: no sport is cheaper just for being off the board', async () => {
-  const { houseCut } = await import('../public/lib/rules.mjs');
-  for (const sport of SPORTS.filter(sp => SIM_SPORTS[sp].family !== 'racing')) {
-    const bets = sportTemplate(sport);
-    const kinds = new Set(bets.map(b => b.kind));
-    // Side markets as on the real board, not only the winner and a total.
-    assert.ok(kinds.size >= 4, `${sport}: ${[...kinds]}`);
-    // Never a locked pick, and the winner at the house's cut for that league.
-    assert.ok(bets.every(b => !b.lock), sport);
-    // A game with every side on sale (a lopsided game's long side is locked).
-    const sides = SIM_SPORTS[sport].family === 'soccer' ? 3 : 2;
-    const game = [...new Set(bets.map(b => b.gameId))].find(g => bets.filter(b => b.kind === 'ml' && b.gameId === g).length === sides);
-    const ml = bets.filter(b => b.kind === 'ml' && b.gameId === game);
-    const implied = ml.reduce((s, b) => s + 1 / b.odds, 0);
-    assert.ok(implied >= houseCut({ base: 1.153, sport }) - 0.02, `${sport}: ${implied}`);
-    const back = bets.reduce((s, b) => s + b.fairChance * b.odds, 0) / bets.length;
-    assert.ok(back < 0.87, `${sport}: ${back}`);
-  }
+test('fairness audit: no sport or kind of fan does better or worse just from how it is modelled', async () => {
+  const { auditPools, auditCrowd, poolBack } = await import('../public/lib/audit.mjs');
+  const { gameOptions, crowdPool } = await import('../public/lib/board.mjs');
+  const { parseKambiEvents } = await import('../public/lib/kambi.mjs');
+  const { readFileSync } = await import('node:fs');
+  // Every sport's typical week in line with the rest.
+  const templates = Object.fromEntries(SPORTS.map(sp => [sp, sportTemplate(sp)]));
+  assert.deepEqual(auditPools(templates), []);
+  for (const [sport, pool] of Object.entries(templates)) assert.ok(pool.every(b => !b.lock && b.odds > 1), sport);
+  // A real board and the typical week of its sport return the same, within 3.
+  const data = JSON.parse(readFileSync(new URL('./fixtures/kambi-atp-2026-09-26.json', import.meta.url), 'utf8'));
+  const games = parseKambiEvents(data, 'tennis', new Date('2026-09-26T00:00:00Z'));
+  const real = crowdPool(games.flatMap(g => gameOptions(g)));
+  assert.ok(Math.abs(poolBack(real) - poolBack(templates.tennis)) < 3, `${poolBack(real)} vs ${poolBack(templates.tennis)}`);
+  // An inflated stand-in (winners only, a lower cut) is caught.
+  const cheap = templates.nba.filter(b => b.kind === 'ml').map(b => ({ ...b, odds: b.odds * 1.08 }));
+  assert.deepEqual(auditPools({ ...templates, nba: cheap }).map(x => x.sport), ['nba']);
+  // In the crowd, every kind of fan within 5 of the whole crowd's money back.
+  const stats = simulateCrowdStats({ sportPools: Object.fromEntries(Object.entries(templates).map(([sp, b]) => [sp, crowdPools(b)])), startWeek: 38, weeks: 52, perGroup: 80, seed: 1 });
+  assert.deepEqual(auditCrowd(stats), []);
 });

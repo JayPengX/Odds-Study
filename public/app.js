@@ -1,32 +1,14 @@
 import {
-  K_DRAFTKINGS,
-  blendOutcomes,
   FUTURES_OVERROUND,
   ODDS_ERROR,
   backMargin,
   estimateF1LotteryOdds,
   f1Phase,
   estimateFuturesOdds,
-  estimateLotteryOdds,
   analyzeSlip,
   slipPayoutTable,
   expectedReturn,
-  lotteryTotalLines,
-  lotteryRunLines,
-  fitTeamRuns,
-  lotteryTeamTotal,
-  fitTotalRuns,
-  totalOverChance,
-  MLB_TOTAL_DISPERSION,
-  GOALS_DISPERSION,
-  scoreGrid,
-  runLineCover,
-  teamOverChance,
-  lineInRange,
-  estimateLineOdds,
   settleSlip,
-  TOP_INNING_ODDS,
-  MLB_MARKET_OVERROUND,
   median,
   quantile,
   SLIP_RULES,
@@ -34,7 +16,7 @@ import {
   choose,
   seededRandom,
   slipErrors,
-  slipSizes,
+  slipSizes
 } from './lib/odds.mjs';
 import {
   FANS,
@@ -82,8 +64,9 @@ import { pack, unpack } from './lib/codec.mjs';
 import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets } from './lib/teams.mjs';
-import { pointsModel, pointsMarkets, fitHockey, goalMarkets, baseballMarkets, setsMarkets, marketOdds } from './lib/markets.mjs';
-import { houseRule, houseCut, minLegsProblem } from './lib/rules.mjs';
+import { houseRule, minLegsProblem } from './lib/rules.mjs';
+import { gameOptions, crowdPool } from './lib/board.mjs';
+import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
 const STAKE = 100;
@@ -231,234 +214,49 @@ function matchupText(game) {
     : `${teamName(game.away)} @ ${teamName(game.home)}`;
 }
 
-// ---- Lines (大小分, 讓分, 單隊大小) -------------------------------------------
-
-// Lines shown besides the lottery's own: totals and team totals this many
-// either side of the main line, run lines up to 4.5 runs either way.
-const TOTAL_SPAN = 3;
-const TEAM_TOTAL_SPAN = 2;
-const RUN_LINES = [1.5, 2.5, 3.5, 4.5];
-// Each game's run and goal models, fitted once: fitting team runs is slow.
-const modelCache = new Map();
-function gameModel(game) {
-  const key = `${game.id}|${game.total?.line}|${game.total?.overFair}|${game.draftKings?.home}`;
-  if (modelCache.has(key)) return modelCache.get(key);
-  const model = {};
-  const baseball = familyOf(game.sport) === 'baseball';
-  if (game.total && !isSets(game.sport)) model.mu = fitTotalRuns(game.total.line, game.total.overFair, baseball ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION);
-  if (baseball && game.total && game.draftKings) {
-    model.means = fitTeamRuns(game.draftKings.home, game.total.line, game.total.overFair);
-    model.grid = scoreGrid(model.means.home, model.means.away);
-  }
-  modelCache.set(key, model);
-  return model;
-}
+// ---- Names for the board's options (board.mjs prices them) --------------------
 
 function fmtLine(line) {
   return `${line > 0 ? '+' : line < 0 ? '−' : ''}${Math.abs(line)}`;
 }
 
-// Every line of a game's totals, run lines and team totals: the lottery's own
-// (checked against its prices) and the wider range.
-function lineBets(game, base, matchup) {
+// A priced option with what the page calls it: `chip` (on its button),
+// `label` (in full), `shortLabel` (on the slip) and `marketLabel` (its
+// market's heading).
+function named(game, o, matchup) {
   const t = state.t;
-  const bets = [];
-  const model = gameModel(game);
-  const total = game.total;
-  const mlb = game.sport === 'mlb';
-  const baseball = familyOf(game.sport) === 'baseball';
-  // The house's cut on a line `steps` from the main one.
-  const cut = (base, steps) => houseCut({ base, sport: game.sport, steps });
-
-  // 大小分. MLB: the lottery's three lines, modelled from DraftKings' one line
-  // (any line, whole or half). Premier League: DraftKings' own half-goal line.
-  const totals = new Map();
-  if (total && mlb) for (const l of lotteryTotalLines(total.line, total.overFair)) totals.set(l.line, { ...l, posted: true });
-  else if (total && total.line % 1 !== 0) totals.set(total.line, { line: total.line, over: total.overFair, main: true, posted: true });
-  if (model.mu != null) {
-    const r = baseball ? MLB_TOTAL_DISPERSION : GOALS_DISPERSION;
-    const main = [...totals.values()].find(l => l.main)?.line ?? Math.floor(model.mu) + 0.5;
-    for (let d = -TOTAL_SPAN; d <= TOTAL_SPAN; d++) {
-      const line = main + d;
-      if (line <= 0 || totals.has(line)) continue;
-      const over = totalOverChance(line, model.mu, r);
-      if (lineInRange(over) && lineInRange(1 - over)) totals.set(line, { line, over, main: false, posted: false });
+  const team = side => teamName(game[side]);
+  const unit = () => t(`unit_${LEAGUES[game.sport]?.sets?.unit ?? 'points'}`);
+  switch (o.kind) {
+    case 'ml': {
+      const name = o.side === 'draw' ? t('draw') : team(o.side);
+      return { ...o, matchup, chip: name, label: o.side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`, shortLabel: name };
+    }
+    case 'total':
+      return { ...o, matchup, marketLabel: String(o.totalLine), chip: t(o.side), label: `${matchup} ${t(o.side)} ${o.totalLine}`, shortLabel: `${t(o.side)} ${o.totalLine}` };
+    case 'runline': {
+      const text = `${team(o.side)} ${fmtLine(o.runLine)}`;
+      return { ...o, matchup, marketLabel: `${team(o.giver)} ${fmtLine(-Math.abs(o.awayLine))}`, chip: text, label: text, shortLabel: `${t('runLine')} ${text}` };
+    }
+    case 'teamtotal': {
+      const text = `${team(o.team)} ${t(o.side)} ${o.teamLine}`;
+      return { ...o, matchup, marketLabel: `${team(o.team)} ${o.teamLine}`, chip: t(o.side), label: text, shortLabel: text };
+    }
+    case 'inning': {
+      const name = o.inning < 9 ? t('inningN', { n: o.inning + 1 }) : t('inningTie');
+      return { ...o, matchup, chip: name, label: `${matchup} ${t('topInning')} ${name}`, shortLabel: name };
+    }
+    case 'gamehcap': {
+      const text = `${team(o.side)} ${fmtLine(o.line)}`;
+      return { ...o, matchup, marketLabel: `${team(o.giver)} ${fmtLine(-Math.abs(o.awayLine))} ${unit()}`, chip: text, label: text, shortLabel: `${t('secGameHcap')} ${text}` };
+    }
+    case 'gametotal':
+      return { ...o, matchup, marketLabel: `${o.line} ${unit()}`, chip: t(o.side), label: `${matchup} ${t(o.side)} ${o.line}`, shortLabel: `${t(o.side)} ${o.line} ${unit()}` };
+    default: {
+      const name = pickName(game, o.m, o.pick);
+      return { ...o, matchup, marketLabel: marketLabelOf(game, o.m), chip: name, label: `${matchup} ${name}`, shortLabel: name };
     }
   }
-  const mainTotal = [...totals.values()].find(l => l.main)?.line;
-  for (const { line, over, main, posted } of [...totals.values()].sort((a, b) => a.line - b.line)) {
-    const k = cut(K_DRAFTKINGS, posted || mainTotal == null ? 0 : line - mainTotal);
-    for (const side of ['over', 'under']) {
-      const p = side === 'over' ? over : 1 - over;
-      bets.push({
-        ...base,
-        id: `${game.id}|tot|${line}|${side}`,
-        kind: 'total',
-        side,
-        totalLine: line,
-        mainLine: main,
-        posted,
-        market: `total|${line}`,
-        marketLabel: String(line),
-        chip: t(side),
-        // The main line's margin is the usual source gap (filled in below);
-        // the lines either side add the model's error, ~1-3 points.
-        fairMargin: main ? null : posted ? 0.02 : 0.03,
-        errKey: !mlb ? errKeyOf(game.sport) : posted ? 'mlbTotal' : 'mlbTotalExtra',
-        label: `${matchup} ${t(side)} ${line}`,
-        shortLabel: `${t(side)} ${line}`,
-        fairChance: p,
-        cut: k,
-        estOdds: estimateLineOdds(p, k)
-      });
-    }
-  }
-
-  // 讓分: true chance from DraftKings; the lottery's two posted lines priced
-  // from its own (shrunk) chance, which differs from the true one. Other
-  // lines come from the per-team score model at the lottery's usual cut.
-  if (baseball && (game.spread || model.grid)) {
-    const lines = new Map();
-    // MLB: the lottery's two posted lines (its own shrunk chances); other
-    // leagues: the bookmaker's line as it is.
-    if (game.spread && mlb) {
-      for (const [i, l] of lotteryRunLines(game.spread.awayLine, game.spread.awayFair).entries()) lines.set(l.awayLine, { ...l, posted: true, first: i === 0 });
-    } else if (game.spread && game.spread.awayLine % 1 !== 0) {
-      lines.set(game.spread.awayLine, { awayLine: game.spread.awayLine, fair: game.spread.awayFair, lottery: game.spread.awayFair, posted: true, first: true });
-    }
-    if (model.grid) {
-      for (const abs of RUN_LINES) {
-        for (const awayLine of [-abs, abs]) {
-          if (lines.has(awayLine)) continue;
-          const fair = runLineCover(model.grid, awayLine);
-          if (lineInRange(fair) && lineInRange(1 - fair)) lines.set(awayLine, { awayLine, fair, lottery: fair, posted: false });
-        }
-      }
-    }
-    const order = [...lines.values()].sort((a, b) => Math.abs(a.awayLine) - Math.abs(b.awayLine) || a.awayLine - b.awayLine);
-    for (const { awayLine, fair, lottery, posted, first } of order) {
-      const giver = awayLine < 0 ? 'away' : 'home';
-      const k = cut(MLB_MARKET_OVERROUND, posted ? 0 : Math.max(1, Math.abs(awayLine) - 2.5));
-      for (const side of ['away', 'home']) {
-        const line = side === 'away' ? awayLine : -awayLine;
-        const text = `${teamName(game[side])} ${fmtLine(line)}`;
-        const p = side === 'away' ? fair : 1 - fair;
-        const priced = side === 'away' ? lottery : 1 - lottery;
-        bets.push({
-          ...base,
-          id: `${game.id}|rl|${line}|${side}`,
-          kind: 'runline',
-          side,
-          runLine: line,
-          awayLine,
-          giver,
-          posted,
-          market: `rl|${awayLine}`,
-          marketLabel: `${teamName(game[giver])} ${fmtLine(-Math.abs(awayLine))}`,
-          chip: text,
-          // DraftKings' own line has one source; the extra run adds model error.
-          fairMargin: first ? 0.02 : 0.03,
-          errKey: !mlb ? errKeyOf(game.sport) : posted ? 'mlbRunLine' : 'mlbRunLineExtra',
-          label: text,
-          shortLabel: `${t('runLine')} ${text}`,
-          fairChance: p,
-          cut: k,
-          estOdds: estimateLineOdds(priced, k)
-        });
-      }
-    }
-  }
-
-  // 單隊大小: each team's runs from a model fitted to DraftKings' win chance
-  // and total; the lottery's line is the one closest to 50/50.
-  if (model.means) {
-    for (const team of ['away', 'home']) {
-      const posted = lotteryTeamTotal(model.means[team]).line;
-      for (let d = -TEAM_TOTAL_SPAN; d <= TEAM_TOTAL_SPAN; d++) {
-        const line = posted + d;
-        if (line <= 0) continue;
-        const over = teamOverChance(model.means[team], line);
-        if (!(lineInRange(over) && lineInRange(1 - over))) continue;
-        const k = cut(MLB_MARKET_OVERROUND, d);
-        for (const side of ['over', 'under']) {
-          const p = side === 'over' ? over : 1 - over;
-          bets.push({
-            ...base,
-            id: `${game.id}|tt|${team}|${line}|${side}`,
-            kind: 'teamtotal',
-            side,
-            team,
-            teamLine: line,
-            posted: line === posted,
-            market: `tt|${team}|${line}`,
-            marketLabel: `${teamName(game[team])} ${line}`,
-            chip: t(side),
-            fairMargin: line === posted ? 0.03 : 0.04,
-            errKey: !mlb ? errKeyOf(game.sport) : line === posted ? 'mlbTeamTotal' : 'mlbTeamTotalExtra',
-            label: `${teamName(game[team])} ${t(side)} ${line}`,
-            shortLabel: `${teamName(game[team])} ${t(side)} ${line}`,
-            fairChance: p,
-            cut: k,
-            estOdds: estimateLineOdds(p, k)
-          });
-        }
-      }
-    }
-  }
-  return bets;
-}
-
-// Lottery-checked error sizes exist for MLB and the Premier League; every
-// other league uses its kind of sport's (unchecked) one.
-function errKeyOf(sport) {
-  return ['mlb', 'epl'].includes(sport) ? sport : familyOf(sport);
-}
-
-// Every model market of a game (markets.mjs) as bets.
-function marketBets(game, base, matchup, probs) {
-  const t = state.t;
-  const family = familyOf(game.sport);
-  const homeWin = probs.home / (probs.home + probs.away);
-  let markets = [];
-  if (family === 'baseball') markets = baseballMarkets({ homeWin, total: game.total });
-  else if (family === 'football' || family === 'basketball') {
-    const model = pointsModel(game.sport, { homeWin, spread: game.spread, total: game.total });
-    if (model) markets = pointsMarkets(model, { spreadLine: game.spread?.awayLine ?? null, totalLine: game.total?.line ?? null });
-  } else if (family === 'hockey') markets = goalMarkets(fitHockey(homeWin, game.total), { family, totalLine: game.total?.line ?? null });
-  else if (family === 'sets') markets = setsMarkets({ homeWin, bestOf: LEAGUES[game.sport]?.sets?.bestOf });
-  else if (family === 'soccer' && probs.draw != null) {
-    // Totals come from lineBets; the rest from each team's mean goals.
-    markets = goalMarkets(fitGoals(probs.home, probs.away), { family }).filter(m => m.kind !== 'total');
-  }
-  const bets = [];
-  for (const m of markets) {
-    const k = houseCut({ base: m.cut, sport: game.sport, steps: m.steps ?? 0 });
-    for (const pick of m.picks) {
-      const name = pickName(game, m, pick);
-      const bet = {
-        ...base,
-        id: `${game.id}|${m.kind}|${m.market}|${pick.side}`,
-        kind: m.kind,
-        side: pick.side,
-        market: m.market,
-        marketLabel: marketLabelOf(game, m),
-        posted: m.posted ?? false,
-        chip: name,
-        label: `${matchup} ${name}`,
-        shortLabel: name,
-        fairChance: pick.fair,
-        fairMargin: null,
-        errKey: 'extra',
-        cut: k,
-        estOdds: marketOdds(m, pick.fair, k),
-        settle: { lo: pick.lo, hi: pick.hi, score: pick.score, listed: m.listed, team: pick.team, ht: pick.ht, ft: pick.ft, ...(m.line != null && m.kind !== 'total' ? { line: m.line } : {}), ...(pick.line != null && m.kind === 'sethcap' ? { line: pick.line } : {}) }
-      };
-      if (m.kind === 'runline') Object.assign(bet, { runLine: pick.line, awayLine: m.awayLine, giver: m.giver, label: name, shortLabel: `${t('runLine')} ${name}` });
-      if (m.kind === 'total') Object.assign(bet, { totalLine: m.line, mainLine: m.main, chip: t(pick.side), label: `${matchup} ${t(pick.side)} ${m.line}`, shortLabel: `${t(pick.side)} ${m.line}` });
-      bets.push(bet);
-    }
-  }
-  return bets;
 }
 
 // A market's heading inside its section, when it needs one.
@@ -490,67 +288,8 @@ function buildBets(data) {
   const t = state.t;
   const bets = [];
   for (const game of data.games) {
-    const blend = blendOutcomes(game.draftKings, game.polymarket);
-    if (!blend) continue;
     const matchup = matchupText(game);
-    const base = { gameId: game.id, game, sport: game.sport, matchup, start: game.startUtc };
-    const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : ['away', 'home'];
-    // The house's cut on the winner: its measured one for the source, more for
-    // a league it knows less or sources that disagree.
-    const gap = game.draftKings && game.polymarket ? Math.max(...sides.map(side => Math.abs(game.draftKings[side] - game.polymarket[side]) / 2)) : null;
-    const mlCut = houseCut({ base: blend.k, sport: game.sport, fairMargin: gap });
-    for (const side of sides) {
-      const p = blend.probs[side];
-      const name = side === 'draw' ? t('draw') : teamName(game[side]);
-      // The two sources' disagreement is the margin; one source gets the typical one below.
-      const both = game.draftKings && game.polymarket;
-      bets.push({
-        ...base,
-        id: `${game.id}|ml|${side}`,
-        kind: 'ml',
-        side,
-        market: 'ml',
-        chip: name,
-        // Never below half of Polymarket's 1-cent price step.
-        fairMargin: both ? Math.max(0.005, Math.abs(game.draftKings[side] - game.polymarket[side]) / 2) : null,
-        errKey: errKeyOf(game.sport),
-        label: side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`,
-        shortLabel: name,
-        fairChance: p,
-        cut: mlCut,
-        estOdds: estimateLotteryOdds(p, mlCut)
-      });
-    }
-    const family = familyOf(game.sport);
-    // Kambi's own lines in games or points (tennis 讓局數 and 總局數; points in
-    // badminton, table tennis and volleyball), at the two-way cut.
-    if (family === 'sets') bets.push(...unitLineBets(game, base, matchup));
-    // Baseball and soccer totals (and MLB's run lines and team totals) are the
-    // lottery-checked models; the rest of every sport's markets come from markets.mjs.
-    if (family === 'baseball' || family === 'soccer') bets.push(...lineBets(game, base, matchup));
-
-    bets.push(...marketBets(game, base, matchup, blend.probs));
-    // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed.
-    if (game.sport === 'mlb') {
-      const book = TOP_INNING_ODDS.reduce((sum, o) => sum + 1 / o, 0);
-      TOP_INNING_ODDS.forEach((odds, i) => {
-        const name = i < 9 ? t('inningN', { n: i + 1 }) : t('inningTie');
-        bets.push({
-          ...base,
-          id: `${game.id}|inning|${i}`,
-          kind: 'inning',
-          market: 'inning',
-          inning: i,
-          chip: name,
-          fairMargin: null,
-          errKey: 'topInning',
-          label: `${matchup} ${t('topInning')} ${name}`,
-          shortLabel: name,
-          fairChance: 1 / odds / book,
-          estOdds: odds
-        });
-      });
-    }
+    for (const o of gameOptions(game)) bets.push(named(game, o, matchup));
   }
   if (data.f1) {
     // Before qualifying the lottery prices the race on its own curve.
@@ -586,35 +325,10 @@ function buildBets(data) {
   return withHouseRules(bets);
 }
 
-// The lottery's locks and parlay-only rules (rules.mjs), on every pick.
+// The lottery's locks and parlay-only rules (rules.mjs), on every pick
+// (board.mjs already applies them to games; F1 and live picks here).
 function withHouseRules(bets) {
   for (const b of bets) Object.assign(b, houseRule(b.kind, b.estOdds));
-  return bets;
-}
-
-// Kambi's handicap and total in games or points, for matches played in sets.
-function unitLineBets(game, base, matchup) {
-  const t = state.t;
-  const unit = LEAGUES[game.sport]?.sets?.unit ?? 'points';
-  const k = houseCut({ base: 'twoWay', sport: game.sport });
-  const bets = [];
-  if (game.spread) {
-    const { awayLine, awayFair } = game.spread;
-    const giver = awayLine < 0 ? 'away' : 'home';
-    for (const side of ['away', 'home']) {
-      const line = side === 'away' ? awayLine : -awayLine;
-      const p = side === 'away' ? awayFair : 1 - awayFair;
-      const text = `${teamName(game[side])} ${fmtLine(line)}`;
-      bets.push({ ...base, id: `${game.id}|gh|${line}|${side}`, kind: 'gamehcap', side, market: `gh|${awayLine}`, marketLabel: `${teamName(game[giver])} ${fmtLine(-Math.abs(awayLine))} ${t(`unit_${unit}`)}`, chip: text, label: text, shortLabel: `${t('secGameHcap')} ${text}`, line, posted: true, fairChance: p, fairMargin: null, errKey: errKeyOf(game.sport), cut: k, estOdds: estimateLineOdds(p, k), settle: { line } });
-    }
-  }
-  if (game.total) {
-    const { line, overFair } = game.total;
-    for (const side of ['over', 'under']) {
-      const p = side === 'over' ? overFair : 1 - overFair;
-      bets.push({ ...base, id: `${game.id}|gt|${line}|${side}`, kind: 'gametotal', side, market: `gt|${line}`, marketLabel: `${line} ${t(`unit_${unit}`)}`, chip: t(side), label: `${matchup} ${t(side)} ${line}`, shortLabel: `${t(side)} ${line} ${t(`unit_${unit}`)}`, posted: true, fairChance: p, fairMargin: null, errKey: errKeyOf(game.sport), cut: k, estOdds: estimateLineOdds(p, k), settle: { line } });
-    }
-  }
   return bets;
 }
 
@@ -2739,47 +2453,22 @@ function renderStats() {
 
 // ---- Simulator ----------------------------------------------------------------
 
-// Bets per sport that stand in for that sport's games in any week of the
-// year: every market on the board a person can buy (locked ones dropped,
-// each with the house's parlay-only rule), or a typical week when a sport
-// has nothing on (the simulated crowd bets by the same rules as you).
-// Each option carries its slice of its game's shared result, so markets of
-// one game agree: the winner and every handicap line share one draw (the
-// away side's slice first), every total line another (under first).
+// What the crowd bets on, per sport: this board's options as they are (the
+// same options you see, by board.mjs), or a typical week (made-up games run
+// through the same code) for a sport with nothing on today. Every sport is
+// simulated, whatever the sport filter shows. A sport whose pool returns
+// clearly more or less than the rest is flagged (audit.mjs).
 function simSportBets() {
   if (state.simBets?.bets === state.bets) return state.simBets.pools;
-  const slice = b => {
-    const game = `${b.sport}|${b.gameId}`;
-    if (b.kind === 'ml' && b.side !== 'draw' && !isSoccer(b.sport)) {
-      const away = b.side === 'away' ? b.fairChance : 1 - b.fairChance;
-      return { key: `${game}|side`, outLo: b.side === 'away' ? 0 : away, outHi: b.side === 'away' ? away : 1 };
-    }
-    if (b.kind === 'ml') {
-      const probs = Object.fromEntries(state.bets.filter(x => x.gameId === b.gameId && x.kind === 'ml').map(x => [x.side, x.fairChance]));
-      const lo = { away: 0, draw: probs.away ?? 0, home: (probs.away ?? 0) + (probs.draw ?? 0) }[b.side];
-      return { key: `${game}|side`, outLo: lo, outHi: lo + b.fairChance };
-    }
-    if (b.kind === 'runline' || b.kind === 'sethcap' || b.kind === 'gamehcap') {
-      const away = b.side === 'away' ? b.fairChance : 1 - b.fairChance;
-      return { key: `${game}|${b.kind === 'runline' ? 'side' : b.kind}`, outLo: b.side === 'away' ? 0 : away, outHi: b.side === 'away' ? away : 1 };
-    }
-    if (b.kind === 'total' || b.kind === 'teamtotal' || b.kind === 'totalsets' || b.kind === 'gametotal') {
-      const over = b.side === 'over' ? b.fairChance : 1 - b.fairChance;
-      return { key: `${game}|${b.kind}${b.kind === 'teamtotal' ? `|${b.team}` : ''}`, outLo: b.side === 'under' ? 0 : 1 - over, outHi: b.side === 'under' ? 1 - over : 1 };
-    }
-    return { key: `${game}|${b.market ?? b.kind}` };
-  };
-  const real = sport =>
-    state.bets
-      .filter(b => b.sport === sport && !b.lock && !b.live && b.fairChance > 0)
-      .map(b => ({ gameId: b.gameId, kind: b.kind, market: b.market ?? b.kind, fairChance: b.fairChance, odds: effectiveOdds(b), minLegs: b.minLegs ?? 1, ...slice(b) }));
   const pools = Object.fromEntries(
     SPORTS.map(sport => {
-      const bets = real(sport);
+      const bets = crowdPool(state.bets.filter(b => b.sport === sport), effectiveOdds);
       const games = new Set(bets.map(b => b.gameId)).size;
       return [sport, games >= (SIM_SPORTS[sport].family === 'racing' ? 1 : 2) ? bets : sportTemplate(sport)];
     })
   );
+  const flagged = auditPools(pools);
+  if (flagged.length) console.warn('Simulator pools out of line with the rest:', flagged);
   state.simBets = { bets: state.bets, pools };
   return pools;
 }
@@ -2959,6 +2648,8 @@ function drawSim(stats, weeks) {
   renderSurplus(stats, period);
   renderLeaders(stats);
   state.simStats = stats;
+  const unfair = auditCrowd(stats);
+  if (unfair.length) console.warn('Kinds of fan out of line with the crowd:', unfair);
   renderYou();
   if (state.lookup) renderLookup(state.lookup);
   renderSimTable(bands, characters, weeks);
