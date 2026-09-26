@@ -50,7 +50,7 @@ import {
   slipErrors,
   slipSizes,
 } from './lib/odds.mjs';
-import { loadOdds, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
+import { loadOdds, loadExtraLeagues, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
 import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, nextRunChances, nextRunOdds, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
@@ -72,7 +72,8 @@ import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from
 import { pack, unpack } from './lib/codec.mjs';
 import { historyStats, outlookOf, chanceOf, funFacts, crowdPercentile, bettingProfile, closestHabit } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { f1Driver, leagueLogo, teamLogo, teamZh } from './lib/teams.mjs';
+import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer } from './lib/teams.mjs';
+import { pointsModel, pointsMarkets, fitHockey, goalMarkets, baseballMarkets, marketOdds } from './lib/markets.mjs';
 
 const STAKE = 100;
 // Simulated players per habit. Big enough that the results barely move
@@ -242,7 +243,7 @@ function teamName(team) {
 // ---- Bets -------------------------------------------------------------------
 
 function matchupText(game) {
-  return game.sport === 'epl'
+  return isSoccer(game.sport)
     ? `${teamName(game.home)} vs ${teamName(game.away)}`
     : `${teamName(game.away)} @ ${teamName(game.home)}`;
 }
@@ -314,7 +315,7 @@ function lineBets(game, base, matchup) {
         // The main line's margin is the usual source gap (filled in below);
         // the lines either side add the model's error, ~1-3 points.
         fairMargin: main ? null : posted ? 0.02 : 0.03,
-        errKey: !mlb ? game.sport : posted ? 'mlbTotal' : 'mlbTotalExtra',
+        errKey: !mlb ? errKeyOf(game.sport) : posted ? 'mlbTotal' : 'mlbTotalExtra',
         label: `${matchup} ${t(side)} ${line}`,
         shortLabel: `${t(side)} ${line}`,
         fairChance: p,
@@ -409,6 +410,66 @@ function lineBets(game, base, matchup) {
   return bets;
 }
 
+// Lottery-checked error sizes exist for MLB and the Premier League; every
+// other league uses its kind of sport's (unchecked) one.
+function errKeyOf(sport) {
+  return ['mlb', 'epl'].includes(sport) ? sport : familyOf(sport);
+}
+
+// Every model market of a game (markets.mjs) as bets.
+function marketBets(game, base, matchup, probs) {
+  const t = state.t;
+  const family = familyOf(game.sport);
+  const homeWin = probs.home / (probs.home + probs.away);
+  let markets = [];
+  if (family === 'baseball') markets = baseballMarkets({ homeWin, total: game.total });
+  else if (family === 'football' || family === 'basketball') {
+    const model = pointsModel(game.sport, { homeWin, spread: game.spread, total: game.total });
+    if (model) markets = pointsMarkets(model, { spreadLine: game.spread?.awayLine ?? null, totalLine: game.total?.line ?? null });
+  } else if (family === 'hockey') markets = goalMarkets(fitHockey(homeWin, game.total), { family, totalLine: game.total?.line ?? null });
+  else if (family === 'soccer' && probs.draw != null) {
+    // Totals come from lineBets; the rest from each team's mean goals.
+    markets = goalMarkets(fitGoals(probs.home, probs.away), { family }).filter(m => m.kind !== 'total');
+  }
+  const bets = [];
+  for (const m of markets) {
+    for (const pick of m.picks) {
+      const name = pickName(game, m, pick);
+      const bet = {
+        ...base,
+        id: `${game.id}|${m.kind}|${m.market}|${pick.side}`,
+        kind: m.kind,
+        side: pick.side,
+        market: m.market,
+        marketLabel: m.kind === 'runline' || m.kind === 'total' ? null : t(SECTIONS.find(sec => sec.kind === m.kind)?.title ?? m.kind),
+        posted: m.posted ?? false,
+        chip: name,
+        label: `${matchup} ${name}`,
+        shortLabel: name,
+        fairChance: pick.fair,
+        fairMargin: null,
+        errKey: 'extra',
+        estOdds: marketOdds(m, pick.fair),
+        settle: { lo: pick.lo, hi: pick.hi, score: pick.score, listed: m.listed, team: pick.team }
+      };
+      if (m.kind === 'runline') Object.assign(bet, { runLine: pick.line, awayLine: m.awayLine, giver: m.giver, label: name, shortLabel: `${t('runLine')} ${name}` });
+      if (m.kind === 'total') Object.assign(bet, { totalLine: m.line, mainLine: m.main, chip: t(pick.side), label: `${matchup} ${t(pick.side)} ${m.line}`, shortLabel: `${t(pick.side)} ${m.line}` });
+      bets.push(bet);
+    }
+  }
+  return bets;
+}
+
+// What a pick is called: a team, a line, a band, a score …
+function pickName(game, market, pick) {
+  const t = state.t;
+  if (market.kind === 'runline') return `${teamName(game[pick.side])} ${fmtLine(pick.line)}`;
+  if (market.kind === 'margin') return `${teamName(game[pick.team])} ${pick.hi == null ? `${pick.lo}+` : pick.lo === pick.hi ? pick.lo : `${pick.lo}-${pick.hi}`}`;
+  if (market.kind === 'score') return pick.score === 'other' ? t('scoreOther') : pick.score.replace('-', ':');
+  if (pick.side === 'away' || pick.side === 'home') return teamName(game[pick.side]);
+  return t({ draw: 'draw', odd: 'odd', even: 'even', yes: 'yes', no: 'no', over: 'over', under: 'under' }[pick.side] ?? pick.side);
+}
+
 function buildBets(data) {
   const t = state.t;
   const bets = [];
@@ -417,7 +478,7 @@ function buildBets(data) {
     if (!blend) continue;
     const matchup = matchupText(game);
     const base = { gameId: game.id, game, sport: game.sport, matchup, start: game.startUtc };
-    const sides = game.sport === 'epl' ? ['home', 'draw', 'away'] : ['away', 'home'];
+    const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : ['away', 'home'];
     for (const side of sides) {
       const p = blend.probs[side];
       const name = side === 'draw' ? t('draw') : teamName(game[side]);
@@ -432,14 +493,18 @@ function buildBets(data) {
         chip: name,
         // Never below half of Polymarket's 1-cent price step.
         fairMargin: both ? Math.max(0.005, Math.abs(game.draftKings[side] - game.polymarket[side]) / 2) : null,
-        errKey: game.sport,
+        errKey: errKeyOf(game.sport),
         label: side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`,
         shortLabel: name,
         fairChance: p,
         estOdds: estimateLotteryOdds(p, blend.k)
       });
     }
-    bets.push(...lineBets(game, base, matchup));
+    const family = familyOf(game.sport);
+    // Baseball and soccer totals (and MLB's run lines and team totals) are the
+    // lottery-checked models; the rest of every sport's markets come from markets.mjs.
+    if (family === 'baseball' || family === 'soccer') bets.push(...lineBets(game, base, matchup));
+    bets.push(...marketBets(game, base, matchup, blend.probs));
     // 得分最高單局: the lottery's own (nearly fixed) table, its cut removed.
     if (game.sport === 'mlb') {
       const book = TOP_INNING_ODDS.reduce((sum, o) => sum + 1 / o, 0);
@@ -485,7 +550,7 @@ function buildBets(data) {
     }
   }
   // Single-source games: the typical DraftKings-Polymarket gap of that sport.
-  for (const sport of ['mlb', 'epl']) {
+  for (const sport of new Set(bets.map(b => b.sport))) {
     const gaps = bets.filter(b => b.sport === sport && b.fairMargin != null).map(b => b.fairMargin);
     const typical = median(gaps) ?? 0.02;
     for (const b of bets) if (b.sport === sport && b.fairMargin == null && (b.kind === 'ml' || b.kind === 'total')) Object.assign(b, { fairMargin: typical, typicalMargin: true });
@@ -589,7 +654,7 @@ function chip({ pressed, icon, text, count, onclick }) {
 function renderSportFilter() {
   const t = state.t;
   const present = new Set([...state.bets, ...state.futures].map(b => b.sport));
-  const sports = ['all', 'mlb', 'epl', 'nba', 'f1'].filter(s => s === 'all' || present.has(s));
+  const sports = ['all', ...Object.keys(LEAGUES), 'f1'].filter(s => s === 'all' || present.has(s));
   if (!sports.includes(state.sport)) state.sport = 'all';
   const games = sport => (sport === 'f1' ? (state.data.f1 ? 1 : 0) : state.data.games.filter(g => sport === 'all' || g.sport === sport).length);
   $('sport-filter').replaceChildren(
@@ -890,7 +955,7 @@ function gameCard(game, bets) {
   const open = state.open.has(game.id);
   const editing = state.editing.has(game.id);
   const ml = bets.filter(b => b.kind === 'ml');
-  const sides = game.sport === 'epl' ? ['home', 'draw', 'away'] : ['away', 'home'];
+  const sides = isSoccer(game.sport) ? ['home', 'draw', 'away'] : ['away', 'home'];
   const rows = sides.map(side => {
     const bet = ml.find(b => b.side === side);
     const who =
@@ -934,7 +999,8 @@ function gameMore(game, bets, editing) {
   const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
   const notes = [];
   if (game.live) notes.push(t(game.sport === 'mlb' ? 'liveNote' : 'liveNoteSoccer'));
-  if (game.sport === 'epl') notes.push(t('soccerUnverified'));
+  if (isSoccer(game.sport)) notes.push(t('soccerUnverified'));
+  if (['football', 'basketball', 'hockey'].includes(familyOf(game.sport))) notes.push(t('otherSportNote'));
   if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) notes.push(t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }));
   if (thin) notes.push(t('thin'));
   return el('div', { class: 'game-more' }, [
@@ -946,7 +1012,7 @@ function gameMore(game, bets, editing) {
               role: 'tab',
               'aria-selected': String(sec === current),
               'aria-pressed': String(sec === current),
-              text: t(sec.short ?? sec.title),
+              text: t(sec.kind === 'runline' && isSoccer(game.sport) ? 'secHandicap' : sec.short ?? sec.title),
               onclick: () => {
                 state.marketTab.set(game.id, sec.kind);
                 (game.live ? renderLive : renderGames)();
@@ -968,6 +1034,8 @@ function gameMore(game, bets, editing) {
 // with the market's take under 詳細) and its two picks.
 function lineRow(label, pair, editing, { posted = false, main = false } = {}) {
   const t = state.t;
+  // Outside MLB the tagged line is DraftKings' main line, not a checked lottery line.
+  if (posted && pair[0]?.sport !== 'mlb') main = true;
   return el('div', { class: `line-row ${posted ? 'posted' : ''} ${main ? 'main' : ''}` }, [
     el('span', { class: 'line-label' }, [
       el('strong', { text: label }),
@@ -1005,7 +1073,7 @@ function marketPanel(game, section, bets, editing) {
         const markets = [...groupBy(bets.filter(b => b.giver === giver), b => b.market).values()].sort((a, b) => Math.abs(a[0].awayLine) - Math.abs(b[0].awayLine));
         if (!markets.length) return null;
         const rows = markets.map(pair => lineRow(fmtLine(-Math.abs(pair[0].awayLine)), [by(pair, giver), by(pair, taker)], editing, { posted: pair[0].posted }));
-        return lineTable([t('colLine'), teamName(game[giver]), teamName(game[taker])], rows, t('giveRuns', { team: teamName(game[giver]) }));
+        return lineTable([t('colLine'), teamName(game[giver]), teamName(game[taker])], rows, t(isSoccer(game.sport) ? 'giveGoals' : 'giveRuns', { team: teamName(game[giver]) }));
       })
       .filter(Boolean);
   } else if (section.kind === 'teamtotal') {
@@ -1025,7 +1093,9 @@ function marketPanel(game, section, bets, editing) {
     ]);
   }
   const extra = bets.some(b => b.posted === false);
-  return el('div', { class: `market-panel ${section.kind}` }, [...body, extra ? el('p', { class: 'note', text: t('linesNote') }) : null]);
+  // Only MLB's lines were compared with the lottery; elsewhere the main line is DraftKings'.
+  const note = game.sport === 'mlb' ? (extra ? t('linesNote') : null) : ['total', 'runline', 'teamtotal'].includes(section.kind) ? t('linesNoteOther') : null;
+  return el('div', { class: `market-panel ${section.kind}` }, [...body, note ? el('p', { class: 'note', text: note }) : null]);
 }
 
 // Shows or hides the real-odds boxes of one card.
@@ -1052,7 +1122,15 @@ const SECTIONS = [
   { kind: 'runline', title: 'secRunLine' },
   { kind: 'teamtotal', title: 'secTeamTotal' },
   { kind: 'inning', title: 'secTopInning', short: 'topInningShort' },
-  { kind: 'nextrun', title: 'secNextRun' }
+  { kind: 'nextrun', title: 'secNextRun' },
+  { kind: 'margin', title: 'secMargin' },
+  { kind: 'half', title: 'secHalf' },
+  { kind: 'f5', title: 'secF5' },
+  { kind: 'regulation', title: 'secRegulation' },
+  { kind: 'firstinning', title: 'secFirstInning' },
+  { kind: 'btts', title: 'secBtts' },
+  { kind: 'score', title: 'secScore' },
+  { kind: 'oddeven', title: 'secOddEven' }
 ];
 
 function takePill(bets) {
@@ -1070,7 +1148,7 @@ function pickSub(bet) {
 
 function pickTitle(bet) {
   const t = state.t;
-  const err = ODDS_ERROR[bet.errKey];
+  const err = ODDS_ERROR[bet.errKey] ?? ODDS_ERROR.extra;
   return [
     bet.label,
     `${t('legendOdds')} ${fmtOdds(effectiveOdds(bet))}${hasRealOdds(bet) ? ` (${t('tagReal')})` : ` ±${fmtOdds(bet.estOdds * err.rel)}${err.checked ? '' : '?'}`}`,
@@ -1089,7 +1167,7 @@ function pickButton(bet, name, editing) {
   const t = state.t;
   const back = betReturn(bet);
   const inSlip = state.parlay.includes(bet.id);
-  const err = ODDS_ERROR[bet.errKey];
+  const err = ODDS_ERROR[bet.errKey] ?? ODDS_ERROR.extra;
   const add = canAddToSlip(bet);
   const body = [
     name ? el('span', { class: 'pick-name', text: name }) : null,
@@ -1863,7 +1941,7 @@ function renderParlay() {
 
 // The market a pick is from, as a small tag: 不讓分, 大小分, 讓分 …
 function marketTag(kind) {
-  const key = { ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'topInningShort', nextrun: 'secNextRun', f1: 'f1Short', future: 'futuresTitle' }[kind];
+  const key = { ml: 'secMoneyline', total: 'secTotal', runline: 'secRunLine', teamtotal: 'secTeamTotal', inning: 'topInningShort', nextrun: 'secNextRun', margin: 'secMargin', half: 'secHalf', f5: 'secF5', regulation: 'secRegulation', firstinning: 'secFirstInning', btts: 'secBtts', score: 'secScore', oddeven: 'secOddEven', f1: 'f1Short', future: 'futuresTitle' }[kind];
   return key ? el('span', { class: `market-tag tag-${kind}`, text: state.t(key) }) : null;
 }
 
@@ -2054,6 +2132,30 @@ function unlinkSync() {
   renderAccount();
 }
 
+// The logo of the team a pick is on (saved with the pick, so history shows
+// it whatever the board holds later), or null for picks on no one team.
+function legLogo(bet) {
+  if (bet.kind === 'future') return teamLogo(bet.sport, bet.teamEn);
+  const side = bet.kind === 'teamtotal' ? bet.team : bet.settle?.team ?? (['away', 'home'].includes(bet.side) ? bet.side : null);
+  return side && bet.game ? teamLogo(bet.sport, bet.game[side].en) : null;
+}
+
+// A saved pick's picture: its team's logo, the driver's badge, or the league's logo.
+function legIcon(leg) {
+  if (leg.kind === 'f1' && leg.driver) {
+    const driver = f1Driver(leg.driver);
+    return driverBadge({ driverEn: leg.driver, driver }, 'logo-sm');
+  }
+  if (leg.logo) {
+    const fallback = () => leagueImg(leg.sport, 'logo-sm');
+    return logoPicture(leg.logo, leg.logo.includes('/500/') ? leg.logo.replace('/500/', '/500-dark/') : null, 'logo logo-sm', fallback);
+  }
+  const side = leg.kind === 'teamtotal' ? leg.team : ['away', 'home'].includes(leg.side) ? leg.side : null;
+  const url = side && leg[side] ? teamLogo(leg.sport, leg[side]) : null;
+  if (url) return logoPicture(url, teamLogo(leg.sport, leg[side], true), 'logo logo-sm', () => leagueImg(leg.sport, 'logo-sm'));
+  return leagueImg(leg.sport, 'logo-sm');
+}
+
 // What a pick on the slip needs to be settled later, whatever the board shows then.
 function legRecord(bet) {
   return {
@@ -2068,13 +2170,15 @@ function legRecord(bet) {
     fairChance: bet.fairChance,
     side: bet.side ?? null,
     line: bet.totalLine ?? bet.runLine ?? bet.teamLine ?? bet.runN ?? null,
-    team: bet.kind === 'future' ? bet.teamEn : bet.team ?? null,
     inning: bet.inning ?? null,
     away: bet.game?.away.en ?? null,
     home: bet.game?.home.en ?? null,
     driver: bet.driverEn ?? null,
     eventSlug: bet.eventSlug ?? null,
-    live: bet.live ? true : undefined
+    live: bet.live ? true : undefined,
+    ...(bet.settle ?? {}),
+    team: bet.kind === 'future' ? bet.teamEn : bet.settle?.team ?? bet.team ?? null,
+    logo: legLogo(bet)
   };
 }
 
@@ -2278,6 +2382,7 @@ function savedSlipCard(slip) {
       slip.legs.map((leg, k) =>
         el('li', { class: `leg-${states[k]}` }, [
           el('span', { class: 'leg-result', 'aria-label': t(`legState_${states[k]}`), title: t(`legState_${states[k]}`), text: LEG_ICON[states[k]] }),
+          legIcon(leg),
           legMain(leg),
           el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(leg.odds))])
         ])
@@ -3671,6 +3776,13 @@ async function load() {
   try {
     state.data = await loadOdds(new Date(), onProgress);
     renderAll();
+    // The other leagues join once they arrive.
+    loadExtraLeagues(new Date()).then(games => {
+      if (!games.length || !state.data) return;
+      const ids = new Set(state.data.games.map(g => g.id));
+      state.data.games = [...state.data.games, ...games.filter(g => !ids.has(g.id))].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+      renderAll();
+    }, error => console.error(error));
     // Opened on the simulator: the page opens once its simulation is ready.
     if (state.booting && state.tab === 'sim') await renderSim();
   } catch (error) {

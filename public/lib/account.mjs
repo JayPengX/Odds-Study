@@ -8,6 +8,7 @@
 // devices' copies merge by taking the union, and nothing counts twice.
 import { settleSlip } from './odds.mjs';
 import { taipeiDayKey } from './sources.mjs';
+import { isSoccer } from './teams.mjs';
 
 export const START_BALANCE = 10_000;
 export const WEEKLY_GRANT = 5_000;
@@ -107,6 +108,39 @@ export function legResult(leg, outcome) {
     case 'teamtotal': {
       const runs = leg.team === 'away' ? away : home;
       return push(leg.side === 'over' ? runs - leg.line : leg.line - runs);
+    }
+    case 'oddeven':
+      return win((away + home) % 2 === (leg.side === 'odd' ? 1 : 0));
+    case 'btts':
+      return win((away > 0 && home > 0) === (leg.side === 'yes'));
+    case 'margin': {
+      // The picked team winning by lo to hi (no upper end when hi is null).
+      const m = leg.team === 'home' ? home - away : away - home;
+      return win(m >= leg.lo && (leg.hi == null || m <= leg.hi));
+    }
+    case 'score': {
+      // Correct score, written home-away; 'other' is any score not listed.
+      const final = `${home}-${away}`;
+      return win(leg.score === 'other' ? !(leg.listed || []).includes(final) : leg.score === final);
+    }
+    case 'half':
+    case 'f5':
+    case 'regulation': {
+      // Part of the game, from the period scores: the first half (one soccer
+      // half, two quarters), the first five innings, or hockey's three periods.
+      const periods = leg.kind === 'f5' ? 5 : leg.kind === 'regulation' ? 3 : leg.sport && isSoccer(leg.sport) ? 1 : 2;
+      const a = outcome.awayInnings || [];
+      const h = outcome.homeInnings || [];
+      if (!a.length && !h.length) return null;
+      const sum = list => list.slice(0, periods).reduce((s, x) => s + (Number(x) || 0), 0);
+      const pa = sum(a);
+      const ph = sum(h);
+      return win(leg.side === 'draw' ? pa === ph : leg.side === 'away' ? pa > ph : ph > pa);
+    }
+    case 'firstinning': {
+      if (!outcome.awayInnings?.length) return null;
+      const runs = (Number(outcome.awayInnings[0]) || 0) + (Number(outcome.homeInnings?.[0]) || 0);
+      return win((runs > 0) === (leg.side === 'yes'));
     }
     case 'nextrun': {
       // The game's Nth run: whose it was, or no one's if the game ended first.

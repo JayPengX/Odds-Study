@@ -120,6 +120,13 @@ export const ODDS_ERROR = {
   live: { rel: 0.08, checked: true },
   liveSoccer: { rel: 0.1, checked: false },
   liveNextRun: { rel: 0.07, checked: true }, // 第N分: 6 prices, one snapshot
+  // Leagues and markets never compared with the lottery: DraftKings' lines at
+  // the lottery's usual cut (see markets.mjs).
+  soccer: { rel: 0.1, checked: false },
+  football: { rel: 0.1, checked: false },
+  basketball: { rel: 0.1, checked: false },
+  hockey: { rel: 0.1, checked: false },
+  extra: { rel: 0.12, checked: false },
   topInning: { rel: 0.03, checked: true }, // the lottery's own table, 8 games
   epl: { rel: 0.1, checked: false }, // soccer never checked
   f1: { rel: 0.1, checked: true }, // 8 prices, race eve

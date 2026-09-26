@@ -26,6 +26,7 @@ The choice is remembered.
   - MLB games up to the end of tomorrow, Taiwan time.
   - The Premier League's next matchweek, once its first game is within 3 days.
   - Championships, NBA included only from its opening night (the first Tuesday on or after 19 October) to the end of June.
+  - **More sports**, from ESPN (DraftKings' lines), each listed whenever it has games with odds: NFL and college football (the current week, 5 days ahead), NBA, WNBA and NHL (to the end of tomorrow), and 12 more soccer leagues (La Liga, Serie A, Bundesliga, Ligue 1, Champions League, Europa League, Eredivisie, Primeira Liga, Championship, MLS, Liga MX, J1 League; 3 days ahead). They load in the background after the page opens, so they never hold it up. Team logos come from ESPN's scoreboards.
   - The next F1 race winner, with **every** driver the market prices, named as the lottery writes them (G.羅素, AK.安東內利 …).
 - **Filters:** sport tiles (league logo, name and games listed) and a day strip (weekday or 今天/明天, the date and what's on). Every league logo sits on the same small white disc in both themes (as in Match-Find); the Premier League shows just its purple lion, cropped by ESPN's own resizer.
 - **Game cards** show the league logo, the kick-off time, the team logos and the win picks.
@@ -37,6 +38,14 @@ The choice is remembered.
   - 讓分 (run lines): the lottery's ±1.5 and ±2.5, plus 1.5 to 4.5 runs given by either team;
   - 單隊大小 (team totals): the lottery's line for each team, plus 2 either side;
   - 得分最高單局 (top-scoring inning).
+
+  - **Every sport's fun markets** (`public/lib/markets.mjs`), from a model of the final score fitted to DraftKings' lines:
+    - baseball: 單雙 (odd/even runs), 勝分差 (winning margin: each team by 1, 2, 3–4, 5+), 首局得分 (a run in the 1st), 前五局 (first five innings, a tie possible);
+    - football and basketball (home margin and total as normals, each league's usual spread: NFL 13.5 and 10.5 points, college 16 and 14, NBA 12.5 and 18, WNBA 11 and 14): 讓分 and 大小分 at DraftKings' line and two steps either side, 單雙, 勝分差 bands, 上半場 (first half, a tie possible);
+    - hockey (goals): puck lines ±1.5 and ±2.5 both ways, totals, 60分鐘勝負 (regulation, a tie possible), 單雙;
+    - soccer (goals): 讓球 (the favourite giving 0.5 to 2.5 goals), 雙方進球 (both teams score), 波膽 (16 correct scores and any other), 上半場 (45% of the goals come before the break), 單雙.
+
+    All at the lottery's cut: two-way markets at its measured MLB cut (1.158, a take of about 14%); three-way markets 1.20 (17%), winning-margin bands 1.35 (26%) and correct score 1.50 (33%), in line with the bigger cuts it takes on its many-outcome markets (the top-scoring inning 1.92, 第N分 1.31). None of the new sports or markets has been compared with real lottery prices yet, so they're marked unchecked (`?`), and the tagged main line is DraftKings'.
 
   Extra lines whose chance is under 3% or over 97% are left out. Lines the lottery didn't post are priced by the same models at its usual cut and marked unchecked (`?`).
 
@@ -106,7 +115,7 @@ The choice is remembered.
   - 已確定沒中: open, but nothing left can pay (a parlay with a lost pick) while its other games finish;
   - settled slips by the day they settled (今天, 昨天, then dates); 10 shown, the rest behind a button.
 
-  Each card shows the mode, the number of games and when it was bought; a bar with one segment per pick (green won, red lost, grey void, pulsing red in play, empty not started); how many games are over and when the next one starts; each pick with its state (✓ ✗ ↺ ● ⏳), market tag and odds; and large figures: cost, total odds (parlays), what is already locked in and the most it can still pay, or once settled the payout and profit. Each slip folds out what the odds said when it was bought: its average payout, the chance of any payout, each pick's fair chance and value per NT$100, and once settled, its result against that average (luck) and the tax withheld.
+  Each pick shows its team's logo (saved with the pick, so it stays after the board moves on), the driver's badge for F1, or the league's logo for picks on no one team (單雙, 波膽 …).   Each card shows the mode, the number of games and when it was bought; a bar with one segment per pick (green won, red lost, grey void, pulsing red in play, empty not started); how many games are over and when the next one starts; each pick with its state (✓ ✗ ↺ ● ⏳), market tag and odds; and large figures: cost, total odds (parlays), what is already locked in and the most it can still pay, or once settled the payout and profit. Each slip folds out what the odds said when it was bought: its average payout, the chance of any payout, each pick's fair chance and value per NT$100, and once settled, its result against that average (luck) and the tax withheld.
 - **統計與分析 (stats and analysis)**, from `public/lib/history.mjs`:
   - key numbers: slips settled, staked, paid after tax, net, back per NT$100 and the share of slips that paid, each against what the odds said to expect;
   - the balance over time, a step line with payouts and weekly claims marked;

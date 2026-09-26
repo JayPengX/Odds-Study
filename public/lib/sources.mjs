@@ -3,7 +3,7 @@
 // markets through the shared sports proxy, which adds the CORS headers
 // Polymarket doesn't send.
 import { americanToProbability, devigProportional, devigPower } from './odds.mjs';
-import { normalizeTeamName, teamZh } from './teams.mjs';
+import { normalizeTeamName, teamZh, LEAGUES, familyOf, isSoccer, rememberLogo } from './teams.mjs';
 import { runOrder } from './live.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
@@ -68,10 +68,18 @@ export function nextMatchweek(games) {
 // once that round is close.
 export function lotteryGames(games, now) {
   const windowEnd = lotteryWindowEnd(now).getTime();
-  const mlb = games.filter(g => g.sport === 'mlb' && Date.parse(g.startUtc) < windowEnd);
+  const within = (g, days) => Date.parse(g.startUtc) < lotteryWindowEnd(now, days).getTime();
   const round = nextMatchweek(games.filter(g => g.sport === 'epl'));
   const epl = round.length && Date.parse(round[0].startUtc) < lotteryWindowEnd(now, EPL_OPEN_DAYS).getTime() ? round : [];
-  return [...mlb, ...epl].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+  const rest = games.filter(g => {
+    if (g.sport === 'epl') return false;
+    const family = familyOf(g.sport);
+    // Weekly sports (football, soccer) a few days ahead; daily ones to the end of tomorrow.
+    if (family === 'football') return within(g, 5);
+    if (family === 'soccer') return within(g, EPL_OPEN_DAYS);
+    return Date.parse(g.startUtc) < windowEnd;
+  });
+  return [...rest, ...epl].sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 }
 
 // Championship markets. Polymarket lists next season's market before this
@@ -127,10 +135,11 @@ export function parseEspnScoreboard(data, sport) {
     const comp = event.competitions?.[0];
     if (!comp || comp.status?.type?.state !== 'pre') continue;
     const teams = Object.fromEntries(comp.competitors.map(c => [c.homeAway, c.team.displayName]));
+    for (const c of comp.competitors) rememberLogo(sport, c.team.displayName, c.team.logo);
     const odds = comp.odds?.[0];
     const ml = odds?.moneyline;
     let outcomes = null;
-    if (sport === 'epl') {
+    if (isSoccer(sport)) {
       const fair = devigProportional([closeProbability(ml?.away), closeProbability(ml?.draw), closeProbability(ml?.home)]);
       if (fair) outcomes = { away: fair[0], draw: fair[1], home: fair[2] };
     } else {
@@ -152,7 +161,10 @@ export function parseEspnScoreboard(data, sport) {
     if (awaySpread?.line && homeSpread) {
       const awayLine = Number(awaySpread.line);
       const fair = devigProportional([americanToProbability(awaySpread.odds), americanToProbability(homeSpread.odds)]);
-      if (Number.isFinite(awayLine) && awayLine % 1 !== 0 && fair) spread = { awayLine, awayFair: fair[0] };
+      // Baseball and soccer lines are half runs/goals; football and basketball
+      // lines can be whole points (a push is rare enough to ignore).
+      const whole = ['football', 'basketball'].includes(familyOf(sport));
+      if (Number.isFinite(awayLine) && (whole || awayLine % 1 !== 0) && fair) spread = { awayLine, awayFair: fair[0] };
     }
     games.push({ sport, startUtc: new Date(event.date).toISOString(), away: teams.away, home: teams.home, outcomes, total, spread });
   }
@@ -182,11 +194,30 @@ export function eplMatchdays(scoreboard, now) {
 }
 
 async function fetchEspnEpl(now) {
-  const scoreboard = await getJson(`${ESPN}/soccer/eng.1/scoreboard`);
-  const days = eplMatchdays(scoreboard, now);
-  if (days.length === 0) return parseEspnScoreboard(scoreboard, 'epl');
-  return fetchEspnDays('epl', 'soccer/eng.1', days);
+  return fetchSoccer('epl', now);
 }
+
+// Soccer leagues: their calendar's matchdays in the next three weeks.
+async function fetchSoccer(key, now) {
+  const path = LEAGUES[key].path;
+  const scoreboard = await getJson(`${ESPN}/${path}/scoreboard`);
+  const days = eplMatchdays(scoreboard, now);
+  if (days.length === 0) return parseEspnScoreboard(scoreboard, key);
+  return fetchEspnDays(key, path, days);
+}
+
+// Every other league: football's current week (its default scoreboard),
+// daily sports from yesterday to two days ahead (US dates run behind Taiwan's).
+async function fetchLeague(key, now) {
+  const { family, path } = LEAGUES[key];
+  if (family === 'soccer') return fetchSoccer(key, now);
+  if (family === 'football') return parseEspnScoreboard(await getJson(`${ESPN}/${path}/scoreboard`), key);
+  return fetchEspnDays(key, path, [-1, 0, 1, 2].map(d => new Date(now.getTime() + d * DAY_MS)));
+}
+
+// Leagues fetched from ESPN alone (DraftKings); MLB and the Premier League
+// also have Polymarket.
+export const EXTRA_LEAGUES = Object.keys(LEAGUES).filter(key => !['mlb', 'epl'].includes(key));
 
 // ---- Polymarket ---------------------------------------------------------------
 
@@ -410,7 +441,7 @@ export async function loadOdds(now = new Date(), onProgress) {
 
 // ---- Results (for saved slips) ------------------------------------------------
 
-const ESPN_PATH = { mlb: 'baseball/mlb', epl: 'soccer/eng.1' };
+const ESPN_PATH = Object.fromEntries(Object.entries(LEAGUES).map(([key, league]) => [key, league.path]));
 const VOID_STATUS = /POSTPONED|CANCELED|CANCELLED|FORFEIT|ABANDONED/;
 
 // Every game on an ESPN scoreboard with how it stands: 'final', 'void'
@@ -642,4 +673,12 @@ export async function loadLive(now = new Date(), minLiquidity = 5000) {
 async function fetchPolymarketLiveEvents(tagId, now) {
   const since = new Date(now.getTime() - 6 * 3_600_000).toISOString();
   return getJson(`${GAMMA}/events?tag_id=${tagId}&closed=false&limit=100&order=startTime&ascending=true&start_time_min=${since}`, 'polymarket-events');
+}
+
+// Every other league (ESPN / DraftKings only), fetched after the page opens
+// so they don't hold it up. A league that fails is left out.
+export async function loadExtraLeagues(now = new Date()) {
+  const results = await Promise.allSettled(EXTRA_LEAGUES.map(key => fetchLeague(key, now)));
+  const games = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
+  return lotteryGames(mergeGames(games, []), now);
 }

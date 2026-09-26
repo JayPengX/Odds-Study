@@ -150,6 +150,42 @@ const EPL_ESPN_ID = {
   'west ham united': 371, 'wolverhampton wanderers': 380, wolves: 380
 };
 
+// Every league the page lists: ESPN path, kind of sport (which markets it
+// gets) and ESPN's league logo id for soccer. Order is the sport filter's.
+export const LEAGUES = {
+  mlb: { family: 'baseball', path: 'baseball/mlb' },
+  nfl: { family: 'football', path: 'football/nfl' },
+  ncaaf: { family: 'football', path: 'football/college-football' },
+  nba: { family: 'basketball', path: 'basketball/nba' },
+  wnba: { family: 'basketball', path: 'basketball/wnba' },
+  nhl: { family: 'hockey', path: 'hockey/nhl' },
+  epl: { family: 'soccer', path: 'soccer/eng.1', logo: 23 },
+  laliga: { family: 'soccer', path: 'soccer/esp.1', logo: 15 },
+  seriea: { family: 'soccer', path: 'soccer/ita.1', logo: 12 },
+  bundesliga: { family: 'soccer', path: 'soccer/ger.1', logo: 10 },
+  ligue1: { family: 'soccer', path: 'soccer/fra.1', logo: 9 },
+  ucl: { family: 'soccer', path: 'soccer/uefa.champions', logo: 2 },
+  uel: { family: 'soccer', path: 'soccer/uefa.europa', logo: 2310 },
+  eredivisie: { family: 'soccer', path: 'soccer/ned.1', logo: 11 },
+  primeira: { family: 'soccer', path: 'soccer/por.1', logo: 14 },
+  championship: { family: 'soccer', path: 'soccer/eng.2', logo: 24 },
+  mls: { family: 'soccer', path: 'soccer/usa.1', logo: 19 },
+  ligamx: { family: 'soccer', path: 'soccer/mex.1', logo: 22 },
+  jleague: { family: 'soccer', path: 'soccer/jpn.1', logo: 2199 }
+};
+
+export function familyOf(sport) {
+  return sport === 'f1' ? 'racing' : LEAGUES[sport]?.family ?? null;
+}
+
+export const isSoccer = sport => familyOf(sport) === 'soccer';
+
+// Logos ESPN's scoreboards give for teams of leagues without a table here.
+const seenLogos = new Map();
+export function rememberLogo(sport, name, url) {
+  if (url) seenLogos.set(`${sport}|${normalizeTeamName(name)}`, url);
+}
+
 // Logo URL for a team (English name as the sources write it), or null. ESPN
 // has a version of every logo for dark backgrounds (`dark`).
 export function teamLogo(sport, name, dark = false) {
@@ -161,7 +197,9 @@ export function teamLogo(sport, name, dark = false) {
     const id = EPL_ESPN_ID[normalizeTeamName(name)];
     return id ? `${base}/soccer/${size}/${id}.png` : null;
   }
-  return null;
+  const seen = seenLogos.get(`${sport}|${normalizeTeamName(name)}`);
+  if (!seen) return null;
+  return dark ? seen.replace('/500/', '/500-dark/') : seen;
 }
 
 // The league's own logo.
@@ -170,8 +208,10 @@ export function leagueLogo(sport, dark = false) {
   // The lion alone: ESPN's own resizer crops the top of its logo, clear of
   // the "Premier League" wordmark (the same crop Match-Find uses).
   if (sport === 'epl') return 'https://a.espncdn.com/combiner/i?img=/i/leaguelogos/soccer/500/23.png&w=128&h=80&scale=crop&location=origin';
-  if (['mlb', 'nba', 'f1'].includes(sport)) return `https://a.espncdn.com/i/teamlogos/leagues/${size}/${sport}.png`;
-  return null;
+  if (['mlb', 'nba', 'f1', 'nfl', 'nhl', 'wnba'].includes(sport)) return `https://a.espncdn.com/i/teamlogos/leagues/${size}/${sport}.png`;
+  if (sport === 'ncaaf') return 'https://a.espncdn.com/i/espn/misc_logos/500/ncaa_football.png';
+  const id = LEAGUES[sport]?.logo;
+  return id ? `https://a.espncdn.com/i/leaguelogos/soccer/500/${id}.png` : null;
 }
 
 // 2026 F1 grid: each driver's team and its colour, for the driver badges.
