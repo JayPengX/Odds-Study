@@ -116,6 +116,9 @@ export const ODDS_ERROR = {
   mlbTotalExtra: { rel: 0.05, checked: false },
   mlbRunLineExtra: { rel: 0.06, checked: false },
   mlbTeamTotalExtra: { rel: 0.05, checked: false },
+  // Live (場中): one lottery snapshot, 6 prices (see tests/fixtures/lottery-live-2026-09-26.json).
+  live: { rel: 0.08, checked: true },
+  liveSoccer: { rel: 0.1, checked: false },
   topInning: { rel: 0.03, checked: true }, // the lottery's own table, 8 games
   epl: { rel: 0.1, checked: false }, // soccer never checked
   f1: { rel: 0.1, checked: true }, // 8 prices, race eve

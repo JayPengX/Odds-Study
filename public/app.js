@@ -50,7 +50,8 @@ import {
   slipErrors,
   slipSizes,
 } from './lib/odds.mjs';
-import { loadOdds, taipeiDayKey, fetchOutcomes } from './lib/sources.mjs';
+import { loadOdds, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
+import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
   WEEKLY_GRANT,
@@ -71,7 +72,7 @@ import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from
 import { pack, unpack } from './lib/codec.mjs';
 import { historyStats, outlookOf, chanceOf } from './lib/history.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { f1Driver, leagueLogo, teamLogo } from './lib/teams.mjs';
+import { f1Driver, leagueLogo, teamLogo, teamZh } from './lib/teams.mjs';
 
 const STAKE = 100;
 // Simulated players per habit. Big enough that the results barely move
@@ -103,6 +104,10 @@ const state = {
   data: null,
   bets: [],
   futures: [],
+  // Games in progress and their live bets.
+  liveGames: [],
+  liveBets: [],
+  liveAt: null,
   userOdds: loadUserOdds(),
   parlay: [],
   slipMode: 'single',
@@ -565,6 +570,7 @@ function rerenderFiltered() {
   renderDayFilter();
   renderRanking();
   renderGames();
+  renderLive();
   renderFutures();
   renderF1();
 }
@@ -703,6 +709,7 @@ function renderStatic() {
   for (const [id, key] of [
     ['ranking-title', 'rankingTitle'],
     ['games-title', 'gamesTitle'],
+    ['live-title', 'liveTitle'],
     ['futures-title', 'futuresTitle'],
     ['parlay-title', 'parlayTitle'],
     ['account-title', 'accountTitle'],
@@ -877,6 +884,7 @@ function hhmm(iso) {
 // A game: its teams with logos and win picks; every other market folds away.
 function gameCard(game, bets) {
   const t = state.t;
+  const rerender = game.live ? renderLive : renderGames;
   const open = state.open.has(game.id);
   const editing = state.editing.has(game.id);
   const ml = bets.filter(b => b.kind === 'ml');
@@ -890,18 +898,21 @@ function gameCard(game, bets) {
             logoImg(game.sport, game[side].en, teamName(game[side])),
             el('span', { class: 'team-name' }, [document.createTextNode(teamName(game[side])), el('small', { text: t(side === 'home' ? 'homeTag' : 'awayTag') })])
           ];
-    return el('div', { class: 'team-row' }, [...who, bet ? pickButton(bet, '', editing) : null]);
+    const score = game.live && side !== 'draw' ? el('span', { class: 'live-score', text: String(game.live[`${side}Score`]) }) : null;
+    return el('div', { class: 'team-row' }, [...who, score, bet ? pickButton(bet, '', editing) : null]);
   });
   const others = bets.filter(b => b.kind !== 'ml');
   const toggle = () => {
     if (state.open.has(game.id)) state.open.delete(game.id);
     else state.open.add(game.id);
-    renderGames();
+    rerender();
   };
-  return el('article', { class: `game ${open ? 'open' : ''}` }, [
+  return el('article', { class: `game ${open ? 'open' : ''} ${game.live ? 'live' : ''}` }, [
     el('div', { class: 'game-top' }, [
       leagueImg(game.sport, 'logo-xs'),
-      el('span', { class: 'game-time', text: hhmm(game.startUtc) }),
+      game.live
+        ? el('span', { class: 'game-time live-state' }, [el('span', { class: 'live-dot', text: t('tagLive') }), document.createTextNode(liveStateText(game.live))])
+        : el('span', { class: 'game-time', text: hhmm(game.startUtc) }),
       ml.length ? el('span', { class: 'game-take detail-only' }, takePill(ml)) : null
     ]),
     el('div', { class: 'team-rows' }, rows),
@@ -917,9 +928,10 @@ function gameMore(game, bets, editing) {
   const t = state.t;
   const kinds = SECTIONS.filter(sec => sec.kind !== 'ml' && bets.some(b => b.kind === sec.kind));
   const current = kinds.find(sec => sec.kind === state.marketTab.get(game.id)) ?? kinds[0];
-  const sourceKey = game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
+  const sourceKey = game.live ? (game.live.pmWin != null ? 'liveSourcePm' : 'liveSource') : game.draftKings && game.polymarket ? 'sourceBoth' : game.draftKings ? 'sourceDk' : 'sourcePm';
   const thin = sourceKey === 'sourcePm' && (game.polymarketLiquidity ?? 0) < THIN_LIQUIDITY;
   const notes = [];
+  if (game.live) notes.push(t(game.sport === 'mlb' ? 'liveNote' : 'liveNoteSoccer'));
   if (game.sport === 'epl') notes.push(t('soccerUnverified'));
   if (game.sport !== 'mlb' && game.total && game.total.line % 1 === 0) notes.push(t('wholeLine', { line: game.total.line, a: game.total.line - 0.5, b: game.total.line + 0.5 }));
   if (thin) notes.push(t('thin'));
@@ -935,7 +947,7 @@ function gameMore(game, bets, editing) {
               text: t(sec.short ?? sec.title),
               onclick: () => {
                 state.marketTab.set(game.id, sec.kind);
-                renderGames();
+                (game.live ? renderLive : renderGames)();
               }
             })
           )
@@ -944,7 +956,7 @@ function gameMore(game, bets, editing) {
     current ? marketPanel(game, current, bets.filter(b => b.kind === current.kind), editing) : null,
     el('div', { class: 'game-foot' }, [
       el('span', { class: 'detail-only', text: `${fmtTime(game.startUtc)} · ${t(sourceKey)}` }),
-      editToggle(game.id, renderGames),
+      editToggle(game.id, game.live ? renderLive : renderGames),
       notes.length ? el('details', { class: 'info detail-only' }, [el('summary', { text: t('notesTitle') }), ...notes.map(text => el('p', { text }))]) : null
     ])
   ]);
@@ -1148,6 +1160,102 @@ function onUserOdds(bet, raw) {
   renderSim();
 }
 
+// ---- Live (場中) --------------------------------------------------------------------
+
+// "4局下 1出局", "中場", "67'".
+function liveStateText(live) {
+  const t = state.t;
+  if (live.sport !== 'mlb') return live.minute >= 45 && /half/i.test(live.detail) ? t('liveHalfTime') : `${live.minute}'`;
+  const text = t(`liveHalf_${live.half}`, { n: live.inning });
+  return live.half === 'top' || live.half === 'bottom' ? `${text} ${t('liveOuts', { n: live.outs })}` : text;
+}
+
+// Every live game as a game card's data, and its bets at live odds.
+function buildLiveBets(data) {
+  const t = state.t;
+  const games = [];
+  const bets = [];
+  for (const g of data?.games ?? []) {
+    const pre = g.pregame;
+    let dist;
+    if (g.sport === 'mlb') {
+      if (!pre.totalLine) continue;
+      const means = pregameRuns({ homeWin: pre.homeWin, totalLine: pre.totalLine, overFair: pre.overFair });
+      const left = inningsLeft(g);
+      dist = liveBaseball({ means, awayScore: g.awayScore, homeScore: g.homeScore, awayLeft: left.away, homeLeft: left.home });
+    } else {
+      if (!(pre.draw > 0)) continue;
+      dist = liveSoccer({ means: fitGoals(pre.homeWin, pre.awayWin), awayScore: g.awayScore, homeScore: g.homeScore, minutesLeft: 90 - g.minute });
+    }
+    const game = {
+      id: `live|${g.sport}|${g.espnId}`,
+      sport: g.sport,
+      startUtc: g.startUtc,
+      away: { en: g.away, zh: teamZh(g.sport, g.away) },
+      home: { en: g.home, zh: teamZh(g.sport, g.home) },
+      live: { ...g, pmWin: g.pm?.awayWin ?? null }
+    };
+    games.push(game);
+    const matchup = matchupText(game);
+    const base = { gameId: game.id, game, sport: g.sport, matchup, start: g.startUtc, live: true, fairMargin: null, errKey: g.sport === 'mlb' ? 'live' : 'liveSoccer' };
+    for (const m of liveMarkets(dist, { sport: g.sport, awayScore: g.awayScore, homeScore: g.homeScore, pm: g.pm })) {
+      const common = { ...base, kind: m.kind, side: m.side, market: m.market, posted: m.posted, fairChance: m.fair, estOdds: liveOdds(m.fair) };
+      if (m.kind === 'ml') {
+        const name = m.side === 'draw' ? t('draw') : teamName(game[m.side]);
+        bets.push({ ...common, id: `${game.id}|ml|${m.side}`, chip: name, label: m.side === 'draw' ? `${matchup} ${name}` : `${name} ${t('win')}`, shortLabel: name });
+      } else if (m.kind === 'total') {
+        bets.push({ ...common, id: `${game.id}|tot|${m.line}|${m.side}`, totalLine: m.line, mainLine: m.main, chip: t(m.side), label: `${matchup} ${t(m.side)} ${m.line}`, shortLabel: `${t(m.side)} ${m.line}` });
+      } else if (m.kind === 'runline') {
+        const text = `${teamName(game[m.side])} ${fmtLine(m.line)}`;
+        bets.push({ ...common, id: `${game.id}|rl|${m.line}|${m.side}`, runLine: m.line, awayLine: m.awayLine, giver: m.giver, chip: text, label: text, shortLabel: `${t('runLine')} ${text}` });
+      } else if (m.kind === 'teamtotal') {
+        const text = `${teamName(game[m.team])} ${t(m.side)} ${m.line}`;
+        bets.push({ ...common, id: `${game.id}|tt|${m.team}|${m.line}|${m.side}`, team: m.team, teamLine: m.line, chip: t(m.side), label: text, shortLabel: text });
+      }
+    }
+  }
+  return { games, bets };
+}
+
+function renderLive() {
+  const t = state.t;
+  const games = state.liveGames.filter(g => inSport(g.sport));
+  $('live').hidden = !games.length;
+  if (!games.length) return;
+  const byGame = groupBy(state.liveBets, b => b.gameId);
+  $('live-updated').textContent = state.liveAt ? t('liveUpdated', { time: formatter('hms', locale => new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Taipei' })).format(new Date(state.liveAt)) }) : '';
+  $('live-list').replaceChildren(...games.filter(g => byGame.get(g.id)).map(g => gameCard(g, byGame.get(g.id))));
+}
+
+// Live games refresh every 30 seconds while the games tab is on screen.
+const LIVE_REFRESH_MS = 30_000;
+let liveBusy = false;
+async function refreshLive() {
+  if (liveBusy) return;
+  liveBusy = true;
+  try {
+    const data = await loadLive(new Date(), LIVE_MIN_LIQUIDITY);
+    const { games, bets } = buildLiveBets(data);
+    state.liveGames = games;
+    state.liveBets = bets;
+    state.liveAt = data.loadedAt;
+    // A live pick whose line is gone (the game moved on, or ended) leaves the slip.
+    const ids = new Set(slipCandidates().map(b => b.id));
+    state.parlay = state.parlay.filter(id => ids.has(id));
+    renderLive();
+    renderParlay();
+    renderTabs();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    liveBusy = false;
+  }
+}
+
+setInterval(() => {
+  if (document.visibilityState === 'visible' && (state.tab === 'games' || (state.tab === 'slip' && state.parlay.some(id => id.startsWith('live|'))))) refreshLive();
+}, LIVE_REFRESH_MS);
+
 // ---- Championships and F1: one board each -------------------------------------
 
 function driverBadge(bet, size = '') {
@@ -1237,6 +1345,7 @@ function toggleLeg(bet) {
     if (state.parlay.length > SLIP_RULES.maxLegs) state.parlay.shift();
   }
   renderGames();
+  renderLive();
   renderF1();
   renderFutures();
   renderRanking();
@@ -1245,12 +1354,12 @@ function toggleLeg(bet) {
 
 // Everything that can go on the slip: games, F1 and championships.
 function slipCandidates() {
-  return [...state.bets, ...state.futures];
+  return [...state.bets, ...state.liveBets, ...state.futures];
 }
 
 // Championships have no start time: they stay open until the lottery closes them.
 function started(bet) {
-  return bet.start != null && Date.parse(bet.start) <= Date.now();
+  return !bet.live && bet.start != null && Date.parse(bet.start) <= Date.now();
 }
 
 // Picks on the slip. Games already under way are dropped: the page doesn't
@@ -1603,6 +1712,7 @@ function renderParlay() {
         onclick: () => {
           state.parlay = [];
           renderGames();
+          renderLive();
           renderF1();
           renderFutures();
           renderRanking();
@@ -1740,7 +1850,7 @@ function marketTag(kind) {
 // time in full (the time tells doubleheader games apart).
 function legMain(leg) {
   return el('span', { class: 'leg-main' }, [
-    el('span', { class: 'leg-pick' }, [marketTag(leg.kind), el('strong', { text: leg.shortLabel })]),
+    el('span', { class: 'leg-pick' }, [leg.live ? el('span', { class: 'market-tag tag-live', text: state.t('tagLive') }) : null, marketTag(leg.kind), el('strong', { text: leg.shortLabel })]),
     el('small', { class: 'slip-leg-game', text: leg.start ? `${leg.matchup} · ${fmtTime(leg.start)}` : leg.matchup })
   ]);
 }
@@ -1942,7 +2052,8 @@ function legRecord(bet) {
     away: bet.game?.away.en ?? null,
     home: bet.game?.home.en ?? null,
     driver: bet.driverEn ?? null,
-    eventSlug: bet.eventSlug ?? null
+    eventSlug: bet.eventSlug ?? null,
+    live: bet.live ? true : undefined
   };
 }
 
@@ -1966,6 +2077,7 @@ function placeButton(legs, sizes, cost, errors) {
         state.freshSlips.add(slip.id);
         commitAccount(account);
         renderGames();
+        renderLive();
         renderF1();
         renderFutures();
         renderRanking();
@@ -3550,7 +3662,10 @@ loadAccount().then(account => {
   syncNow();
   if (state.data) checkResults();
 });
-load().then(() => state.accountReady && checkResults());
+load().then(() => {
+  if (state.accountReady) checkResults();
+  refreshLive();
+});
 // Back on the tab: pick up what another device did, and any games that ended.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;

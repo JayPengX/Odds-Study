@@ -964,3 +964,14 @@ details.market[open] > summary { margin-bottom: 6px; }
 .pay-cell { display: grid; gap: 2px; min-width: 0; }
 .pay-cell small { font-size: 0.72rem; color: var(--text-muted); }
 .pay-cell strong { font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Live (場中) */
+#live { margin-bottom: 18px; }
+.game.live { border-color: color-mix(in srgb, var(--bad-strong) 35%, var(--border)); }
+.live-state { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.live-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; font-weight: 800; color: #fff; background: var(--bad-strong); padding: 1px 7px; border-radius: 999px; }
+.live-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: live-pulse 1.4s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .live-dot::before { animation: none; } }
+.live-score { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 1.6em; text-align: center; }
+.market-tag.tag-live { background: var(--bad-strong); color: #fff; }

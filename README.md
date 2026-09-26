@@ -49,6 +49,13 @@ The choice is remembered.
 
   With 詳細 on, each market shows its own house take.
 - **✎ 填真實賠率** shows a box on every pick for the lottery's real odds. Once typed in, the real odds replace the estimates everywhere.
+- **場中 (live):** games in progress (MLB and the Premier League) at the top, refreshed every 30 seconds while the tab is on screen (and while the slip holds a live pick). Each card shows a red 場中 tag, the inning and outs (or the minute) and the score, with the same market tabs as before the game:
+  - the winner, and for MLB the total, the run line and each team's total: the line closest to 50/50 (tagged, as the lottery posts it) with lines either side;
+  - the model (`public/lib/live.mjs`): each team's runs per inning from the pregame DraftKings win odds and total (from ESPN's game summary, fetched once per game), the same negative binomial as before the game scaled to the half-innings left (outs count as thirds), plus the current score; a tie at the end is split by the teams' strength. Soccer: goals scaled to the minutes left;
+  - the winner is averaged with Polymarket's live price when at least US$5,000 is behind it. Polymarket's live totals and run lines are too thin to use (one total moved from 0.52 to 0.77 in three minutes with no run scored);
+  - priced at the lottery's usual cut (`1 ÷ (p × 1.16)`). On one real snapshot of the lottery's 場中 page (`tests/fixtures/lottery-live-2026-09-26.json`: Reds @ Blue Jays, middle of the 4th, 5–2) the model posts the same lines (total 11.5, run line 2.5), the lottery's live markets add up to 1.143–1.166, and its 6 prices come out about 7% off on average. Soccer live prices are unchecked. The lottery's 第 N 分 (next run) markets aren't covered.
+
+  A live pick stays on the slip (pregame picks drop off at the start) and locks in the odds when placed, like the lottery. If the line it was on is no longer offered after a refresh, it leaves the slip. Live picks are tagged 場中 on the slip and in the history, and settle from the final score like any other.
 - **Best value of the day:** the top three bets as cards (a phone scrolls through them), each with its average back per NT$100 and a button to add it, then every bet ranked in a folded list.
 - **Boards:**
   - F1: drivers with team-coloured badges.
@@ -68,7 +75,7 @@ The choice is remembered.
 - **Stake:** typed in NT$10 units, like a real slip (10 = NT$100 per combination).
 - **Each pick** shows its market as a coloured tag (不讓分, 大小分, 讓分, 單隊大小 …), the pick, its game and start time in full, and its odds large (`@1.87`).
 - **派彩試算 (what it pays)** above the place button: for 全部過關 the odds multiplied out (`1.89 × 1.87 × 1.68 = ×5.94`), for 一關 each pick's return, for 過關組合 each size with its number of combinations; then the ticket total, what all correct pays after tax (large) with the profit, the tax withheld when any combination is over NT$5,000, and the least a winning ticket pays.
-- **Live games:** games that have started drop off the slip.
+- **Games that have started:** their pregame picks drop off the slip; live picks from 場中 stay.
 - **Analysis:** all of it is exact over every way the picks can land:
   - **Key numbers:** cost, top payout, average back after tax, chance of any payout, chance of profit, take + tax. Each comes with its error range.
   - **Where each NT$100 goes:** back to you, the lottery's cut and the tax.
@@ -188,7 +195,7 @@ Every estimate carries its **margin of error**:
 - **Estimated odds:** their measured error against real lottery prices. `?` marks one not yet checked.
 - **Simulator results:** 95% sampling error.
 
-The calibration data is the real lottery prices in `tests/fixtures/lottery-mlb-2026-09-25.json` and `tests/fixtures/lottery-f1-2026-09-26.json`. Soccer prices haven't been checked against the lottery yet.
+The calibration data is the real lottery prices in `tests/fixtures/lottery-mlb-2026-09-25.json` `tests/fixtures/lottery-f1-2026-09-26.json` and, for live odds, `tests/fixtures/lottery-live-2026-09-26.json`. Soccer prices haven't been checked against the lottery yet.
 
 ## How it works
 
@@ -210,6 +217,7 @@ The practice account's sync uses Shared-Proxy's other Worker, `orbit-workers-pro
 | `public/lib/i18n.mjs` | Traditional Chinese and English text (follows the browser's language) |
 | `public/lib/account.mjs` | The practice account: ledger, weekly grant, placing and settling slips, merging two copies |
 | `public/lib/sync.mjs` | The account's sync through Shared-Proxy's `/odds-sync` |
+| `public/lib/live.mjs` | Live odds: the in-game score model, the lines closest to 50/50, prices at the live cut |
 | `public/lib/history.mjs` | Stats over saved slips: money, luck against the cut, picks against their chances, breakdowns, streaks, records |
 | `public/lib/codec.mjs` | gzip + base64 for every save |
 | `public/app.js` | Rendering |

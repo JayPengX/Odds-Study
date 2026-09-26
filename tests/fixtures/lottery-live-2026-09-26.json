@@ -1,0 +1,13 @@
+{
+  "note": "Taiwan Sports Lottery 場中 (live) prices, 2026-09-26 08:18 Taiwan time: Cincinnati Reds @ Toronto Blue Jays, middle of the 4th, CIN 5-2. Pregame lines are DraftKings' (via ESPN). Polymarket's live winner price at 00:18 UTC was 0.775 for CIN.",
+  "pregame": { "awayMoneyline": 143, "homeMoneyline": -174, "total": 7.5, "overOdds": -114, "underOdds": -105 },
+  "state": { "awayScore": 5, "homeScore": 2, "inning": 4, "half": "mid", "outs": 0 },
+  "polymarketAwayWin": 0.775,
+  "lottery": {
+    "ml": { "away": 1.16, "home": 3.35 },
+    "total": { "line": 11.5, "over": 1.73, "under": 1.7 },
+    "runline": { "giver": "away", "line": 2.5, "giverOdds": 1.74, "takerOdds": 1.76 },
+    "nextRun8": { "away": 1.9, "none": 10.0, "home": 1.42 },
+    "nextRun9": { "away": 1.97, "none": 5.23, "home": 1.66 }
+  }
+}

@@ -515,3 +515,122 @@ export async function fetchOutcomes(legs, now = new Date()) {
   );
   return out;
 }
+
+// ---- Live (場中) ------------------------------------------------------------------
+
+// A baseball game's state from ESPN's short detail ("Top 4th", "Mid 4th",
+// "Bot 4th", "End 4th", possibly after "Rain Delay, ").
+export function parseInning(detail, period) {
+  const half = /\b(Top|Mid|Bot|End)\b/.exec(detail || '')?.[1];
+  const map = { Top: 'top', Mid: 'mid', Bot: 'bottom', End: 'end' };
+  return half ? { inning: Number(period) || 1, half: map[half] } : null;
+}
+
+// Games in progress on an ESPN scoreboard, with their live state.
+export function parseEspnLive(data, sport) {
+  const games = [];
+  for (const event of data.events || []) {
+    const comp = event.competitions?.[0];
+    if (!comp || comp.status?.type?.state !== 'in') continue;
+    const side = ha => comp.competitors.find(c => c.homeAway === ha);
+    const away = side('away');
+    const home = side('home');
+    if (!away || !home) continue;
+    const game = {
+      espnId: event.id,
+      sport,
+      startUtc: new Date(event.date).toISOString(),
+      away: away.team.displayName,
+      home: home.team.displayName,
+      awayScore: Number(away.score) || 0,
+      homeScore: Number(home.score) || 0,
+      detail: comp.status.type.shortDetail || '',
+      delayed: /delay|suspend/i.test(comp.status.type.shortDetail || '')
+    };
+    if (sport === 'mlb') {
+      const inning = parseInning(game.detail, comp.status.period);
+      if (!inning) continue;
+      Object.assign(game, inning, { outs: Number(comp.situation?.outs) || 0 });
+    } else {
+      // "67'" or "45'+2'"; half time counts as 45 played.
+      const minute = /^(\d+)/.exec(comp.status.displayClock || '')?.[1];
+      game.minute = /half/i.test(game.detail) ? 45 : Math.min(90, Number(minute) || 0);
+    }
+    games.push(game);
+  }
+  return games;
+}
+
+// Pregame lines from ESPN's game summary (DraftKings), with the margin removed.
+export function parsePregameLines(summary) {
+  const pick = (summary?.pickcenter || []).find(p => p.homeTeamOdds?.moneyLine != null) ?? summary?.pickcenter?.[0];
+  if (!pick) return null;
+  const home = americanToProbability(pick.homeTeamOdds?.moneyLine);
+  const away = americanToProbability(pick.awayTeamOdds?.moneyLine);
+  const draw = americanToProbability(pick.drawOdds?.moneyLine);
+  const win = draw ? devigProportional([home, draw, away]) : devigProportional([home, away]);
+  const total = devigProportional([americanToProbability(pick.overOdds), americanToProbability(pick.underOdds)]);
+  if (!win) return null;
+  return {
+    homeWin: win[0],
+    awayWin: win.at(-1),
+    draw: draw ? win[1] : 0,
+    totalLine: Number(pick.overUnder) || null,
+    overFair: total ? total[0] : 0.5
+  };
+}
+
+const pmNumber = (market, outcome) => {
+  const outcomes = parseJsonArray(market.outcomes);
+  const prices = parseJsonArray(market.outcomePrices);
+  const i = outcomes?.findIndex(o => o === outcome || normalizeTeamName(o) === normalizeTeamName(outcome)) ?? -1;
+  const price = Number(prices?.[i]);
+  return i >= 0 && price > 0 && price < 1 ? price : null;
+};
+
+// Polymarket's live winner price for one game (the away team's chance), when
+// enough money is behind it.
+export function parsePolymarketLive(event, game, minLiquidity) {
+  const market = (event.markets || []).find(m => m.question === event.title);
+  if (!market || (Number(market.liquidity) || 0) < minLiquidity) return { awayWin: null };
+  return { awayWin: pmNumber(market, game.away) };
+}
+
+const pregameCache = new Map();
+
+// Every game in progress (MLB, Premier League) with its state, pregame lines
+// and Polymarket's live prices. Pregame lines are fetched once per game.
+export async function loadLive(now = new Date(), minLiquidity = 5000) {
+  const [mlb, epl, pmMlb, pmEpl] = await Promise.all([
+    getJson(`${ESPN}/baseball/mlb/scoreboard`).then(d => parseEspnLive(d, 'mlb')).catch(() => []),
+    getJson(`${ESPN}/soccer/eng.1/scoreboard`).then(d => parseEspnLive(d, 'epl')).catch(() => []),
+    fetchPolymarketLiveEvents(POLYMARKET_TAG.mlb, now).catch(() => []),
+    fetchPolymarketLiveEvents(POLYMARKET_TAG.epl, now).catch(() => [])
+  ]);
+  const games = [...mlb, ...epl];
+  await Promise.all(
+    games.map(async game => {
+      const key = `${game.sport}|${game.espnId}`;
+      if (!pregameCache.has(key)) {
+        const path = ESPN_PATH[game.sport];
+        pregameCache.set(key, getJson(`${ESPN}/${path}/summary?event=${game.espnId}`).then(parsePregameLines).catch(() => null));
+      }
+      game.pregame = await pregameCache.get(key);
+      const events = game.sport === 'mlb' ? pmMlb : pmEpl;
+      // The game's own event, not its side events ("… - 1st Inning Winner").
+      const event = events.find(e => {
+        if (/ - /.test(e.title || '')) return false;
+        const teams = eventTeams(e);
+        return teams && sameGame({ sport: game.sport, away: teams.away, home: teams.home, startUtc: new Date(e.startTime).toISOString() }, game);
+      });
+      game.pm = event && game.sport === 'mlb' ? parsePolymarketLive(event, game, minLiquidity) : null;
+    })
+  );
+  return { loadedAt: now.toISOString(), games: games.filter(g => g.pregame) };
+}
+
+// Polymarket events that started in the last six hours (games in progress).
+async function fetchPolymarketLiveEvents(tagId, now) {
+  const since = new Date(now.getTime() - 6 * 3_600_000).toISOString();
+  return getJson(`${GAMMA}/events?tag_id=${tagId}&closed=false&limit=100&order=startTime&ascending=true&start_time_min=${since}`, 'polymarket-events');
+}
