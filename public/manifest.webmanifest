@@ -1,15 +1,35 @@
 {
-  "name": "賠率研究室",
-  "short_name": "賠率研究室",
+  "name": "四方運彩 Quadra Sportsbook",
+  "short_name": "四方運彩",
   "description": "用數學看台灣運彩：公平機率、估計賠率、每一注平均拿回多少。教學用途。",
   "lang": "zh-Hant-TW",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0b1220",
-  "theme_color": "#0b1220",
+  "theme_color": "#c2410c",
   "icons": [
-    { "src": "./icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml" }
-  ]
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "id": "/Odds-Study/"
 }

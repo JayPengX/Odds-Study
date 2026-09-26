@@ -631,7 +631,7 @@ function badge(text, color, size = '') {
 function renderStatic() {
   const t = state.t;
   document.documentElement.lang = state.locale === 'zh' ? 'zh-Hant' : 'en';
-  // The app's name in the page's language only: 賠率研究室 or Odds Study.
+  // The app's name in the page's language only: 四方運彩 or Quadra Sportsbook.
   document.title = t('title');
   $('loading-title').textContent = t('title');
   $('title').textContent = t('title');
