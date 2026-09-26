@@ -1121,3 +1121,5 @@ img[src*='thesportsdb'] { object-fit: contain; }
 @keyframes pad-up { from { transform: translateY(100%); } }
 @keyframes pad-fade { from { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .pad-backdrop, .pad-sheet { animation: none; } }
+.value-timer { height: 5px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; }
+.value-timer > div { height: 100%; width: 100%; background: #ef6c00; border-radius: inherit; }

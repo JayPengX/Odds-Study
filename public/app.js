@@ -42,7 +42,7 @@ import {
   replayPlayer
 } from './lib/sim.mjs';
 import { ticketProfile, accountTickets } from './lib/profile.mjs';
-import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive } from './lib/sources.mjs';
+import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive, loadLeagueTeams } from './lib/sources.mjs';
 import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, nextRunChances, nextRunOdds, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
@@ -67,7 +67,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
-import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_SETS, sortSet, sortTicket, FREE_THROW, shotPlan, markerAt, shotResult } from './lib/arcade.mjs';
+import { ARCADE, STREAK, scorer, bestRound, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, TYPING, ticketCode, groupCode, typedRight, SORT, SORT_SETS, sortSet, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -595,7 +595,9 @@ function badge(text, color, size = '') {
 function renderStatic() {
   const t = state.t;
   document.documentElement.lang = state.locale === 'zh' ? 'zh-Hant' : 'en';
-  document.title = `${t('title')} · Odds Study`;
+  // The app's name in the page's language only: 賠率研究室 or Odds Study.
+  document.title = t('title');
+  $('loading-title').textContent = t('title');
   $('title').textContent = t('title');
   $('notice').textContent = t('notice');
   $('refresh').setAttribute('aria-label', t('refresh'));
@@ -3891,7 +3893,9 @@ function derbyView() {
   // The ball along its path: p is ballAt's 0-1, the plate at DERBY.plate.
   const ballPos = p => {
     const k = p / DERBY.plate;
-    return { x: mound.x + (plate.x - mound.x) * k, y: mound.y + (plate.y - mound.y) * k, r: 2.5 + 5.5 * Math.min(1.2, k) };
+    // A breaking ball drifts sideways more and more on its way in.
+    const drift = (plan?.breakX ?? 0) * 26 * Math.min(1.2, k) ** 2;
+    return { x: mound.x + (plate.x - mound.x) * k + drift, y: mound.y + (plate.y - mound.y) * k, r: 2.5 + 5.5 * Math.min(1.2, k) };
   };
   const drawField = () => {
     // Stands and sky, the outfield grass in stripes, the infield dirt.
@@ -4276,19 +4280,25 @@ function freeThrowView() {
   ]);
 }
 
-// 整理彩券: each ticket shows a team; put it in its league's box (keys 1-4 too).
+// 整理彩券: each ticket shows a team; put it in its league's box (keys 1-4
+// too) before the ticket's clock runs out. The set's team lists load first.
 function sortView() {
   const t = state.t;
   const hud = gameHud();
   const box = el('div', { class: 'arcade-actions' });
-  const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' });
-  const set = sortSet();
-  const bins = SORT_SETS[set];
+  const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' }, el('p', { class: 'muted', text: t('sortLoading') }));
+  const clock = el('div', { class: 'value-timer', 'aria-hidden': 'true' }, el('div'));
+  const binRow = el('div', { class: 'sort-bins' });
+  const view = el('div', { class: 'arcade-game', tabindex: '0' }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.tickets, s: SORT.seconds, total: fmtMoney(sortPayout(SORT.tickets), { sign: false }) })} ${streakRule('sort')}` }), hud.node, clock, slot, binRow, box]);
   const score = scorer('sort');
-  let ticket = sortTicket(set);
+  let set = sortSet();
+  let bins = SORT_SETS[set];
+  let ticket = null;
   let right = 0;
   let wrong = 0;
   let began = 0;
+  let deadline = null;
+  let buttons = [];
   const update = () => hud.set({ done: right, of: SORT.tickets, earned: score.total, run: score.run });
   const card = tk => {
     const team = { en: tk.team, zh: teamZh(tk.league, tk.team) };
@@ -4298,13 +4308,30 @@ function sortView() {
       el('small', { class: 'lotto-serial', text: groupCode(ticketCode()) })
     ]);
   };
+  // Each ticket's clock: the bar empties over SORT.seconds; at zero it's a mistake.
+  const startClock = () => {
+    clearTimeout(deadline);
+    const bar = clock.firstChild;
+    bar.style.transition = 'none';
+    bar.style.width = '100%';
+    requestAnimationFrame(() => requestAnimationFrame(() => ((bar.style.transition = `width ${SORT.seconds}s linear`), (bar.style.width = '0%'))));
+    deadline = setTimeout(() => {
+      if (!began || right >= SORT.tickets) return startClock();
+      wrong++;
+      hud.flash(score.bad(), false);
+      ticket = sortTicket(set, Math.random, ticket.team);
+      show();
+    }, SORT.seconds * 1000);
+    gameTimers.push(deadline);
+  };
   const show = () => {
     slot.replaceChildren(card(ticket));
     update();
+    startClock();
   };
   const place = (league, button) => {
-    if (right >= SORT.tickets) return;
-    if (!began) began = performance.now();
+    if (!ticket || right >= SORT.tickets) return;
+    began ||= performance.now();
     const current = slot.firstChild;
     if (league === ticket.league) {
       right++;
@@ -4313,10 +4340,12 @@ function sortView() {
       void button.offsetWidth;
       button.classList.add('flash');
       current?.classList.add('fly', `fly-${bins.indexOf(league)}`);
-      ticket = sortTicket(set);
+      ticket = sortTicket(set, Math.random, ticket.team);
       if (right === SORT.tickets) {
+        clearTimeout(deadline);
         update();
         binRow.remove();
+        clock.remove();
         later(() => finishRound('sort', score.total, box, t('sortDone', { n: right, wrong }), performance.now() - began, score), 250);
         return;
       }
@@ -4330,23 +4359,30 @@ function sortView() {
       update();
     }
   };
-  const buttons = bins.map((league, i) =>
-    el('button', { class: 'sort-bin', type: 'button', onclick: event => place(league, event.currentTarget) }, [
-      leagueImg(league, 'logo-tile'),
-      el('span', { text: t(`sport_${league}`) }),
-      el('small', { class: 'muted', text: String(i + 1) })
-    ])
-  );
-  const binRow = el('div', { class: 'sort-bins' }, buttons);
-  show();
-  return el('div', {
-    class: 'arcade-game',
-    tabindex: '0',
-    onkeydown: e => {
-      const i = Number(e.key) - 1;
-      if (i >= 0 && i < bins.length) place(bins[i], buttons[i]);
+  view.addEventListener('keydown', e => {
+    const i = Number(e.key) - 1;
+    if (i >= 0 && i < bins.length) place(bins[i], buttons[i]);
+  });
+  // Load the set's teams (ESPN's lists for the leagues without our own);
+  // a set that can't load falls back to baseball, which needs none.
+  Promise.all(bins.map(loadLeagueTeams)).then(ok => {
+    if (!ok.every(Boolean)) {
+      set = 'baseball';
+      bins = SORT_SETS[set];
     }
-  }, [el('p', { class: 'note', text: `${t('sortRules', { n: SORT.tickets, pay: fmtMoney(SORT.pay, { sign: false }) })} ${streakRule('sort')}` }), hud.node, slot, binRow, box]);
+    buttons = bins.map((league, i) =>
+      el('button', { class: 'sort-bin', type: 'button', onclick: event => place(league, event.currentTarget) }, [
+        leagueImg(league, 'logo-tile'),
+        el('span', { text: t(`sport_${league}`) }),
+        el('small', { class: 'muted', text: String(i + 1) })
+      ])
+    );
+    binRow.replaceChildren(...buttons);
+    ticket = sortTicket(set);
+    show();
+  });
+  update();
+  return view;
 }
 
 // 打工：輸入彩券號碼: key in each ticket number on the page's own number pad

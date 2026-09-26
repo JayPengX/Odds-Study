@@ -30,10 +30,14 @@
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') check(); });
   })();
 </script>
-<title>賠率研究室 Odds Study</title>
+<title>賠率研究室</title>
 <meta name="description" content="用數學看台灣運彩：公平機率、估計賠率、每一注平均拿回多少。教學用途。" />
 <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+<!-- The home screen always says 賠率研究室, whatever language the page shows. -->
+<meta name="apple-mobile-web-app-title" content="賠率研究室" />
+<meta name="application-name" content="賠率研究室" />
+<link rel="manifest" href="./manifest.webmanifest" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="賠率研究室 Odds Study" />
 <meta property="og:title" content="賠率研究室 Odds Study｜用數學看台灣運彩" />
@@ -60,7 +64,7 @@
 <div id="loading" class="loading" role="status" aria-live="polite">
   <div class="loading-box">
     <img class="loading-logo" src="./favicon.svg" alt="" width="64" height="64" />
-    <p class="loading-title">賠率研究室 · Odds Study</p>
+    <p id="loading-title" class="loading-title">賠率研究室</p>
     <div id="loading-spinner" class="spinner" aria-hidden="true"></div>
     <p id="loading-text"></p>
     <div id="loading-bar" class="loading-bar"><span id="loading-fill"></span></div>

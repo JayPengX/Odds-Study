@@ -339,12 +339,20 @@ export function f1Driver(name) {
 // Every club of a league we have a logo for, one name each (aliases dropped):
 // English names as the feeds write them. For games that show a team.
 const titleCase = key => key.replace(/\b[a-z]/g, c => c.toUpperCase());
+// Clubs of other leagues, from ESPN's team lists (rememberTeams).
+const fetchedTeams = new Map();
+export function rememberTeams(sport, teams) {
+  for (const { name, logo } of teams) rememberLogo(sport, name, logo);
+  fetchedTeams.set(sport, teams.map(t => t.name));
+}
+export const hasTeams = sport => leagueTeams(sport).length > 0;
 export function leagueTeams(sport) {
   let names = [];
   if (sport === 'mlb') names = Object.keys(MLB_ABBR);
   else if (sport === 'nba') names = Object.keys(NBA_ABBR);
   else if (sport === 'epl') names = Object.keys(EPL_ESPN_ID).map(titleCase);
-  else names = Object.keys(TEAM_BADGES[sport] ?? {});
+  else if (TEAM_BADGES[sport]) names = Object.keys(TEAM_BADGES[sport]);
+  else names = fetchedTeams.get(sport) ?? [];
   const seen = new Set();
   return names.filter(name => {
     const logo = teamLogo(sport, name);

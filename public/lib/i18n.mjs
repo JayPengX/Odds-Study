@@ -433,7 +433,7 @@ const STRINGS = {
     ftDone: "投進 {made} 球，其中 {swish} 球空心。",
     ftRules: "10 球罰球。左邊的箭頭上下跑，一球比一球快，綠色也一球比一球窄：停在深綠色是空心 {swish}，淺綠色是進球 {make}，其他都不進。點畫面、按按鈕或空白鍵出手。",
     sortDone: "整理 {n} 張，放錯 {wrong} 次。",
-    sortRules: "收班整理：每張彩券印著一支球隊，放進它所屬聯盟的箱子（也可以按 1–4）。每局是四個棒球聯盟，或籃球加英超。{n} 張，每張放對 {pay}。",
+    sortRules: "收班整理：每張彩券印著一支球隊，{s} 秒內放進它所屬聯盟的箱子（也可以按 1–4），超時算放錯。每局四個容易搞混的聯盟：四個棒球聯盟、四個籃球聯盟、美國四大聯盟、歐洲四大足球聯賽或另外四個足球聯賽，每局上百支球隊。{n} 張全部放對 {total}。",
     hudBonus: "連續獎金 +{v}",
     hudPenalty: "扣 {v}",
     streakRule: "連續對 {every} 次加 {bonus}；錯一次扣 {penalty}，連續歸零。",
@@ -441,6 +441,7 @@ const STRINGS = {
     scoreLine: "連續獎金 +{bonus}，扣款 −{penalty}。",
     keyBack: "刪除",
     keyOk: "確定",
+    sortLoading: "正在拿球隊名單…",
     guideReadTitle: '怎麼看這些數字',
     guideRead: [
       ['賠率', '每個選項上的大數字是估計的運彩賠率。下 NT$100、中了拿回 NT$100 × 賠率。🔒 是運彩不開放的選項；「限2關」「限3關」只能串關。角落的「划算」「穩」「值博」是推薦（見下方「推薦」）。'],
@@ -1356,7 +1357,7 @@ const STRINGS = {
     ftDone: "{made} made, {swish} of them swishes.",
     ftRules: "10 free throws. The arrow on the left runs up and down, faster each shot, and the green gets narrower: stop it in the dark green for a swish, {swish}; the light green for a make, {make}; anywhere else misses. Tap the court, the button or press space.",
     sortDone: "{n} tickets sorted, {wrong} in the wrong box.",
-    sortRules: "Closing time: each ticket shows a team; put it in its league's box (keys 1-4 work too). A round is either the four baseball leagues or basketball plus the Premier League. {n} tickets, {pay} for each one right.",
+    sortRules: "Closing time: each ticket shows a team; put it in its league's box within {s} seconds (keys 1-4 work too), or it counts as wrong. Each round has four leagues easy to mix up: the four baseball leagues, four basketball leagues, America's big four, Europe's big four soccer leagues or four more soccer leagues, around a hundred teams a round. All {n} right pays {total}.",
     hudBonus: "streak +{v}",
     hudPenalty: "−{v}",
     streakRule: "{every} right in a row adds {bonus}; a mistake costs {penalty} and ends the streak.",
@@ -1364,6 +1365,7 @@ const STRINGS = {
     scoreLine: "Streak bonuses +{bonus}, penalties −{penalty}.",
     keyBack: "Delete",
     keyOk: "OK",
+    sortLoading: "Fetching the team lists…",
     guideReadTitle: 'Reading the numbers',
     guideRead: [
       ['Odds', 'The big number on each pick is the estimated lottery odds. NT$100 on it pays NT$100 × the odds if it wins. 🔒 Locked picks aren\'t on sale; "2+ legs" and "3+ legs" ones only in parlays. The corner tags (Value, Steady, Worth a shot) are recommendations (see Recommendations below).'],

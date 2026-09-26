@@ -102,9 +102,9 @@ export function scoreRound(game, events) {
 }
 export const PACE = {
   typing: { seconds: 140, events: [...run(8, 'ok'), 'bad', ...run(7, 'ok'), 'bad', ...run(5, 'ok')] },
-  sort: { seconds: 75, events: [...run(8, 'ok'), 'bad', ...run(6, 'ok'), 'bad', ...run(7, 'ok'), 'bad', ...run(4, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok')] },
-  derby: { seconds: 35, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'hr', 'miss', 'miss', 'hit', 'miss'] },
-  freethrow: { seconds: 32, events: ['swish', 'make', 'make', 'miss', 'make', 'swish', 'miss', 'make', 'miss', 'miss'] }
+  sort: { seconds: 85, events: [...run(6, 'ok'), 'bad', ...run(5, 'ok'), 'bad', 'bad', ...run(7, 'ok'), 'bad', ...run(4, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(3, 'ok'), 'bad', ...run(2, 'ok')] },
+  derby: { seconds: 33, events: ['hr', 'hit', 'hit', 'miss', 'hit', 'miss', 'miss', 'hit', 'miss', 'miss'] },
+  freethrow: { seconds: 32, events: ['swish', 'make', 'make', 'miss', 'make', 'miss', 'miss', 'make', 'miss', 'miss'] }
 };
 function run(n, x) {
   return Array(n).fill(x);
@@ -144,13 +144,14 @@ export function payGame(account, game, amount, now = new Date()) {
 // Ten pitches a round, each faster than the last, some of them change-ups
 // that slow down halfway. Swing as the ball crosses the plate: within
 // DERBY.hr of its middle a home run, within DERBY.hit a base hit, else a miss.
-export const DERBY = { pitches: 10, plate: 0.83, hr: 0.025, hit: 0.07, pay: { hr: 4, hit: 1 } };
+export const DERBY = { pitches: 10, plate: 0.83, hr: 0.018, hit: 0.05, pay: { hr: 6, hit: 1 } };
 
-// How long pitch i (0-based) takes to reach the end of the track, in ms, and
-// whether it's a change-up.
+// How long pitch i (0-based) takes to reach the end of the track, in ms;
+// whether it's a change-up (from the third pitch); and how much it breaks
+// sideways (from the fifth: it looks different, the timing is the same).
 export function pitchPlan(i, random = Math.random) {
-  const base = 1150 - i * 55;
-  return { ms: Math.round(base * (0.88 + random() * 0.24)), changeUp: i >= 3 && random() < 0.3 };
+  const base = 1000 - i * 60;
+  return { ms: Math.round(base * (0.85 + random() * 0.3)), changeUp: i >= 2 && random() < 0.35, breakX: i >= 4 ? random() * 2 - 1 : 0 };
 }
 
 // Where the ball is (0-1 along the track) `elapsed` ms into a pitch: a
@@ -188,24 +189,35 @@ export const typingPayout = right => right * TYPING.pay;
 // ---- 整理彩券 (sorting tickets by team) -------------------------------------------------
 //
 // Work that takes knowing your teams: each ticket shows a team (its logo and
-// name); put it in its league's box. A round uses one set of four boxes,
-// either every baseball league (is it NPB or KBO?) or a basketball and
-// soccer mix. Each one right pays the same; a wrong box costs a little and
-// the ticket stays.
-export const SORT = { tickets: 30, pay: 1 };
+// name); put it in its league's box before its clock runs out (a ticket
+// left too long counts as a mistake). A round uses one set of four boxes,
+// chosen to be confusable: the four baseball leagues (NPB or KBO?), four
+// basketball leagues, the four big American leagues (the New York Rangers,
+// Giants, Mets or Knicks?), Europe's big four soccer leagues, or four more
+// soccer leagues. Teams come from our own tables and ESPN's team lists:
+// about 20-30 a league, so 80-120 a set.
+export const SORT = { tickets: 30, pay: 1.2, seconds: 5 };
 export const SORT_SETS = {
   baseball: ['mlb', 'npb', 'kbo', 'cpbl'],
-  mixed: ['nba', 'bleague', 'euroleague', 'epl']
+  basketball: ['nba', 'wnba', 'euroleague', 'bleague'],
+  usa: ['nfl', 'nhl', 'mlb', 'nba'],
+  soccer: ['epl', 'laliga', 'seriea', 'bundesliga'],
+  soccer2: ['ligue1', 'eredivisie', 'primeira', 'mls']
 };
 
 export const sortSet = (random = Math.random) => Object.keys(SORT_SETS)[Math.floor(random() * Object.keys(SORT_SETS).length)];
 
-// A ticket: a league of the set, then one of its teams.
-export function sortTicket(set, random = Math.random) {
+// A ticket: a league of the set, then one of its teams, never the team just
+// shown (`last`).
+export function sortTicket(set, random = Math.random, last = null) {
   const leagues = SORT_SETS[set];
-  const league = leagues[Math.floor(random() * leagues.length)];
-  const teams = leagueTeams(league);
-  return { league, team: teams[Math.floor(random() * teams.length)] };
+  for (let tries = 0; tries < 20; tries++) {
+    const league = leagues[Math.floor(random() * leagues.length)];
+    const teams = leagueTeams(league);
+    const team = teams[Math.floor(random() * teams.length)];
+    if (team && team !== last) return { league, team };
+  }
+  return null;
 }
 
 export const sortPayout = right => Math.round(right * SORT.pay);
@@ -215,16 +227,18 @@ export const sortPayout = right => Math.round(right * SORT.pay);
 // Ten shots. A marker sweeps back and forth across the aim bar, faster each
 // shot, while the green zone in the middle narrows: stop it in the zone's
 // middle half for a swish, anywhere in the zone for a make.
-export const FREE_THROW = { shots: 10, pay: { swish: 3, make: 2 } };
+export const FREE_THROW = { shots: 10, pay: { swish: 5, make: 3 } };
 
 export function shotPlan(i) {
-  return { period: 1500 - i * 80, zone: 0.16 - i * 0.009 };
+  return { period: 1300 - i * 70, zone: 0.13 - i * 0.008 };
 }
 
-// The marker's place (0-1) `elapsed` ms into a shot: there and back each period.
+// The marker's place (0-1) `elapsed` ms into a shot: there and back each
+// period, easing like a swing, slow at the ends and fastest through the
+// middle, where the green is.
 export function markerAt(plan, elapsed) {
   const x = (elapsed % plan.period) / plan.period;
-  return x < 0.5 ? 2 * x : 2 - 2 * x;
+  return (1 - Math.cos(2 * Math.PI * x)) / 2;
 }
 
 export function shotResult(position, plan) {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ARCADE, PACE, STREAK, scorer, scoreRound, bestRound, typicalPerMinute, earnedToday, roomToday, payGame, wageMinutes, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_SETS, sortSet, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
-import { leagueTeams } from '../public/lib/teams.mjs';
+import { leagueTeams, rememberTeams, normalizeTeamName } from '../public/lib/teams.mjs';
 import { newAccount, balance, mergeAccounts } from '../public/lib/account.mjs';
 
 test('mini games pay into the ledger, at most the daily cap, and merge like any entry', () => {
@@ -60,18 +60,27 @@ test('every round is measured against the minimum wage and the lottery\'s take',
 });
 
 
-test('ticket sorting: a team from one of the round\'s four leagues, each with a logo', () => {
+test('ticket sorting: sets of four confusable leagues, a team from one of them, never the same twice running', () => {
+  // Leagues without our own tables get ESPN's lists at play time; stand-ins here.
+  for (const league of new Set(Object.values(SORT_SETS).flat()))
+    if (!leagueTeams(league).length) rememberTeams(league, Array.from({ length: 16 }, (_, i) => ({ name: `${league} Club ${i}`, logo: `https://a.espncdn.com/x/${league}${i}.png` })));
   for (const [set, leagues] of Object.entries(SORT_SETS)) {
     assert.equal(leagues.length, 4);
-    for (const league of leagues) assert.ok(leagueTeams(league).length >= 6, league);
+    // Enough teams that a round of 30 is a real quiz.
+    assert.ok(leagues.reduce((n, l) => n + leagueTeams(l).length, 0) >= 50, set);
+    let last = null;
     for (let i = 0; i < 40; i++) {
-      const ticket = sortTicket(set);
+      const ticket = sortTicket(set, Math.random, last?.team);
       assert.ok(leagues.includes(ticket.league));
       assert.ok(leagueTeams(ticket.league).includes(ticket.team));
+      assert.notEqual(ticket.team, last?.team);
+      last = ticket;
     }
   }
+  // Our own tables are big enough on their own.
+  for (const league of SORT_SETS.baseball) assert.ok(leagueTeams(league).length >= 6, league);
   assert.ok(SORT_SETS[sortSet()]);
-  assert.equal(sortPayout(SORT.tickets), SORT.tickets * SORT.pay);
+  assert.equal(sortPayout(SORT.tickets), Math.round(SORT.tickets * SORT.pay));
 });
 
 test('streaks and penalties follow how hard each game is', () => {
@@ -120,6 +129,6 @@ test('the pay is balanced: every game pays about the same per minute of typical 
     const rate = typicalPerMinute(game);
     assert.ok(Math.abs(rate - ARCADE.perMinute) / ARCADE.perMinute < 0.15, `${game} ${rate}`);
   }
-  // A perfect round of a skill game pays at most about four times a typical one.
-  for (const game of ['derby', 'freethrow']) assert.ok(bestRound(game) <= 4.5 * scoreRound(game, PACE[game].events).total, game);
+  // A perfect round of a skill game pays at most about five times a typical one.
+  for (const game of ['derby', 'freethrow']) assert.ok(bestRound(game) <= 6 * scoreRound(game, PACE[game].events).total, game);
 });
