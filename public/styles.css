@@ -1046,3 +1046,48 @@ details.market[open] > summary { margin-bottom: 6px; }
 .league-badge.logo-xxs { --s: 16px; }
 /* TheSportsDB badges come in their own shapes: shown whole. */
 img[src*='thesportsdb'] { object-fit: contain; }
+
+/* ---- 小遊戲 (mini games) ------------------------------------------------------------ */
+.arcade-cap { display: grid; gap: 4px; margin: 6px 0 12px; }
+.arcade-cap-bar { height: 6px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; }
+.arcade-cap-bar > div { height: 100%; background: var(--accent); border-radius: inherit; }
+.arcade-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.arcade-tile { display: grid; justify-items: center; gap: 2px; padding: 10px 6px; border-radius: 12px; border: 1px solid var(--grid); background: var(--surface); color: inherit; font: inherit; cursor: pointer; text-align: center; }
+.arcade-tile[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.arcade-icon { font-size: 1.5rem; line-height: 1.2; }
+.arcade-name { font-weight: 700; font-size: 0.86rem; }
+.arcade-game { margin-top: 14px; display: grid; gap: 10px; outline: none; }
+.arcade-actions { display: grid; gap: 8px; justify-items: start; }
+.arcade-result { font-weight: 600; }
+.derby-track { position: relative; height: 44px; border-radius: 22px; background: linear-gradient(90deg, var(--surface-sunken), color-mix(in srgb, var(--surface-sunken) 70%, #2e7d32 30%)); overflow: hidden; cursor: pointer; touch-action: manipulation; user-select: none; }
+.derby-zone { position: absolute; top: 0; bottom: 0; background: rgba(255, 193, 7, 0.28); }
+.derby-sweet { position: absolute; top: 0; bottom: 0; background: rgba(255, 152, 0, 0.7); }
+.derby-ball { position: absolute; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #c62828 inset, 0 1px 3px rgba(0, 0, 0, 0.3); }
+.derby-track[data-result='hr'] { box-shadow: 0 0 0 3px var(--accent); }
+.derby-track[data-result='miss'] { box-shadow: 0 0 0 3px #c62828; }
+.derby-call { font-weight: 700; min-height: 1.4em; margin: 0; }
+.derby-dots { display: flex; gap: 6px; }
+.derby-dots .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--surface-sunken); }
+.derby-dots .dot.hr { background: var(--accent); }
+.derby-dots .dot.hit { background: #f9a825; }
+.derby-dots .dot.miss { background: #c62828; }
+.derby-swing { width: 100%; justify-self: stretch; padding: 14px; font-size: 1.05rem; }
+.value-timer { height: 4px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; }
+.value-timer > div { height: 100%; width: 100%; background: var(--accent); }
+.value-q { display: grid; gap: 8px; }
+.value-count { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+.value-option { display: grid; gap: 2px; text-align: left; padding: 12px; border-radius: 12px; border: 1px solid var(--grid); background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.value-option.right { border-color: #2e7d32; box-shadow: 0 0 0 1px #2e7d32 inset; }
+.value-option.wrong { opacity: 0.6; }
+.value-label { font-size: 0.86rem; }
+.value-nums strong { font-size: 1.1rem; }
+.value-back { font-weight: 700; }
+.typing-code { font: 700 1.6rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.06em; margin: 0; }
+.typing-form { display: flex; gap: 8px; }
+.typing-input { flex: 1 1 auto; min-width: 0; font: 600 1.2rem ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--grid); background: var(--surface); color: inherit; }
+.typing-input.typo { border-color: #c62828; box-shadow: 0 0 0 1px #c62828 inset; }
+.arcade-wage { margin: 0; font-size: 0.86rem; color: var(--text-secondary); }
+.arcade-tiles { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.typing-code.quiz-q { font: 700 1.15rem/1.4 inherit; font-family: inherit; letter-spacing: 0; }
+.typing-form .primary-button { flex: none; white-space: nowrap; }
+.quiz-feedback { margin: 0; min-height: 1.3em; }

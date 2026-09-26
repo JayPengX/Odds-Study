@@ -67,6 +67,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
+import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, VALUE_GAME, valueQuestion, valuePayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, QUIZZES, quizQuestion, quizRight, quizPayout } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -87,6 +88,10 @@ const SYNC_KEY = 'oddsStudy.syncCode';
 const SAVED_SHOWN = 10;
 
 const state = {
+  // 小遊戲: the open game, its view (kept across re-renders) and its animation frame.
+  arcadeGame: null,
+  arcadeView: null,
+  arcadeFrame: 0,
   locale: detectLocale(),
   t: null,
   data: null,
@@ -602,6 +607,7 @@ function renderStatic() {
     ['futures-title', 'futuresTitle'],
     ['parlay-title', 'parlayTitle'],
     ['account-title', 'accountTitle'],
+    ['arcade-title', 'arcadeTitle'],
     ['saved-title', 'savedTitle'],
     ['stats-title', 'statsTitle'],
     ['sim-title', 'simTitle'],
@@ -1906,7 +1912,8 @@ function renderAccount() {
   const account = state.account;
   const now = new Date();
   const funds = balance(account);
-  const grants = account.ledger.filter(e => e.kind === 'grant').reduce((s, e) => s + e.amount, 0);
+  // Money that didn't come from betting: the weekly grants and mini games.
+  const grants = account.ledger.filter(e => e.kind === 'grant' || e.kind === 'game').reduce((s, e) => s + e.amount, 0);
   const open = account.slips.filter(s => s.status === 'open');
   const atStake = open.reduce((s, x) => s + x.cost, 0);
   // Won or lost on settled slips, and money still on open ones.
@@ -1969,6 +1976,7 @@ function renderAccount() {
       ])
     ])
   );
+  renderArcade();
 }
 
 const RESULT_ICON = { won: '✓', lost: '✗', void: '↺' };
@@ -3592,6 +3600,298 @@ function renderSimTable(bands, characters, weeks) {
       el('tbody', {}, rows)
     ])
   );
+}
+
+// ---- 小遊戲 (mini games) ------------------------------------------------------------
+
+// The games' tiles, today's winnings against the daily cap, and the game
+// being played. The game's own view is built once per round and kept, so the
+// page re-rendering (new odds, a sync) never interrupts a pitch.
+const ARCADE_ICON = { typing: '⌨️', payout: '🧾', till: '🧮', implied: '📐', value: '⚖️', derby: '⚾' };
+const ARCADE_MAX = { typing: typingPayout(TYPING.codes), ...Object.fromEntries(Object.keys(QUIZZES).map(k => [k, quizPayout(k, QUIZZES[k].questions)])), value: valuePayout(VALUE_GAME.questions), derby: DERBY.pitches * DERBY.pay.hr + DERBY.allHrBonus };
+
+function renderArcade() {
+  if (!state.accountReady) return;
+  const t = state.t;
+  const earned = earnedToday(state.account);
+  const room = roomToday(state.account);
+  $('arcade-body').replaceChildren(
+    el('div', { class: 'card arcade' }, [
+      el('p', { class: 'lede', text: t('arcadeIntro', { cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) }),
+      el('div', { class: 'arcade-cap' }, [
+        el('div', { class: 'arcade-cap-bar', 'aria-hidden': 'true' }, el('div', { style: `width:${Math.min(100, (earned / ARCADE.dailyCap) * 100)}%` })),
+        el('small', { class: 'muted', text: room > 0 ? t('arcadeEarned', { v: fmtMoney(earned, { sign: false }), cap: fmtMoney(ARCADE.dailyCap, { sign: false }) }) : t('arcadeCapped') })
+      ]),
+      el('div', { class: 'arcade-tiles' },
+        ARCADE.games.map(game =>
+          el('button', { class: 'arcade-tile', type: 'button', 'aria-pressed': String(state.arcadeGame === game), onclick: () => openGame(game) }, [
+            el('span', { class: 'arcade-icon', 'aria-hidden': 'true', text: ARCADE_ICON[game] }),
+            el('span', { class: 'arcade-name', text: t(`arcade_${game}`) }),
+            el('small', { class: 'muted', text: t('arcadeUpTo', { v: fmtMoney(ARCADE_MAX[game], { sign: false }) }) })
+          ])
+        )
+      ),
+      state.arcadeView
+    ])
+  );
+}
+
+function openGame(game) {
+  stopGame();
+  state.arcadeGame = state.arcadeGame === game ? null : game;
+  state.arcadeView = state.arcadeGame ? (QUIZZES[game] ? quizView(game) : { typing: typingView, value: valueView, derby: derbyView }[game]()) : null;
+  renderArcade();
+}
+
+// Timers of the running game, cleared when it closes.
+let gameTimers = [];
+function later(fn, ms) {
+  gameTimers.push(setTimeout(fn, ms));
+}
+function stopGame() {
+  gameTimers.forEach(clearTimeout);
+  gameTimers = [];
+  cancelAnimationFrame(state.arcadeFrame ?? 0);
+}
+
+// A finished round: its winnings into the account (up to today's room), then
+// what the work came to an hour against the minimum wage, and how much
+// betting loses as much on average.
+function finishRound(game, amount, box, summary, ms) {
+  const t = state.t;
+  const { account, paid } = payGame(state.account, game, amount);
+  if (paid > 0) commitAccount(account);
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  box.replaceChildren(
+    ...[
+      el('p', { class: 'arcade-result' }, [
+        document.createTextNode(summary),
+        el('strong', { class: paid > 0 ? 'back-high' : '', text: ` ${t('arcadePaid', { v: fmtMoney(paid) })}` })
+      ]),
+      amount > paid ? el('p', { class: 'note', text: t('arcadeCapNote') }) : null,
+      el('p', { class: 'arcade-wage' }, [
+        document.createTextNode(t('arcadeWage', { m: minutes, s: seconds, rate: fmtMoney(hourlyRate(paid, ms), { sign: false }), wage: fmtMoney(ARCADE.minWage, { sign: false }) })),
+        paid > 0 ? el('strong', { text: ` ${t('arcadeLoss', { v: fmtMoney(paid, { sign: false }), stake: fmtMoney(stakeToLose(paid), { sign: false }) })}` }) : null
+      ]),
+      el('button', { class: 'primary-button', type: 'button', text: t('arcadeAgain'), onclick: () => ((state.arcadeGame = null), openGame(game)) })
+    ].filter(Boolean)
+  );
+  renderArcade();
+}
+
+// 全壘打大賽: a ball runs along the track; swing as it crosses the plate.
+function derbyView() {
+  const t = state.t;
+  const ball = el('span', { class: 'derby-ball', 'aria-hidden': 'true' });
+  const zone = el('span', { class: 'derby-zone', style: `left:${(DERBY.plate - DERBY.hit) * 100}%;width:${DERBY.hit * 200}%` }, el('span', { class: 'derby-sweet', style: `left:${((DERBY.hit - DERBY.hr) / (2 * DERBY.hit)) * 100}%;width:${(DERBY.hr / DERBY.hit) * 100}%` }));
+  const track = el('div', { class: 'derby-track', role: 'button', 'aria-label': t('derbySwing') }, [zone, ball]);
+  const call = el('p', { class: 'derby-call', 'aria-live': 'polite', text: t('derbyReady') });
+  const dots = el('div', { class: 'derby-dots', 'aria-hidden': 'true' });
+  const box = el('div', { class: 'arcade-actions' });
+  const results = [];
+  let plan = null;
+  let start = 0;
+  let began = 0;
+  let live = false;
+  const draw = () => {
+    dots.replaceChildren(...Array.from({ length: DERBY.pitches }, (_, i) => el('span', { class: `dot ${results[i] ?? ''}` })));
+  };
+  const next = () => {
+    if (results.length === DERBY.pitches) {
+      const hr = results.filter(r => r === 'hr').length;
+      const hits = results.filter(r => r === 'hit').length;
+      finishRound('derby', derbyPayout(results), box, t('derbyDone', { hr, hits }), performance.now() - began);
+      return;
+    }
+    plan = pitchPlan(results.length);
+    call.textContent = t('derbyPitch', { n: results.length + 1 });
+    ball.style.left = '0%';
+    later(() => {
+      live = true;
+      start = performance.now();
+      const frame = now => {
+        if (!live) return;
+        const x = ballAt(plan, now - start);
+        ball.style.left = `${Math.min(1.02, x) * 100}%`;
+        if (x > 1) return swing(true);
+        state.arcadeFrame = requestAnimationFrame(frame);
+      };
+      state.arcadeFrame = requestAnimationFrame(frame);
+    }, 700 + Math.random() * 600);
+  };
+  const swing = (late = false) => {
+    if (!live) return;
+    live = false;
+    cancelAnimationFrame(state.arcadeFrame ?? 0);
+    const result = late ? 'miss' : swingResult(ballAt(plan, performance.now() - start));
+    results.push(result);
+    call.textContent = t(`derby_${result}`);
+    track.dataset.result = result;
+    draw();
+    later(() => (delete track.dataset.result, next()), 900);
+  };
+  track.addEventListener('pointerdown', () => swing());
+  const swingButton = el('button', { class: 'primary-button derby-swing', type: 'button', text: t('derbySwing'), onclick: () => swing() });
+  box.append(el('button', { class: 'primary-button', type: 'button', text: t('arcadeStart'), onclick: () => ((began = performance.now()), box.replaceChildren(swingButton), next()) }));
+  draw();
+  return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), swing()) }, [
+    el('p', { class: 'note', text: t('derbyRules', { hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }), bonus: fmtMoney(DERBY.allHrBonus, { sign: false }) }) }),
+    track,
+    call,
+    dots,
+    box
+  ]);
+}
+
+// 誰比較划算: two of today's picks; tap the one that returns more per NT$100.
+function valueView() {
+  const t = state.t;
+  const picks = state.bets.filter(b => !b.lock && !b.live && b.kind !== 'future').map(b => ({ id: b.id, gameId: b.gameId, label: b.label, odds: effectiveOdds(b), fairChance: b.fairChance }));
+  const area = el('div', { class: 'value-q' });
+  const bar = el('div', { class: 'value-timer', 'aria-hidden': 'true' }, el('div'));
+  const box = el('div', { class: 'arcade-actions' });
+  let asked = 0;
+  let correct = 0;
+  let began = 0;
+  const ask = () => {
+    if (asked === VALUE_GAME.questions) {
+      bar.hidden = true;
+      area.replaceChildren();
+      finishRound('value', valuePayout(correct), box, t('valueDone', { n: correct, of: VALUE_GAME.questions }), performance.now() - began);
+      return;
+    }
+    const q = valueQuestion(picks);
+    if (!q) {
+      area.replaceChildren(el('p', { class: 'muted', text: t('valueNone') }));
+      return;
+    }
+    asked++;
+    let open = true;
+    const answer = side => {
+      if (!open) return;
+      open = false;
+      stopGame();
+      if (side === q.answer) correct++;
+      buttons.forEach((b, i) => {
+        const key = i ? 'b' : 'a';
+        b.disabled = true;
+        b.classList.add(key === q.answer ? 'right' : 'wrong');
+        b.append(el('small', { class: 'value-back', text: t('valueBack', { v: Math.round(key === 'a' ? q.backA : q.backB) }) }));
+      });
+      later(ask, 1600);
+    };
+    const option = (pick, side) =>
+      el('button', { class: 'value-option', type: 'button', onclick: () => answer(side) }, [
+        el('span', { class: 'value-label', text: pick.label }),
+        el('span', { class: 'value-nums' }, [el('strong', { text: fmtOdds(pick.odds) }), document.createTextNode(` × ${fmtPctShort(pick.fairChance)}`)])
+      ]);
+    const buttons = [option(q.a, 'a'), option(q.b, 'b')];
+    area.replaceChildren(el('p', { class: 'value-count', text: t('valueCount', { n: asked, of: VALUE_GAME.questions, right: correct }) }), ...buttons);
+    const inner = bar.firstChild;
+    inner.style.transition = 'none';
+    inner.style.width = '100%';
+    requestAnimationFrame(() => requestAnimationFrame(() => ((inner.style.transition = `width ${VALUE_GAME.seconds}s linear`), (inner.style.width = '0%'))));
+    later(() => answer(null), VALUE_GAME.seconds * 1000);
+  };
+  box.append(el('button', { class: 'primary-button', type: 'button', text: t('arcadeStart'), onclick: () => ((began = performance.now()), box.replaceChildren(), ask()) }));
+  return el('div', { class: 'arcade-game' }, [
+    el('p', { class: 'note', text: t('valueRules', { s: VALUE_GAME.seconds, pay: fmtMoney(VALUE_GAME.pay, { sign: false }), bonus: fmtMoney(VALUE_GAME.perfectBonus, { sign: false }) }) }),
+    bar,
+    area,
+    box
+  ]);
+}
+
+// 算彩金, 對帳, 換算機率: typed answers, no clock; the clock for the hourly
+// rate starts at the first keystroke.
+function quizView(kind) {
+  const t = state.t;
+  const spec = QUIZZES[kind];
+  const shown = el('p', { class: 'typing-code quiz-q', 'aria-live': 'polite' });
+  const input = el('input', { class: 'typing-input', type: 'text', inputmode: 'decimal', autocomplete: 'off', spellcheck: 'false', 'aria-label': t('quizLabel'), oninput: () => (began ||= performance.now()) });
+  const info = el('p', { class: 'value-count' });
+  const box = el('div', { class: 'arcade-actions' });
+  const feedback = el('p', { class: 'note quiz-feedback', 'aria-live': 'polite' });
+  let q = quizQuestion(kind);
+  let asked = 0;
+  let right = 0;
+  let began = 0;
+  const text = question => {
+    const p = question.parts;
+    if (kind === 'payout') return t('quizPayoutQ', { stake: fmtMoney(p.stake, { sign: false }), odds: fmtOdds(p.odds) });
+    if (kind === 'till') return p.amounts.map(v => fmtInt(v)).join(' + ');
+    return t('quizImpliedQ', { odds: fmtOdds(p.odds) });
+  };
+  const show = () => {
+    shown.textContent = text(q);
+    info.textContent = t('quizCount', { n: asked + 1, of: spec.questions, right });
+  };
+  const submit = event => {
+    event.preventDefault();
+    if (!input.value.trim()) return;
+    const ok = quizRight(q, input.value);
+    if (ok) right++;
+    feedback.textContent = ok ? t('quizRight') : t('quizWrong', { v: kind === 'implied' ? `${q.answer}%` : fmtInt(q.answer) });
+    feedback.className = `note quiz-feedback ${ok ? 'back-high' : 'back-low'}`;
+    asked++;
+    input.value = '';
+    if (asked === spec.questions) {
+      form.remove();
+      shown.remove();
+      finishRound(kind, quizPayout(kind, right), box, t('valueDone', { n: right, of: spec.questions }), performance.now() - began);
+      return;
+    }
+    q = quizQuestion(kind);
+    show();
+  };
+  const form = el('form', { class: 'typing-form', onsubmit: submit }, [input, el('button', { class: 'primary-button', type: 'submit', text: t('typingEnter') })]);
+  show();
+  return el('div', { class: 'arcade-game' }, [el('p', { class: 'note', text: t(`quizRules_${kind}`, { n: spec.questions, pay: fmtMoney(spec.pay, { sign: false }) }) }), info, shown, form, feedback, box]);
+}
+
+// 打工：輸入彩券號碼: type each ticket number exactly; each one right pays the
+// same. The clock starts at the first keystroke.
+function typingView() {
+  const t = state.t;
+  const shown = el('p', { class: 'typing-code', 'aria-live': 'polite' });
+  const input = el('input', { class: 'typing-input', type: 'text', inputmode: 'numeric', autocomplete: 'off', spellcheck: 'false', 'aria-label': t('typingLabel'), oninput: () => (began ||= performance.now()) });
+  const info = el('p', { class: 'value-count' });
+  const box = el('div', { class: 'arcade-actions' });
+  let code = ticketCode();
+  let right = 0;
+  let typos = 0;
+  let began = 0;
+  const show = () => {
+    shown.textContent = groupCode(code);
+    info.textContent = t('typingCount', { n: right, of: TYPING.codes, typos });
+  };
+  const submit = event => {
+    event.preventDefault();
+    if (typedRight(input.value, code)) {
+      right++;
+      code = ticketCode();
+      input.classList.remove('typo');
+    } else {
+      typos++;
+      input.classList.add('typo');
+    }
+    input.value = '';
+    show();
+    if (right === TYPING.codes) {
+      form.remove();
+      finishRound('typing', typingPayout(right), box, t('typingDone', { n: right, typos }), performance.now() - began);
+    }
+  };
+  const form = el('form', { class: 'typing-form', onsubmit: submit }, [input, el('button', { class: 'primary-button', type: 'submit', text: t('typingEnter') })]);
+  show();
+  return el('div', { class: 'arcade-game' }, [
+    el('p', { class: 'note', text: t('typingRules', { n: TYPING.codes, pay: fmtMoney(TYPING.pay, { sign: false }) }) }),
+    info,
+    shown,
+    form,
+    box
+  ]);
 }
 
 // ---- F1 -----------------------------------------------------------------------

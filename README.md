@@ -38,6 +38,7 @@ The page stays simple: odds, colours and the amounts that matter. What the numbe
   - F1: the race winner and **前三名** (podium): top-three chances from the win chances (Harville), priced to return what the winner board does.
 - **Cards:** each shows its series (日職 · NPB, 網球 WTA · Seoul: the league and, for tours and cups, the event). Players' sports (tennis, badminton, table tennis, snooker) have no 主/客: players are listed in the draw's order as "A vs B".
 - **場中 (live):** games in progress (MLB and the Premier League), refreshed every 30 seconds while on screen, with the same market tabs, 第N分 for MLB, and the live model (`public/lib/live.mjs`) checked on one real snapshot of the lottery's 場中 page. The house rules apply live too, so lopsided games show their lopsided side locked.
+- **小遊戲 (mini games)** in 紀錄 (`public/lib/arcade.mjs`): play money for the practice account earned by effort, never luck, six to choose from: 打工輸入號碼 (type ten-digit ticket numbers, NT$3 each), 算彩金 (stake × odds), 對帳 (add up five tickets), 換算機率 (odds to chance), each NT$4–5 a right answer with no clock; 誰比較划算 (two of today's picks, 7 seconds to tell which returns more per NT$100, NT$8 each) and 全壘打大賽 (ten pitches, faster and with change-ups; a home run needs a swing within about 40 ms). All of them pay at most NT$1,500 a Taiwan day. After every round the page shows what it came to an hour against Taiwan's minimum wage (NT$196) and how much betting loses it again on average (the lottery keeps about 22%), as a reminder of how slowly money is earned. Winnings are ledger entries like the grants: they sync and merge the same way, and the account's betting result leaves them out.
 - **Boards:** F1 (drivers with team-coloured badges, and whether the odds are before or after qualifying) and every championship: World Series, AL, NL, NBA, Premier League, and from Polymarket's search NFL, NHL, WNBA, college football, Champions League, Europa League, La Liga, Serie A, Bundesliga, Ligue 1, MLS, and the F1 drivers' and constructors' titles.
 
 ### House rules, the house cut and recommendations
@@ -182,6 +183,7 @@ The practice account's sync uses Shared-Proxy's other Worker, `orbit-workers-pro
 | --- | --- |
 | `public/lib/odds.mjs` | The math: devig, estimated odds, F1 phases, bet slip rules and analysis |
 | `public/lib/board.mjs` | Every priced option of a game, for the page and the crowd alike, and the crowd's pool |
+| `public/lib/arcade.mjs` | The mini games' rules, pay and daily cap |
 | `public/lib/audit.mjs` | The fairness audit of sports and series |
 | `public/lib/rules.mjs` | House rules (locks, parlay only) and the house cut by risk |
 | `public/lib/recommend.mjs` | Recommendations on single picks |
