@@ -1,10 +1,9 @@
 // 小遊戲: small games that earn play money for the practice account, by
-// effort, not luck: typing ticket numbers, working out payouts, adding up
-// the till and turning odds into chances (steady work), a which-pays-more
-// quiz (mental math against the clock) and a home run derby (practice until
-// your timing is right). The pay is small on purpose: every round shows what it worked out
-// to an hour against Taiwan's minimum wage, and how little betting it takes
-// to lose it again, so the games are a reminder of how slowly money is
+// effort, not luck, and no math: typing ticket numbers and sorting tickets
+// (plain work), a home run derby and free throws (practice until your timing
+// is right). The pay is small on purpose: every round shows what it worked
+// out to an hour against Taiwan's minimum wage, and how little betting it
+// takes to lose it again, so the games are a reminder of how slowly money is
 // earned. All together they pay at most ARCADE.dailyCap a Taiwan day.
 //
 // Winnings go in the ledger like every other entry ('game-<id>', kind
@@ -14,7 +13,7 @@ import { taipeiDayKey } from './sources.mjs';
 
 export const ARCADE = {
   dailyCap: 1500,
-  games: ['typing', 'payout', 'till', 'implied', 'value', 'derby'],
+  games: ['typing', 'sort', 'derby', 'freethrow'],
   // Taiwan's minimum hourly wage in 2026 (NT$).
   minWage: 196,
   // What the lottery keeps of every NT$100 staked, on average (it pays out at most 78%).
@@ -81,33 +80,6 @@ export function derbyPayout(results) {
   return sum + (results.length === DERBY.pitches && results.every(r => r === 'hr') ? DERBY.allHrBonus : 0);
 }
 
-// ---- 誰比較划算 (which pays back more) --------------------------------------------------
-//
-// Two real picks from today's board, each with its odds and fair chance: tap
-// the one that returns more per NT$100 (chance x odds) before the clock runs
-// out. The numbers are the page's own, so the game is the page's one lesson.
-export const VALUE_GAME = { questions: 10, seconds: 7, pay: 8, perfectBonus: 40, minGap: 2 };
-
-// A question from a list of picks ({ id, fairChance, odds, ... }): two picks
-// whose return per NT$100 differs by at least minGap. Null if there aren't any.
-export function valueQuestion(picks, random = Math.random) {
-  const usable = picks.filter(p => p.fairChance >= 0.05 && p.fairChance <= 0.9 && p.odds > 1);
-  if (usable.length < 2) return null;
-  for (let tries = 0; tries < 60; tries++) {
-    const a = usable[Math.floor(random() * usable.length)];
-    const b = usable[Math.floor(random() * usable.length)];
-    if (a === b || a.gameId === b.gameId) continue;
-    const backA = a.fairChance * a.odds * 100;
-    const backB = b.fairChance * b.odds * 100;
-    if (Math.abs(backA - backB) >= VALUE_GAME.minGap) return { a, b, backA, backB, answer: backA > backB ? 'a' : 'b' };
-  }
-  return null;
-}
-
-export function valuePayout(correct, total = VALUE_GAME.questions) {
-  return correct * VALUE_GAME.pay + (correct === total ? VALUE_GAME.perfectBonus : 0);
-}
-
 // ---- 打工：輸入彩券號碼 (data entry) ---------------------------------------------------
 //
 // Plain work: type each ticket number exactly as shown. Every one typed right
@@ -125,40 +97,48 @@ export const typedRight = (typed, code) => typed.replace(/\D/g, '') === code;
 
 export const typingPayout = right => right * TYPING.pay;
 
-// ---- Office work: payout, till and odds sums ------------------------------------------
+// ---- 整理彩券 (sorting tickets) ----------------------------------------------------------
 //
-// Three more plain-work quizzes, typed answers, no clock and no luck: every
-// answer is worked out, and every right one pays the same.
-// - payout 算彩金: a single ticket's payout (stake x odds);
-// - till 對帳: the day's tickets added up;
-// - implied 換算機率: the chance odds imply (100 / odds, to the nearest %; 1 either way is fine).
-export const QUIZZES = {
-  payout: { questions: 10, pay: 5 },
-  till: { questions: 10, pay: 5 },
-  implied: { questions: 10, pay: 4 }
+// Plain work: each ticket names a league; tap the box of its sport. Every one
+// sorted right pays the same; a wrong box pays nothing and the ticket stays.
+export const SORT = { tickets: 30, pay: 2 };
+// The four boxes and the leagues whose tickets go in each.
+export const SORT_BINS = {
+  baseball: ['mlb', 'npb', 'kbo', 'cpbl'],
+  basketball: ['nba', 'wnba', 'euroleague', 'bleague'],
+  soccer: ['epl', 'laliga', 'seriea', 'bundesliga', 'ucl', 'jleague'],
+  tennis: ['tennis', 'wta']
 };
 
-const pick = (list, random) => list[Math.floor(random() * list.length)];
-
-// A question: { kind, parts, answer } (parts: what to show).
-export function quizQuestion(kind, random = Math.random) {
-  if (kind === 'payout') {
-    const stake = pick([100, 200, 300, 500, 1000], random);
-    const odds = Math.round((1.2 + random() * 3.3) * 100) / 100;
-    return { kind, parts: { stake, odds }, answer: Math.round(stake * odds) };
-  }
-  if (kind === 'till') {
-    const amounts = Array.from({ length: 5 }, () => 10 * (5 + Math.floor(random() * 196)));
-    return { kind, parts: { amounts }, answer: amounts.reduce((a, b) => a + b, 0) };
-  }
-  const odds = Math.round((1.1 + random() * 8.8) * 100) / 100;
-  return { kind: 'implied', parts: { odds }, answer: Math.round(100 / odds) };
+export function sortTicket(random = Math.random) {
+  const bins = Object.keys(SORT_BINS);
+  const bin = bins[Math.floor(random() * bins.length)];
+  const leagues = SORT_BINS[bin];
+  return { league: leagues[Math.floor(random() * leagues.length)], bin };
 }
 
-export function quizRight(question, typed) {
-  const value = Number(String(typed).replace(/[^\d.]/g, ''));
-  if (!Number.isFinite(value) || String(typed).trim() === '') return false;
-  return question.kind === 'implied' ? Math.abs(value - question.answer) <= 1 : value === question.answer;
+export const sortPayout = right => right * SORT.pay;
+
+// ---- 罰球 (free throws) ------------------------------------------------------------------
+//
+// Ten shots. A marker sweeps back and forth across the aim bar, faster each
+// shot, while the green zone in the middle narrows: stop it in the zone's
+// middle half for a swish, anywhere in the zone for a make.
+export const FREE_THROW = { shots: 10, pay: { swish: 8, make: 3, miss: 0 } };
+
+export function shotPlan(i) {
+  return { period: 1500 - i * 80, zone: 0.16 - i * 0.009 };
 }
 
-export const quizPayout = (kind, right) => right * QUIZZES[kind].pay;
+// The marker's place (0-1) `elapsed` ms into a shot: there and back each period.
+export function markerAt(plan, elapsed) {
+  const x = (elapsed % plan.period) / plan.period;
+  return x < 0.5 ? 2 * x : 2 - 2 * x;
+}
+
+export function shotResult(position, plan) {
+  const off = Math.abs(position - 0.5);
+  return off <= plan.zone / 4 ? 'swish' : off <= plan.zone / 2 ? 'make' : 'miss';
+}
+
+export const freeThrowPayout = results => results.reduce((s, r) => s + FREE_THROW.pay[r], 0);

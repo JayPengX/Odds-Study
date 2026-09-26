@@ -192,7 +192,7 @@ test('every text key exists in both languages', async () => {
   const { makeT } = await import('../public/lib/i18n.mjs');
   const { readFile } = await import('node:fs/promises');
   const src = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')) + (await readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
-  const keys = new Set([...src.matchAll(/t\('([A-Za-z0-9_]+)'/g), ...src.matchAll(/data-t="([A-Za-z0-9_]+)"/g)].map(m => m[1]));
+  const keys = new Set([...src.matchAll(/\bt\('([A-Za-z0-9_]+)'/g), ...src.matchAll(/data-t="([A-Za-z0-9_]+)"/g)].map(m => m[1]));
   // Keys whose English text is the key itself.
   const same = new Set(['win', 'worst', 'f1']);
   for (const locale of ['zh', 'en']) {

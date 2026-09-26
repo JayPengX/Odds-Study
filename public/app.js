@@ -67,7 +67,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { f1Driver, leagueLogo, teamLogo, teamZh, LEAGUES, familyOf, isSoccer, isSets, isNeutral, normalizeTeamName } from './lib/teams.mjs';
 import { houseRule, minLegsProblem } from './lib/rules.mjs';
 import { gameOptions, crowdPool, f1Podium } from './lib/board.mjs';
-import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, VALUE_GAME, valueQuestion, valuePayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, QUIZZES, quizQuestion, quizRight, quizPayout } from './lib/arcade.mjs';
+import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_BINS, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from './lib/arcade.mjs';
 import { auditPools, auditCrowd } from './lib/audit.mjs';
 import { recommend } from './lib/recommend.mjs';
 
@@ -3607,8 +3607,13 @@ function renderSimTable(bands, characters, weeks) {
 // The games' tiles, today's winnings against the daily cap, and the game
 // being played. The game's own view is built once per round and kept, so the
 // page re-rendering (new odds, a sync) never interrupts a pitch.
-const ARCADE_ICON = { typing: '⌨️', payout: '🧾', till: '🧮', implied: '📐', value: '⚖️', derby: '⚾' };
-const ARCADE_MAX = { typing: typingPayout(TYPING.codes), ...Object.fromEntries(Object.keys(QUIZZES).map(k => [k, quizPayout(k, QUIZZES[k].questions)])), value: valuePayout(VALUE_GAME.questions), derby: DERBY.pitches * DERBY.pay.hr + DERBY.allHrBonus };
+const ARCADE_ICON = { typing: '⌨️', sort: '🗂️', derby: '⚾', freethrow: '🏀' };
+const ARCADE_MAX = {
+  typing: typingPayout(TYPING.codes),
+  sort: sortPayout(SORT.tickets),
+  derby: DERBY.pitches * DERBY.pay.hr + DERBY.allHrBonus,
+  freethrow: FREE_THROW.shots * FREE_THROW.pay.swish
+};
 
 function renderArcade() {
   if (!state.accountReady) return;
@@ -3627,7 +3632,8 @@ function renderArcade() {
           el('button', { class: 'arcade-tile', type: 'button', 'aria-pressed': String(state.arcadeGame === game), onclick: () => openGame(game) }, [
             el('span', { class: 'arcade-icon', 'aria-hidden': 'true', text: ARCADE_ICON[game] }),
             el('span', { class: 'arcade-name', text: t(`arcade_${game}`) }),
-            el('small', { class: 'muted', text: t('arcadeUpTo', { v: fmtMoney(ARCADE_MAX[game], { sign: false }) }) })
+            el('small', { class: 'muted', text: t(`arcadeKind_${game}`) }),
+            el('small', { class: 'arcade-max', text: t('arcadeUpTo', { v: fmtMoney(ARCADE_MAX[game], { sign: false }) }) })
           ])
         )
       ),
@@ -3639,11 +3645,12 @@ function renderArcade() {
 function openGame(game) {
   stopGame();
   state.arcadeGame = state.arcadeGame === game ? null : game;
-  state.arcadeView = state.arcadeGame ? (QUIZZES[game] ? quizView(game) : { typing: typingView, value: valueView, derby: derbyView }[game]()) : null;
+  state.arcadeView = state.arcadeGame ? { typing: typingView, sort: sortView, derby: derbyView, freethrow: freeThrowView }[game]() : null;
   renderArcade();
+  state.arcadeView?.focus({ preventScroll: true });
 }
 
-// Timers of the running game, cleared when it closes.
+// Timers and the animation of the running game, all stopped when it closes.
 let gameTimers = [];
 function later(fn, ms) {
   gameTimers.push(setTimeout(fn, ms));
@@ -3653,12 +3660,39 @@ function stopGame() {
   gameTimers = [];
   cancelAnimationFrame(state.arcadeFrame ?? 0);
 }
+// Runs draw(now) every frame until it returns false or the game closes.
+function animate(draw) {
+  cancelAnimationFrame(state.arcadeFrame ?? 0);
+  const frame = now => {
+    if (draw(now) !== false) state.arcadeFrame = requestAnimationFrame(frame);
+  };
+  state.arcadeFrame = requestAnimationFrame(frame);
+}
+
+// The strip above a game: progress, the round's money so far, the streak.
+function gameHud() {
+  const t = state.t;
+  const progress = el('div', { class: 'hud-bar', 'aria-hidden': 'true' }, el('div'));
+  const count = el('span', { class: 'hud-count' });
+  const money = el('strong', { class: 'hud-money' });
+  const streak = el('span', { class: 'hud-streak' });
+  const node = el('div', { class: 'game-hud' }, [el('div', { class: 'hud-row' }, [count, streak, money]), progress]);
+  const set = ({ done, of, earned, run }) => {
+    count.textContent = t('hudCount', { n: done, of });
+    money.textContent = fmtMoney(earned, { sign: false });
+    streak.textContent = run >= 3 ? t('hudStreak', { n: run }) : '';
+    streak.classList.toggle('hot', run >= 5);
+    progress.firstChild.style.width = `${(done / of) * 100}%`;
+  };
+  return { node, set };
+}
 
 // A finished round: its winnings into the account (up to today's room), then
 // what the work came to an hour against the minimum wage, and how much
 // betting loses as much on average.
 function finishRound(game, amount, box, summary, ms) {
   const t = state.t;
+  stopGame();
   const { account, paid } = payGame(state.account, game, amount);
   if (paid > 0) commitAccount(account);
   const minutes = Math.floor(ms / 60_000);
@@ -3680,204 +3714,577 @@ function finishRound(game, amount, box, summary, ms) {
   renderArcade();
 }
 
-// 全壘打大賽: a ball runs along the track; swing as it crosses the plate.
+// A canvas drawn at the screen's pixel density, W x H in CSS pixels.
+function gameCanvas(W, H) {
+  const canvas = el('canvas', { class: 'game-canvas', width: String(W * (window.devicePixelRatio || 1)), height: String(H * (window.devicePixelRatio || 1)) });
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  return { canvas, ctx };
+}
+
+// Big text in the middle of a canvas, fading out over `life` ms.
+function drawCallout(ctx, W, text, sub, age, life = 1100, color = '#fff') {
+  if (!text || age < 0 || age > life) return;
+  const a = Math.max(0, 1 - age / life);
+  const rise = (age / life) * 12;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = color;
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 4;
+  ctx.font = '800 30px system-ui, sans-serif';
+  ctx.strokeText(text, W / 2, 96 - rise);
+  ctx.fillText(text, W / 2, 96 - rise);
+  if (sub) {
+    ctx.font = '700 15px system-ui, sans-serif';
+    ctx.lineWidth = 3;
+    ctx.strokeText(sub, W / 2, 120 - rise);
+    ctx.fillText(sub, W / 2, 120 - rise);
+  }
+  ctx.restore();
+}
+
+// Bursts of confetti for the best results.
+function burst(x, y, n = 28) {
+  const colors = ['#ffd54f', '#ff7043', '#4fc3f7', '#81c784', '#f06292'];
+  return Array.from({ length: n }, (_, i) => {
+    const angle = (i / n) * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 2.5;
+    return { x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 1.5, color: colors[i % colors.length], life: 900 };
+  });
+}
+function drawParticles(ctx, particles, dt) {
+  for (const p of particles) {
+    p.x += p.vx * dt * 0.06;
+    p.y += p.vy * dt * 0.06;
+    p.vy += 0.004 * dt;
+    p.life -= dt;
+    if (p.life <= 0) continue;
+    ctx.globalAlpha = Math.min(1, p.life / 400);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+  return particles.filter(p => p.life > 0);
+}
+
+// 全壘打大賽: the pitch comes in from the mound; swing as it reaches the plate.
 function derbyView() {
   const t = state.t;
-  const ball = el('span', { class: 'derby-ball', 'aria-hidden': 'true' });
-  const zone = el('span', { class: 'derby-zone', style: `left:${(DERBY.plate - DERBY.hit) * 100}%;width:${DERBY.hit * 200}%` }, el('span', { class: 'derby-sweet', style: `left:${((DERBY.hit - DERBY.hr) / (2 * DERBY.hit)) * 100}%;width:${(DERBY.hr / DERBY.hit) * 100}%` }));
-  const track = el('div', { class: 'derby-track', role: 'button', 'aria-label': t('derbySwing') }, [zone, ball]);
-  const call = el('p', { class: 'derby-call', 'aria-live': 'polite', text: t('derbyReady') });
-  const dots = el('div', { class: 'derby-dots', 'aria-hidden': 'true' });
+  const W = 360;
+  const H = 250;
+  const { canvas, ctx } = gameCanvas(W, H);
+  const hud = gameHud();
   const box = el('div', { class: 'arcade-actions' });
+  const mound = { x: W / 2, y: 78 };
+  const plate = { x: W / 2, y: 214 };
   const results = [];
+  let phase = 'idle';
   let plan = null;
-  let start = 0;
+  let pitchStart = 0;
+  let swingAt = -1e9;
+  let flight = null;
+  let callout = null;
+  let particles = [];
   let began = 0;
-  let live = false;
-  const draw = () => {
-    dots.replaceChildren(...Array.from({ length: DERBY.pitches }, (_, i) => el('span', { class: `dot ${results[i] ?? ''}` })));
+  let run = 0;
+  let last = performance.now();
+  const earned = () => derbyPayout(results) - (results.length === DERBY.pitches && results.every(r => r === 'hr') ? DERBY.allHrBonus : 0);
+  const update = () => hud.set({ done: results.length, of: DERBY.pitches, earned: earned(), run });
+  // The ball along its path: p is ballAt's 0-1, the plate at DERBY.plate.
+  const ballPos = p => {
+    const k = p / DERBY.plate;
+    return { x: mound.x + (plate.x - mound.x) * k, y: mound.y + (plate.y - mound.y) * k, r: 2.5 + 5.5 * Math.min(1.2, k) };
+  };
+  const drawField = () => {
+    // Stands and sky, the outfield grass in stripes, the infield dirt.
+    const sky = ctx.createLinearGradient(0, 0, 0, 60);
+    sky.addColorStop(0, '#0d2a4a');
+    sky.addColorStop(1, '#1d4f7a');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, 60);
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = i % 3 ? 'rgba(255,255,255,0.08)' : 'rgba(255,214,79,0.14)';
+      ctx.fillRect((i * 37) % W, 30 + ((i * 13) % 22), 3, 3);
+    }
+    ctx.fillStyle = '#12351f';
+    ctx.fillRect(0, 52, W, 6);
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = i % 2 ? '#2f7d3a' : '#358a41';
+      ctx.fillRect(0, 58 + i * 25, W, 25);
+    }
+    ctx.fillStyle = '#b07a4a';
+    ctx.beginPath();
+    ctx.ellipse(W / 2, H + 30, 190, 120, 0, Math.PI, 2 * Math.PI);
+    ctx.fill();
+    ctx.fillStyle = '#a06b3c';
+    ctx.beginPath();
+    ctx.ellipse(mound.x, mound.y + 6, 26, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // The pitcher: a simple figure, arm up while throwing.
+    const throwing = phase === 'pitch' && performance.now() - pitchStart < 160;
+    ctx.fillStyle = '#e8eef5';
+    ctx.beginPath();
+    ctx.arc(mound.x, mound.y - 22, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(mound.x - 5, mound.y - 16, 10, 16);
+    ctx.strokeStyle = '#e8eef5';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(mound.x + 4, mound.y - 13);
+    ctx.lineTo(mound.x + (throwing ? -8 : 11), mound.y + (throwing ? -24 : -4));
+    ctx.stroke();
+    // Home plate, the batter's boxes and the strike zone ring.
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(plate.x - 11, plate.y - 4);
+    ctx.lineTo(plate.x + 11, plate.y - 4);
+    ctx.lineTo(plate.x + 11, plate.y + 2);
+    ctx.lineTo(plate.x, plate.y + 9);
+    ctx.lineTo(plate.x - 11, plate.y + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(plate.x - 52, plate.y - 26, 30, 44);
+    ctx.strokeRect(plate.x + 22, plate.y - 26, 30, 44);
+  };
+  const drawBat = now => {
+    // A right-handed batter's bat, swinging round in 160 ms.
+    const pivot = { x: plate.x - 30, y: plate.y - 6 };
+    const k = Math.min(1, (now - swingAt) / 160);
+    const angle = -2.3 + (k < 1 ? k : 1) * 2.9 * (now - swingAt < 600 ? 1 : 0);
+    ctx.strokeStyle = '#c58b4e';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(pivot.x, pivot.y);
+    ctx.lineTo(pivot.x + Math.cos(angle) * 58, pivot.y + Math.sin(angle) * 58);
+    ctx.stroke();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#7a4f24';
+    ctx.beginPath();
+    ctx.moveTo(pivot.x, pivot.y);
+    ctx.lineTo(pivot.x + Math.cos(angle) * 14, pivot.y + Math.sin(angle) * 14);
+    ctx.stroke();
+  };
+  const drawBall = (x, y, r) => {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + r + 2, r, r * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#d32f2f';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x - r * 0.9, y, r * 0.8, -0.8, 0.8);
+    ctx.arc(x + r * 0.9, y, r * 0.8, Math.PI - 0.8, Math.PI + 0.8);
+    ctx.stroke();
+  };
+  const draw = now => {
+    const dt = Math.min(50, now - last);
+    last = now;
+    ctx.clearRect(0, 0, W, H);
+    drawField();
+    if (phase === 'pitch') {
+      const p = ballAt(plan, now - pitchStart);
+      // The timing ring lights up while the ball is in the hitting window.
+      const inWindow = Math.abs(p - DERBY.plate) <= DERBY.hit;
+      ctx.strokeStyle = inWindow ? 'rgba(255,213,79,0.95)' : 'rgba(255,213,79,0.35)';
+      ctx.lineWidth = inWindow ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(plate.x, plate.y - 10, 16, 0, Math.PI * 2);
+      ctx.stroke();
+      const b = ballPos(p);
+      drawBall(b.x, b.y, b.r);
+      if (p > 1.02) swing(true);
+    } else if (flight) {
+      const k = Math.min(1, (now - flight.start) / flight.ms);
+      const x = flight.from.x + (flight.to.x - flight.from.x) * k;
+      const y = flight.from.y + (flight.to.y - flight.from.y) * k - Math.sin(k * Math.PI) * flight.arc;
+      drawBall(x, y, Math.max(1.5, flight.r * (1 - 0.7 * k)));
+      if (k >= 1 && flight.result === 'hr' && !flight.popped) {
+        flight.popped = true;
+        particles.push(...burst(x, Math.max(20, y)));
+      }
+    }
+    drawBat(now);
+    particles = drawParticles(ctx, particles, dt);
+    if (phase === 'idle') drawCallout(ctx, W, t('derbyTitle'), t('derbyTap'), 0, 1);
+    if (callout) drawCallout(ctx, W, callout.text, callout.sub, now - callout.at, 1200, callout.color);
+    return phase !== 'done' || particles.length > 0 || (callout && now - callout.at < 1200);
   };
   const next = () => {
     if (results.length === DERBY.pitches) {
+      phase = 'done';
       const hr = results.filter(r => r === 'hr').length;
       const hits = results.filter(r => r === 'hit').length;
-      finishRound('derby', derbyPayout(results), box, t('derbyDone', { hr, hits }), performance.now() - began);
+      later(() => finishRound('derby', derbyPayout(results), box, t('derbyDone', { hr, hits }), performance.now() - began), 900);
       return;
     }
-    plan = pitchPlan(results.length);
-    call.textContent = t('derbyPitch', { n: results.length + 1 });
-    ball.style.left = '0%';
+    phase = 'wait';
+    flight = null;
     later(() => {
-      live = true;
-      start = performance.now();
-      const frame = now => {
-        if (!live) return;
-        const x = ballAt(plan, now - start);
-        ball.style.left = `${Math.min(1.02, x) * 100}%`;
-        if (x > 1) return swing(true);
-        state.arcadeFrame = requestAnimationFrame(frame);
-      };
-      state.arcadeFrame = requestAnimationFrame(frame);
-    }, 700 + Math.random() * 600);
+      plan = pitchPlan(results.length);
+      phase = 'pitch';
+      pitchStart = performance.now();
+    }, 900 + Math.random() * 700);
   };
-  const swing = (late = false) => {
-    if (!live) return;
-    live = false;
-    cancelAnimationFrame(state.arcadeFrame ?? 0);
-    const result = late ? 'miss' : swingResult(ballAt(plan, performance.now() - start));
+  function swing(late = false) {
+    const now = performance.now();
+    if (phase === 'idle') return start();
+    if (!late) swingAt = now;
+    if (phase !== 'pitch') return;
+    const p = ballAt(plan, now - pitchStart);
+    const result = late ? 'miss' : swingResult(p);
     results.push(result);
-    call.textContent = t(`derby_${result}`);
-    track.dataset.result = result;
-    draw();
-    later(() => (delete track.dataset.result, next()), 900);
-  };
-  track.addEventListener('pointerdown', () => swing());
-  const swingButton = el('button', { class: 'primary-button derby-swing', type: 'button', text: t('derbySwing'), onclick: () => swing() });
-  box.append(el('button', { class: 'primary-button', type: 'button', text: t('arcadeStart'), onclick: () => ((began = performance.now()), box.replaceChildren(swingButton), next()) }));
-  draw();
+    run = result === 'miss' ? 0 : run + 1;
+    phase = 'flight';
+    const b = ballPos(Math.min(p, 1.1));
+    const off = Math.abs(p - DERBY.plate);
+    if (result === 'hr') {
+      // Distance by how true the swing was.
+      const meters = Math.round(118 + (1 - off / DERBY.hr) * 32);
+      flight = { from: b, to: { x: W / 2 + (p - DERBY.plate) * 900, y: -30 }, arc: 90, ms: 1000, r: b.r, result };
+      callout = { text: t('derby_hr'), sub: t('derbyMeters', { m: meters }), at: now, color: '#ffd54f' };
+    } else if (result === 'hit') {
+      const side = p < DERBY.plate ? -1 : 1;
+      flight = { from: b, to: { x: W / 2 + side * (60 + Math.random() * 90), y: 95 + Math.random() * 40 }, arc: 50, ms: 800, r: b.r, result };
+      callout = { text: t('derby_hit'), sub: t('derbyMeters', { m: Math.round(35 + (1 - off / DERBY.hit) * 55) }), at: now, color: '#fff' };
+    } else {
+      flight = { from: b, to: { x: plate.x + 4, y: H + 20 }, arc: 0, ms: 250, r: b.r, result };
+      callout = { text: t(late ? 'derby_strike' : 'derby_miss'), sub: '', at: now, color: '#ff8a80' };
+    }
+    update();
+    later(next, 1300);
+  }
+  function start() {
+    began = performance.now();
+    box.replaceChildren(swingButton);
+    next();
+  }
+  canvas.addEventListener('pointerdown', event => (event.preventDefault(), swing()));
+  const swingButton = el('button', { class: 'primary-button game-big-button', type: 'button', text: t('derbySwing'), onclick: () => swing() });
+  box.append(el('button', { class: 'primary-button game-big-button', type: 'button', text: t('arcadeStart'), onclick: start }));
+  update();
+  animate(draw);
   return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), swing()) }, [
     el('p', { class: 'note', text: t('derbyRules', { hr: fmtMoney(DERBY.pay.hr, { sign: false }), hit: fmtMoney(DERBY.pay.hit, { sign: false }), bonus: fmtMoney(DERBY.allHrBonus, { sign: false }) }) }),
-    track,
-    call,
-    dots,
+    hud.node,
+    canvas,
     box
   ]);
 }
 
-// 誰比較划算: two of today's picks; tap the one that returns more per NT$100.
-function valueView() {
+// 罰球: stop the sweeping marker in the green zone, and watch the shot.
+function freeThrowView() {
   const t = state.t;
-  const picks = state.bets.filter(b => !b.lock && !b.live && b.kind !== 'future').map(b => ({ id: b.id, gameId: b.gameId, label: b.label, odds: effectiveOdds(b), fairChance: b.fairChance }));
-  const area = el('div', { class: 'value-q' });
-  const bar = el('div', { class: 'value-timer', 'aria-hidden': 'true' }, el('div'));
+  const W = 360;
+  const H = 250;
+  const { canvas, ctx } = gameCanvas(W, H);
+  const hud = gameHud();
   const box = el('div', { class: 'arcade-actions' });
-  let asked = 0;
-  let correct = 0;
+  const meter = { x: 22, y: 30, w: 16, h: 190 };
+  const rim = { x: 286, y: 92, r: 18 };
+  const hand = { x: 110, y: 186 };
+  const results = [];
+  let phase = 'idle';
+  let plan = null;
+  let aimStart = 0;
+  let shot = null;
+  let callout = null;
+  let particles = [];
+  let ripple = -1e9;
   let began = 0;
-  const ask = () => {
-    if (asked === VALUE_GAME.questions) {
-      bar.hidden = true;
-      area.replaceChildren();
-      finishRound('value', valuePayout(correct), box, t('valueDone', { n: correct, of: VALUE_GAME.questions }), performance.now() - began);
-      return;
+  let run = 0;
+  let last = performance.now();
+  const update = () => hud.set({ done: results.length, of: FREE_THROW.shots, earned: freeThrowPayout(results), run });
+  const drawCourt = now => {
+    const wall = ctx.createLinearGradient(0, 0, 0, 150);
+    wall.addColorStop(0, '#1b2331');
+    wall.addColorStop(1, '#2a3547');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, W, 150);
+    for (let i = 0; i < 9; i++) {
+      ctx.fillStyle = i % 2 ? '#c8904f' : '#d19a58';
+      ctx.fillRect(0, 150 + i * 12, W, 12);
     }
-    const q = valueQuestion(picks);
-    if (!q) {
-      area.replaceChildren(el('p', { class: 'muted', text: t('valueNone') }));
-      return;
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(90, 250);
+    ctx.lineTo(130, 150);
+    ctx.stroke();
+    // Backboard, its square, the pole.
+    ctx.fillStyle = '#9aa7b8';
+    ctx.fillRect(326, 60, 6, 140);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect(304, 38, 8, 70);
+    ctx.strokeStyle = '#e53935';
+    ctx.strokeRect(304, 70, 8, 22);
+    // The net: longer and swaying just after a make.
+    const sway = Math.max(0, 1 - (now - ripple) / 600);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 6; i++) {
+      const x0 = rim.x - rim.r + (i * rim.r * 2) / 6;
+      ctx.beginPath();
+      ctx.moveTo(x0, rim.y);
+      ctx.lineTo(rim.x - rim.r * 0.55 + (i * rim.r * 1.1) / 6 + Math.sin(now / 60 + i) * 3 * sway, rim.y + 26 + 8 * sway);
+      ctx.stroke();
     }
-    asked++;
-    let open = true;
-    const answer = side => {
-      if (!open) return;
-      open = false;
-      stopGame();
-      if (side === q.answer) correct++;
-      buttons.forEach((b, i) => {
-        const key = i ? 'b' : 'a';
-        b.disabled = true;
-        b.classList.add(key === q.answer ? 'right' : 'wrong');
-        b.append(el('small', { class: 'value-back', text: t('valueBack', { v: Math.round(key === 'a' ? q.backA : q.backB) }) }));
-      });
-      later(ask, 1600);
-    };
-    const option = (pick, side) =>
-      el('button', { class: 'value-option', type: 'button', onclick: () => answer(side) }, [
-        el('span', { class: 'value-label', text: pick.label }),
-        el('span', { class: 'value-nums' }, [el('strong', { text: fmtOdds(pick.odds) }), document.createTextNode(` × ${fmtPctShort(pick.fairChance)}`)])
-      ]);
-    const buttons = [option(q.a, 'a'), option(q.b, 'b')];
-    area.replaceChildren(el('p', { class: 'value-count', text: t('valueCount', { n: asked, of: VALUE_GAME.questions, right: correct }) }), ...buttons);
-    const inner = bar.firstChild;
-    inner.style.transition = 'none';
-    inner.style.width = '100%';
-    requestAnimationFrame(() => requestAnimationFrame(() => ((inner.style.transition = `width ${VALUE_GAME.seconds}s linear`), (inner.style.width = '0%'))));
-    later(() => answer(null), VALUE_GAME.seconds * 1000);
   };
-  box.append(el('button', { class: 'primary-button', type: 'button', text: t('arcadeStart'), onclick: () => ((began = performance.now()), box.replaceChildren(), ask()) }));
-  return el('div', { class: 'arcade-game' }, [
-    el('p', { class: 'note', text: t('valueRules', { s: VALUE_GAME.seconds, pay: fmtMoney(VALUE_GAME.pay, { sign: false }), bonus: fmtMoney(VALUE_GAME.perfectBonus, { sign: false }) }) }),
-    bar,
-    area,
+  const drawRim = () => {
+    ctx.strokeStyle = '#ff6d00';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(rim.x, rim.y, rim.r, 4, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  };
+  const drawBall = (x, y) => {
+    ctx.fillStyle = '#ef6c00';
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3e2723';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 9, y);
+    ctx.lineTo(x + 9, y);
+    ctx.moveTo(x, y - 9);
+    ctx.lineTo(x, y + 9);
+    ctx.stroke();
+  };
+  const drawMeter = now => {
+    const zone = plan?.zone ?? shotPlan(results.length).zone;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(meter.x - 3, meter.y - 3, meter.w + 6, meter.h + 6);
+    ctx.fillStyle = '#e53935';
+    ctx.fillRect(meter.x, meter.y, meter.w, meter.h);
+    ctx.fillStyle = '#fdd835';
+    ctx.fillRect(meter.x, meter.y + meter.h * (0.5 - zone), meter.w, meter.h * zone * 2);
+    ctx.fillStyle = '#43a047';
+    ctx.fillRect(meter.x, meter.y + meter.h * (0.5 - zone / 2), meter.w, meter.h * zone);
+    ctx.fillStyle = '#1b5e20';
+    ctx.fillRect(meter.x, meter.y + meter.h * (0.5 - zone / 4), meter.w, (meter.h * zone) / 2);
+    if (phase === 'aim' || phase === 'flight') {
+      const m = phase === 'aim' ? markerAt(plan, now - aimStart) : shot.marker;
+      const y = meter.y + meter.h * m;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(meter.x + meter.w + 2, y);
+      ctx.lineTo(meter.x + meter.w + 12, y - 6);
+      ctx.lineTo(meter.x + meter.w + 12, y + 6);
+      ctx.fill();
+      ctx.fillRect(meter.x - 2, y - 1.5, meter.w + 4, 3);
+    }
+  };
+  const drawShooter = () => {
+    ctx.fillStyle = '#e8eef5';
+    ctx.beginPath();
+    ctx.arc(hand.x - 22, hand.y - 26, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1565c0';
+    ctx.fillRect(hand.x - 30, hand.y - 18, 16, 28);
+    ctx.fillStyle = '#e8eef5';
+    ctx.fillRect(hand.x - 29, hand.y + 10, 5, 22);
+    ctx.fillRect(hand.x - 20, hand.y + 10, 5, 22);
+    ctx.strokeStyle = '#e8eef5';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(hand.x - 16, hand.y - 14);
+    ctx.lineTo(hand.x - 4, hand.y - 4);
+    ctx.stroke();
+  };
+  const draw = now => {
+    const dt = Math.min(50, now - last);
+    last = now;
+    ctx.clearRect(0, 0, W, H);
+    drawCourt(now);
+    drawShooter();
+    drawMeter(now);
+    if (shot) {
+      // The flight: up and over to the target, then through, off the rim, or short.
+      const k = Math.min(1, (now - shot.start) / 850);
+      const x = hand.x + (shot.target.x - hand.x) * k;
+      const y = hand.y + (shot.target.y - hand.y) * k - Math.sin(k * Math.PI) * 120;
+      if (k < 1) drawBall(x, y);
+      else {
+        const k2 = Math.min(1, (now - shot.start - 850) / 500);
+        if (shot.result !== 'miss') drawBall(rim.x + shot.drift * (1 - k2), rim.y + 8 + k2 * 70);
+        else drawBall(shot.target.x + shot.bounce * k2 * 60, shot.target.y - Math.sin(k2 * Math.PI) * 30 + k2 * 60);
+        if (!shot.landed) {
+          shot.landed = true;
+          if (shot.result !== 'miss') ripple = now;
+          if (shot.result === 'swish') particles.push(...burst(rim.x, rim.y));
+        }
+      }
+    } else if (phase !== 'done') drawBall(hand.x, hand.y);
+    drawRim();
+    particles = drawParticles(ctx, particles, dt);
+    if (phase === 'idle') drawCallout(ctx, W, t('ftTitle'), t('ftTap'), 0, 1);
+    if (callout) drawCallout(ctx, W, callout.text, callout.sub, now - callout.at, 1200, callout.color);
+    return phase !== 'done' || particles.length > 0 || (callout && now - callout.at < 1200);
+  };
+  const next = () => {
+    if (results.length === FREE_THROW.shots) {
+      phase = 'done';
+      const made = results.filter(r => r !== 'miss').length;
+      const swish = results.filter(r => r === 'swish').length;
+      later(() => finishRound('freethrow', freeThrowPayout(results), box, t('ftDone', { made, swish }), performance.now() - began), 900);
+      return;
+    }
+    shot = null;
+    plan = shotPlan(results.length);
+    phase = 'aim';
+    aimStart = performance.now();
+  };
+  function shoot() {
+    if (phase === 'idle') return start();
+    if (phase !== 'aim') return;
+    const now = performance.now();
+    const marker = markerAt(plan, now - aimStart);
+    const result = shotResult(marker, plan);
+    results.push(result);
+    run = result === 'miss' ? 0 : run + 1;
+    phase = 'flight';
+    const err = marker - 0.5;
+    // Too high a mark: long (off the back of the rim); too low: short.
+    const target = result === 'miss' ? { x: rim.x + Math.sign(err) * (rim.r + 4), y: rim.y - 2 } : { x: rim.x + err * 40, y: rim.y - 2 };
+    shot = { start: now, marker, result, target, drift: err * 40, bounce: err > 0 ? 1 : -1.2 };
+    callout = { text: t(`ft_${result}`), sub: '', at: now + 850, color: result === 'swish' ? '#ffd54f' : result === 'make' ? '#fff' : '#ff8a80' };
+    update();
+    later(next, 1700);
+  }
+  function start() {
+    began = performance.now();
+    box.replaceChildren(shootButton);
+    next();
+  }
+  canvas.addEventListener('pointerdown', event => (event.preventDefault(), shoot()));
+  const shootButton = el('button', { class: 'primary-button game-big-button', type: 'button', text: t('ftShoot'), onclick: () => shoot() });
+  box.append(el('button', { class: 'primary-button game-big-button', type: 'button', text: t('arcadeStart'), onclick: start }));
+  update();
+  animate(draw);
+  return el('div', { class: 'arcade-game', tabindex: '0', onkeydown: e => e.key === ' ' && (e.preventDefault(), shoot()) }, [
+    el('p', { class: 'note', text: t('ftRules', { swish: fmtMoney(FREE_THROW.pay.swish, { sign: false }), make: fmtMoney(FREE_THROW.pay.make, { sign: false }) }) }),
+    hud.node,
+    canvas,
     box
   ]);
 }
 
-// 算彩金, 對帳, 換算機率: typed answers, no clock; the clock for the hourly
-// rate starts at the first keystroke.
-function quizView(kind) {
+// 整理彩券: each ticket to its sport's box; keys 1-4 work too.
+const SORT_ICON = { baseball: '⚾', basketball: '🏀', soccer: '⚽', tennis: '🎾' };
+function sortView() {
   const t = state.t;
-  const spec = QUIZZES[kind];
-  const shown = el('p', { class: 'typing-code quiz-q', 'aria-live': 'polite' });
-  const input = el('input', { class: 'typing-input', type: 'text', inputmode: 'decimal', autocomplete: 'off', spellcheck: 'false', 'aria-label': t('quizLabel'), oninput: () => (began ||= performance.now()) });
-  const info = el('p', { class: 'value-count' });
+  const hud = gameHud();
   const box = el('div', { class: 'arcade-actions' });
-  const feedback = el('p', { class: 'note quiz-feedback', 'aria-live': 'polite' });
-  let q = quizQuestion(kind);
-  let asked = 0;
+  const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' });
+  let ticket = sortTicket();
   let right = 0;
+  let wrong = 0;
+  let run = 0;
   let began = 0;
-  const text = question => {
-    const p = question.parts;
-    if (kind === 'payout') return t('quizPayoutQ', { stake: fmtMoney(p.stake, { sign: false }), odds: fmtOdds(p.odds) });
-    if (kind === 'till') return p.amounts.map(v => fmtInt(v)).join(' + ');
-    return t('quizImpliedQ', { odds: fmtOdds(p.odds) });
-  };
+  const bins = Object.keys(SORT_BINS);
+  const card = tk =>
+    el('div', { class: 'lotto-ticket sort-ticket' }, [
+      el('span', { class: 'lotto-head', text: t('lottoHead') }),
+      el('span', { class: 'sort-league' }, [leagueImg(tk.league, 'logo-sm'), el('strong', { text: t(`sport_${tk.league}`) })]),
+      el('small', { class: 'lotto-serial', text: groupCode(ticketCode()) })
+    ]);
   const show = () => {
-    shown.textContent = text(q);
-    info.textContent = t('quizCount', { n: asked + 1, of: spec.questions, right });
+    slot.replaceChildren(card(ticket));
+    hud.set({ done: right, of: SORT.tickets, earned: sortPayout(right), run });
   };
-  const submit = event => {
-    event.preventDefault();
-    if (!input.value.trim()) return;
-    const ok = quizRight(q, input.value);
-    if (ok) right++;
-    feedback.textContent = ok ? t('quizRight') : t('quizWrong', { v: kind === 'implied' ? `${q.answer}%` : fmtInt(q.answer) });
-    feedback.className = `note quiz-feedback ${ok ? 'back-high' : 'back-low'}`;
-    asked++;
-    input.value = '';
-    if (asked === spec.questions) {
-      form.remove();
-      shown.remove();
-      finishRound(kind, quizPayout(kind, right), box, t('valueDone', { n: right, of: spec.questions }), performance.now() - began);
-      return;
+  const place = (bin, button) => {
+    if (right >= SORT.tickets) return;
+    if (!began) began = performance.now();
+    const current = slot.firstChild;
+    if (bin === ticket.bin) {
+      right++;
+      run++;
+      button.classList.remove('flash');
+      void button.offsetWidth;
+      button.classList.add('flash');
+      current?.classList.add('fly', `fly-${bins.indexOf(bin)}`);
+      ticket = sortTicket();
+      if (right === SORT.tickets) {
+        hud.set({ done: right, of: SORT.tickets, earned: sortPayout(right), run });
+        binRow.remove();
+        later(() => finishRound('sort', sortPayout(right), box, t('sortDone', { n: right, wrong }), performance.now() - began), 250);
+        return;
+      }
+      later(show, 140);
+    } else {
+      wrong++;
+      run = 0;
+      current?.classList.remove('shake');
+      void current?.offsetWidth;
+      current?.classList.add('shake');
+      hud.set({ done: right, of: SORT.tickets, earned: sortPayout(right), run });
     }
-    q = quizQuestion(kind);
-    show();
   };
-  const form = el('form', { class: 'typing-form', onsubmit: submit }, [input, el('button', { class: 'primary-button', type: 'submit', text: t('typingEnter') })]);
+  const buttons = bins.map((bin, i) =>
+    el('button', { class: 'sort-bin', type: 'button', onclick: event => place(bin, event.currentTarget) }, [
+      el('span', { class: 'sort-bin-icon', 'aria-hidden': 'true', text: SORT_ICON[bin] }),
+      el('span', { text: t(`group_${bin}`) }),
+      el('small', { class: 'muted', text: String(i + 1) })
+    ])
+  );
+  const binRow = el('div', { class: 'sort-bins' }, buttons);
   show();
-  return el('div', { class: 'arcade-game' }, [el('p', { class: 'note', text: t(`quizRules_${kind}`, { n: spec.questions, pay: fmtMoney(spec.pay, { sign: false }) }) }), info, shown, form, feedback, box]);
+  return el('div', {
+    class: 'arcade-game',
+    tabindex: '0',
+    onkeydown: e => {
+      const i = Number(e.key) - 1;
+      if (i >= 0 && i < bins.length) place(bins[i], buttons[i]);
+    }
+  }, [el('p', { class: 'note', text: t('sortRules', { n: SORT.tickets, pay: fmtMoney(SORT.pay, { sign: false }) }) }), hud.node, slot, binRow, box]);
 }
 
 // 打工：輸入彩券號碼: type each ticket number exactly; each one right pays the
 // same. The clock starts at the first keystroke.
 function typingView() {
   const t = state.t;
-  const shown = el('p', { class: 'typing-code', 'aria-live': 'polite' });
-  const input = el('input', { class: 'typing-input', type: 'text', inputmode: 'numeric', autocomplete: 'off', spellcheck: 'false', 'aria-label': t('typingLabel'), oninput: () => (began ||= performance.now()) });
-  const info = el('p', { class: 'value-count' });
+  const hud = gameHud();
+  const slot = el('div', { class: 'sort-slot', 'aria-live': 'polite' });
+  const input = el('input', { class: 'typing-input', type: 'text', inputmode: 'numeric', autocomplete: 'off', spellcheck: 'false', 'aria-label': t('typingLabel'), placeholder: t('typingLabel'), oninput: () => (began ||= performance.now()) });
   const box = el('div', { class: 'arcade-actions' });
   let code = ticketCode();
   let right = 0;
   let typos = 0;
+  let run = 0;
   let began = 0;
   const show = () => {
-    shown.textContent = groupCode(code);
-    info.textContent = t('typingCount', { n: right, of: TYPING.codes, typos });
+    slot.replaceChildren(el('div', { class: 'lotto-ticket' }, [el('span', { class: 'lotto-head', text: t('lottoHead') }), el('p', { class: 'typing-code', text: groupCode(code) })]));
+    hud.set({ done: right, of: TYPING.codes, earned: typingPayout(right), run });
   };
   const submit = event => {
     event.preventDefault();
+    if (!input.value.trim()) return;
     if (typedRight(input.value, code)) {
       right++;
+      run++;
       code = ticketCode();
       input.classList.remove('typo');
+      slot.firstChild?.classList.add('fly', 'fly-2');
+      later(show, 140);
     } else {
       typos++;
+      run = 0;
       input.classList.add('typo');
+      slot.firstChild?.classList.remove('shake');
+      void slot.firstChild?.offsetWidth;
+      slot.firstChild?.classList.add('shake');
+      hud.set({ done: right, of: TYPING.codes, earned: typingPayout(right), run });
     }
     input.value = '';
-    show();
     if (right === TYPING.codes) {
       form.remove();
       finishRound('typing', typingPayout(right), box, t('typingDone', { n: right, typos }), performance.now() - began);
@@ -3885,13 +4292,7 @@ function typingView() {
   };
   const form = el('form', { class: 'typing-form', onsubmit: submit }, [input, el('button', { class: 'primary-button', type: 'submit', text: t('typingEnter') })]);
   show();
-  return el('div', { class: 'arcade-game' }, [
-    el('p', { class: 'note', text: t('typingRules', { n: TYPING.codes, pay: fmtMoney(TYPING.pay, { sign: false }) }) }),
-    info,
-    shown,
-    form,
-    box
-  ]);
+  return el('div', { class: 'arcade-game' }, [el('p', { class: 'note', text: t('typingRules', { n: TYPING.codes, pay: fmtMoney(TYPING.pay, { sign: false }) }) }), hud.node, slot, form, box]);
 }
 
 // ---- F1 -----------------------------------------------------------------------

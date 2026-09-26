@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, valueQuestion, valuePayout, VALUE_GAME, TYPING, ticketCode, groupCode, typedRight, typingPayout, QUIZZES, quizQuestion, quizRight, quizPayout } from '../public/lib/arcade.mjs';
+import { ARCADE, earnedToday, roomToday, payGame, hourlyRate, stakeToLose, DERBY, pitchPlan, ballAt, swingResult, derbyPayout, TYPING, ticketCode, groupCode, typedRight, typingPayout, SORT, SORT_BINS, sortTicket, sortPayout, FREE_THROW, shotPlan, markerAt, shotResult, freeThrowPayout } from '../public/lib/arcade.mjs';
 import { newAccount, balance, mergeAccounts } from '../public/lib/account.mjs';
 
 test('mini games pay into the ledger, at most the daily cap, and merge like any entry', () => {
@@ -39,25 +39,6 @@ test('home run derby: timing decides, faster pitches, change-ups slow down', () 
   assert.equal(derbyPayout(['hit', 'miss']), DERBY.pay.hit);
 });
 
-test('which pays more: two picks from different games, a clear answer', () => {
-  const picks = [
-    { id: 'a', gameId: 1, fairChance: 0.5, odds: 1.9 },
-    { id: 'b', gameId: 2, fairChance: 0.3, odds: 2.9 },
-    { id: 'c', gameId: 2, fairChance: 0.6, odds: 1.4 }
-  ];
-  let seed = 1;
-  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 20; i++) {
-    const q = valueQuestion(picks, random);
-    assert.notEqual(q.a.gameId, q.b.gameId);
-    assert.ok(Math.abs(q.backA - q.backB) >= VALUE_GAME.minGap);
-    assert.equal(q.answer, q.backA > q.backB ? 'a' : 'b');
-  }
-  assert.equal(valueQuestion(picks.slice(0, 1)), null);
-  assert.equal(valuePayout(10), 10 * VALUE_GAME.pay + VALUE_GAME.perfectBonus);
-  assert.equal(valuePayout(9), 9 * VALUE_GAME.pay);
-});
-
 test('data entry: pure effort, the same pay for every number typed right', () => {
   const code = ticketCode();
   assert.match(code, /^\d{10}$/);
@@ -73,23 +54,40 @@ test('every round is measured against the minimum wage and the lottery\'s take',
   assert.equal(hourlyRate(60, 600_000), 360);
   assert.equal(Math.round(stakeToLose(60)), 273);
   // Effort pays modestly: a whole round of any game stays small.
-  assert.ok(typingPayout(TYPING.codes) <= 100 && valuePayout(VALUE_GAME.questions) <= 150 && derbyPayout(Array(10).fill('hr')) <= 250);
+  assert.ok(typingPayout(TYPING.codes) <= 100 && sortPayout(SORT.tickets) <= 100 && derbyPayout(Array(10).fill('hr')) <= 250 && freeThrowPayout(Array(10).fill('swish')) <= 100);
 });
 
-test('office quizzes: worked-out answers, the same pay for each right one', () => {
-  let seed = 7;
-  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+test('ticket sorting: every ticket has one right box', () => {
+  const owner = new Map(Object.entries(SORT_BINS).flatMap(([bin, leagues]) => leagues.map(l => [l, bin])));
+  assert.equal(owner.size, Object.values(SORT_BINS).flat().length);
   for (let i = 0; i < 50; i++) {
-    const pay = quizQuestion('payout', random);
-    assert.equal(pay.answer, Math.round(pay.parts.stake * pay.parts.odds));
-    assert.ok(quizRight(pay, String(pay.answer)) && !quizRight(pay, String(pay.answer + 1)));
-    const till = quizQuestion('till', random);
-    assert.equal(till.answer, till.parts.amounts.reduce((a, b) => a + b, 0));
-    assert.ok(quizRight(till, `${till.answer.toLocaleString('en')}`));
-    const implied = quizQuestion('implied', random);
-    assert.ok(quizRight(implied, `${implied.answer + 1}%`) && !quizRight(implied, String(implied.answer + 2)));
+    const ticket = sortTicket();
+    assert.equal(owner.get(ticket.league), ticket.bin);
   }
-  assert.ok(!quizRight(quizQuestion('till'), ''));
-  for (const kind of Object.keys(QUIZZES)) assert.equal(quizPayout(kind, 10), 10 * QUIZZES[kind].pay);
-  assert.deepEqual(ARCADE.games.filter(g => QUIZZES[g]), Object.keys(QUIZZES));
+  assert.equal(sortPayout(SORT.tickets), SORT.tickets * SORT.pay);
+});
+
+test('free throws: the arrow sweeps faster and the zone narrows; the middle swishes', () => {
+  assert.ok(shotPlan(9).period < shotPlan(0).period && shotPlan(9).zone < shotPlan(0).zone);
+  const plan = shotPlan(0);
+  assert.equal(markerAt(plan, 0), 0);
+  assert.equal(markerAt(plan, plan.period / 2), 1);
+  assert.equal(shotResult(0.5, plan), 'swish');
+  assert.equal(shotResult(0.5 + plan.zone / 3, plan), 'make');
+  assert.equal(shotResult(0.9, plan), 'miss');
+  assert.equal(freeThrowPayout(['swish', 'make', 'miss']), FREE_THROW.pay.swish + FREE_THROW.pay.make);
+  // No math and no luck: every game is work or timing.
+  assert.deepEqual(ARCADE.games, ['typing', 'sort', 'derby', 'freethrow']);
+});
+
+test('no two leagues share a name, so every ticket (and board card) says which one it is', async () => {
+  globalThis.navigator ??= { language: 'en' };
+  const { makeT } = await import('../public/lib/i18n.mjs');
+  const { LEAGUES } = await import('../public/lib/teams.mjs');
+  for (const locale of ['zh', 'en']) {
+    const t = makeT(locale);
+    const names = [...Object.keys(LEAGUES), 'f1'].map(k => t(`sport_${k}`));
+    assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), [], locale);
+  }
 });
