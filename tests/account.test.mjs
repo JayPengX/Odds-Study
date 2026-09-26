@@ -250,3 +250,21 @@ test('fun facts, and your tickets told like a simulated person\'s', async () => 
   assert.deepEqual(profile.traits, []);
   assert.equal(crowdPercentile([-3, -1, 0, 2, 10], 1), 0.625);
 });
+
+test('slip history keeps itself: final scores with each pick, compact picks, backups merge', async () => {
+  const { newAccount, placeSlip, applyResults, compactLeg, compactAccount, mergeAccounts, balance } = await import('../public/lib/account.mjs');
+  const now = new Date('2026-09-26T04:00:00Z');
+  const leg = { id: 'g1|ml|home', kind: 'ml', sport: 'mlb', odds: 1.9, side: 'home', line: null, inning: null, driver: null, away: 'Houston Astros', home: 'Athletics' };
+  let account = placeSlip(newAccount(now), { id: 's1', mode: 'single', sizes: [1], stake: 100, cost: 100, legs: [leg] }, now).account;
+  // Empty fields aren't saved.
+  assert.equal('line' in account.slips[0].legs[0], false);
+  assert.deepEqual(compactLeg({ a: 1, b: null, result: null }), { a: 1, result: null });
+  account = applyResults(account, 's1', ['won'], now, [{ away: 4, home: 6 }]);
+  assert.deepEqual(account.slips[0].legs[0].final, { away: 4, home: 6 });
+  assert.equal(account.slips[0].status, 'settled');
+  // A backup restored onto a device that has it already changes nothing.
+  const backup = JSON.parse(JSON.stringify(account));
+  assert.equal(balance(mergeAccounts(account, backup)), balance(account));
+  assert.equal(mergeAccounts(newAccount(now), backup).slips.length, 1);
+  assert.deepEqual(compactAccount(backup).slips[0].legs[0].final, { away: 4, home: 6 });
+});

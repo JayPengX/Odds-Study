@@ -46,6 +46,15 @@ export async function readSync(passcode) {
   return unpack(body.payload);
 }
 
+// The most the Worker keeps for one account (its ODDS_MAX_PAYLOAD_LENGTH).
+export const SYNC_MAX_LENGTH = 1_000_000;
+
 export async function writeSync(passcode, account) {
-  await request('PATCH', { passcode, payload: await pack(account) });
+  const payload = await pack(account);
+  if (payload.length > SYNC_MAX_LENGTH) {
+    const error = new Error('account too big to sync');
+    error.code = 'TOO_BIG';
+    throw error;
+  }
+  await request('PATCH', { passcode, payload });
 }

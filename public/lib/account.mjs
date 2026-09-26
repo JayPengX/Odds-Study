@@ -60,10 +60,20 @@ export function newSlipId(now = new Date()) {
 
 // Buys a slip: { id, mode, sizes, stake, cost, legs }. The cost comes off the
 // balance at once. Returns { account } or { error: 'funds' }.
+// A pick as saved: empty fields left out, so years of slips stay small.
+export function compactLeg(leg) {
+  return Object.fromEntries(Object.entries(leg).filter(([key, v]) => v != null || key === 'result'));
+}
+
+// Every saved pick compacted (older accounts saved empty fields too).
+export function compactAccount(account) {
+  return { ...account, slips: account.slips.map(slip => ({ ...slip, legs: slip.legs.map(compactLeg) })) };
+}
+
 export function placeSlip(account, slip, now = new Date()) {
   if (!(slip.cost > 0) || slip.cost > balance(account)) return { error: 'funds' };
   const t = now.toISOString();
-  const saved = { ...slip, t, status: 'open', legs: slip.legs.map(leg => ({ ...leg, result: null })) };
+  const saved = { ...slip, t, status: 'open', legs: slip.legs.map(leg => compactLeg({ ...leg, result: null })) };
   const entry = { id: `stake-${slip.id}`, t, kind: 'stake', amount: -slip.cost, slipId: slip.id };
   return { account: touched({ ...account, ledger: [...account.ledger, entry], slips: [saved, ...account.slips] }, now) };
 }
@@ -205,10 +215,16 @@ export function legResult(leg, outcome) {
 
 // Records leg results (one per leg, null if not known yet); once every leg
 // is decided the slip is settled and its payout (after tax) is paid in.
-export function applyResults(account, slipId, results, now = new Date()) {
+// `finals` (optional, one per leg): the final score to keep with a pick as it
+// is decided, { away, home } (and each set's score), so a slip's history
+// never depends on the sources keeping old games.
+export function applyResults(account, slipId, results, now = new Date(), finals = []) {
   const slip = account.slips.find(s => s.id === slipId);
   if (!slip || slip.status !== 'open') return account;
-  const legs = slip.legs.map((leg, i) => ({ ...leg, result: leg.result ?? results[i] ?? null }));
+  const legs = slip.legs.map((leg, i) => {
+    if (leg.result || !results[i]) return leg;
+    return { ...leg, result: results[i], ...(finals[i] ? { final: finals[i] } : {}) };
+  });
   if (legs.every((leg, i) => leg.result === slip.legs[i].result)) return account;
   let updated = { ...slip, legs };
   let ledger = account.ledger;
@@ -234,7 +250,7 @@ export function mergeAccounts(a, b) {
     const other = slips.get(slip.id);
     if (!other) slips.set(slip.id, slip);
     else if (other.status !== 'settled' && slip.status === 'settled') slips.set(slip.id, slip);
-    else if (other.status !== 'settled') slips.set(slip.id, { ...other, legs: other.legs.map((leg, i) => ({ ...leg, result: leg.result ?? slip.legs[i]?.result ?? null })) });
+    else if (other.status !== 'settled') slips.set(slip.id, { ...other, legs: other.legs.map((leg, i) => ({ ...leg, result: leg.result ?? slip.legs[i]?.result ?? null, ...(leg.final ?? slip.legs[i]?.final ? { final: leg.final ?? slip.legs[i]?.final } : {}) })) });
   }
   return {
     v: 1,

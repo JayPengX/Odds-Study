@@ -42,7 +42,7 @@ import {
   replayPlayer
 } from './lib/sim.mjs';
 import { ticketProfile, accountTickets } from './lib/profile.mjs';
-import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive, loadLeagueTeams } from './lib/sources.mjs';
+import { loadOdds, loadExtraLeagues, loadExtraFutures, taipeiDayKey, fetchOutcomes, loadLive, loadLeagueTeams, parseInning } from './lib/sources.mjs';
 import { inningsLeft, liveBaseball, liveSoccer, fitGoals, liveMarkets, liveOdds, pregameRuns, nextRunChances, nextRunOdds, LIVE_MIN_LIQUIDITY } from './lib/live.mjs';
 import {
   START_BALANCE,
@@ -58,6 +58,7 @@ import {
   legResult,
   applyResults,
   mergeAccounts,
+  compactAccount,
   isAccount
 } from './lib/account.mjs';
 import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
@@ -127,6 +128,8 @@ const state = {
   freshSlips: new Set(),
   checking: false,
   checkedAt: 0,
+  // Games in progress on open slips: leg id -> its outcome so far.
+  legLive: new Map(),
   showAllSaved: false,
   // 大手筆 (bets grow with the balance) or 真實 (survey-based stakes) in the simulator.
   // The leaderboard shown.
@@ -1663,7 +1666,7 @@ function payLine(label, value, cls = '') {
 async function loadAccount() {
   try {
     const stored = await unpack(localStorage.getItem(ACCOUNT_KEY));
-    if (isAccount(stored)) return stored;
+    if (isAccount(stored)) return compactAccount(stored);
   } catch {}
   return newAccount();
 }
@@ -1731,7 +1734,7 @@ async function syncNow() {
     state.sync = { ...state.sync, busy: false, at: new Date().toISOString() };
   } catch (error) {
     console.error(error);
-    state.sync = { ...state.sync, busy: false, error: state.t('syncFailed') };
+    state.sync = { ...state.sync, busy: false, error: state.t(error.code === 'TOO_BIG' ? 'syncTooBig' : 'syncFailed') };
   }
   renderAccount();
 }
@@ -1880,12 +1883,13 @@ async function checkResults(force = false) {
   const now = new Date();
   const pending = open.flatMap(s => s.legs.filter(l => !l.result && (l.kind === 'future' || (l.start && Date.parse(l.start) <= now.getTime()))));
   if (!pending.length || state.checking) return;
-  if (!force && now.getTime() - state.checkedAt < RESULT_CHECK_MS) return;
+  if (!force && now.getTime() - state.checkedAt < (state.legLive.size ? LIVE_REFRESH_MS : RESULT_CHECK_MS)) return;
   state.checking = true;
   state.checkedAt = now.getTime();
   renderSaved();
   try {
     const outcomes = await fetchOutcomes(pending, now);
+    state.legLive = new Map([...outcomes].filter(([, o]) => o?.status === 'pending' && o.state === 'in'));
     let account = state.account;
     for (const slip of open) {
       const results = slip.legs.map(leg => {
@@ -1895,7 +1899,7 @@ async function checkResults(force = false) {
         const stale = leg.kind !== 'future' && leg.start && now.getTime() - Date.parse(leg.start) > VOID_AFTER_MS;
         return stale && !outcomes.has(leg.id) ? 'void' : null;
       });
-      const next = applyResults(account, slip.id, results, now);
+      const next = applyResults(account, slip.id, results, now, slip.legs.map(leg => finalOf(outcomes.get(leg.id))));
       if (next !== account && next.slips.find(s => s.id === slip.id).status === 'settled') state.freshSlips.add(slip.id);
       account = next;
     }
@@ -1906,6 +1910,15 @@ async function checkResults(force = false) {
     state.checking = false;
     renderSaved();
   }
+}
+
+// What to keep of a decided game with its pick: the final score (and each
+// set's), or a race's or championship's winner.
+function finalOf(outcome) {
+  if (outcome?.status !== 'final') return null;
+  if (outcome.winner) return { winner: outcome.winner, ...(outcome.podium ? { podium: outcome.podium } : {}) };
+  if (!Number.isFinite(outcome.awayScore) || !Number.isFinite(outcome.homeScore)) return null;
+  return { away: outcome.awayScore, home: outcome.homeScore, ...(outcome.homeSets ? { homeSets: outcome.homeSets, awaySets: outcome.awaySets } : {}) };
 }
 
 function renderAccount() {
@@ -1975,10 +1988,55 @@ function renderAccount() {
         el('summary', { text: sync.code ? t('syncOn') : t('syncTitle') }),
         ...syncBody,
         sync.error ? el('p', { class: 'back-low', text: sync.error }) : null
-      ])
+      ]),
+      backupBox()
     ])
   );
   renderArcade();
+}
+
+// Every slip is kept for good: in this browser, in the sync (when on), and in
+// a backup file you download. Restoring a file adds what it has to the
+// account (nothing is lost or counted twice: the same merge as the sync).
+function backupBox() {
+  const t = state.t;
+  const file = el('input', {
+    type: 'file',
+    accept: 'application/json,.json',
+    hidden: '',
+    onchange: async event => {
+      const f = event.target.files?.[0];
+      if (!f) return;
+      try {
+        const backup = JSON.parse(await f.text());
+        if (!isAccount(backup)) throw new Error('not an account');
+        commitAccount(compactAccount(mergeAccounts(state.account, backup)));
+        state.backupNote = t('backupRestored', { n: backup.slips.length });
+      } catch {
+        state.backupNote = t('backupBad');
+      }
+      renderAccount();
+    }
+  });
+  const download = () => {
+    const day = taipeiDayKey(new Date().toISOString());
+    const blob = new Blob([JSON.stringify(state.account)], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: `odds-study-backup-${day}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  };
+  return el('details', { class: 'sync' }, [
+    el('summary', { text: t('backupTitle') }),
+    el('p', { class: 'muted', text: t('backupIntro', { n: state.account.slips.length }) }),
+    el('div', { class: 'button-row' }, [
+      el('button', { class: 'ghost-button', type: 'button', text: t('backupDownload'), onclick: download }),
+      el('button', { class: 'ghost-button', type: 'button', text: t('backupRestore'), onclick: () => file.click() }),
+      file
+    ]),
+    state.backupNote ? el('p', { class: 'note', text: state.backupNote }) : null
+  ]);
 }
 
 const RESULT_ICON = { won: '✓', lost: '✗', void: '↺' };
@@ -2001,6 +2059,85 @@ function slipRange(slip) {
 }
 
 const LEG_ICON = { won: '✓', lost: '✗', void: '↺', live: '●', waiting: '⏳' };
+
+// Where a pick's game in play stands, if the game ended right now: the same
+// settlement the slip will use ('won', 'lost', 'void' for a push), 'level'
+// for a winner pick with the score level, or null when the score can't tell
+// yet (the first run, a set not played).
+function legStanding(leg) {
+  const live = state.legLive.get(leg.id);
+  if (!live) return null;
+  // A level winner pick (no draw to back) is neither winning nor losing yet.
+  if (leg.kind === 'ml' && leg.side !== 'draw' && live.homeScore === live.awayScore) return 'level';
+  return legResult(leg, { ...live, status: 'final' });
+}
+
+// ESPN's short detail in the page's language: baseball's half-innings and
+// half-time translated, the rest ("Q3 5:21", "67'") as it is.
+function liveDetail(live, sport) {
+  const t = state.t;
+  // Matches in sets: the set being played.
+  if (!live.detail && live.homeSets?.length) return t('liveSetN', { n: live.homeSets.length });
+  if (!live.detail) return t('liveInPlay');
+  if (familyOf(sport) === 'baseball') {
+    const inning = parseInning(live.detail, live.period);
+    if (inning) return t(`liveHalf_${inning.half}`, { n: inning.inning });
+  }
+  if (/half/i.test(live.detail)) return t('liveHalfTime');
+  return live.detail;
+}
+
+// An open slip with games in play: how many picks are winning and losing
+// right now, and what it would pay if every game in play ended now (once
+// nothing is still to start).
+function slipNowLine(slip, states) {
+  const t = state.t;
+  // A level winner pick isn't settled either way: no payout figure while one is.
+  const now = slip.legs.map((leg, k) => leg.result ?? (states[k] === 'live' ? legStanding(leg) : null)).map(x => (x === 'level' ? null : x));
+  const live = slip.legs.filter((leg, k) => states[k] === 'live' && state.legLive.has(leg.id));
+  if (!live.length) return null;
+  const count = x => slip.legs.filter((leg, k) => states[k] === 'live' && now[k] === x).length;
+  const parts = [t('slipNowCount', { win: count('won'), lose: count('lost') })];
+  if (now.every(Boolean)) {
+    const pay = settleSlip({ legs: slip.legs.map((leg, k) => ({ odds: leg.odds, result: now[k] })), sizes: slip.sizes, stake: slip.stake }).net;
+    parts.push(pay > 0 ? t('slipNowPays', { v: fmtMoney(pay, { sign: false }) }) : t('slipNowNothing'));
+  }
+  return el('p', { class: 'slip-now' }, [el('span', { class: 'live-dot', text: t('tagLive') }), document.createTextNode(` ${parts.join(' · ')}`)]);
+}
+
+// A pick's game in play in one line: the score (sets and each set's score
+// for matches in sets), where the game is, and whether the pick is winning
+// right now.
+// A game's score in one line, the teams in the card's order: "太空人 4 : 6
+// 運動家", with each set's score for matches in sets.
+function scoreText(leg, score) {
+  const name = side => teamName({ en: leg[side], zh: teamZh(leg.sport, leg[side]) });
+  const first = isSoccer(leg.sport) || isNeutral(leg.sport) ? ['home', 'away'] : ['away', 'home'];
+  const sets = score.homeSets ? ` (${score.homeSets.map((h, i) => (first[0] === 'home' ? `${h}-${score.awaySets[i]}` : `${score.awaySets[i]}-${h}`)).join(' ')})` : '';
+  return `${name(first[0])} ${score[first[0]]} : ${score[first[1]]} ${name(first[1])}${sets}`;
+}
+
+// A decided pick's final score (or race winner), kept with the slip.
+function legFinalLine(leg) {
+  const f = leg.final;
+  if (!f) return null;
+  const text = f.winner ? `${state.t('finalWinner')} ${f.winner}` : `${state.t('finalScore')} ${scoreText(leg, f)}`;
+  return el('span', { class: 'leg-inplay muted', text });
+}
+
+function legLiveLine(leg) {
+  const t = state.t;
+  const live = state.legLive.get(leg.id);
+  if (!live) return null;
+  const score = scoreText(leg, { away: live.awayScore, home: live.homeScore, homeSets: live.homeSets, awaySets: live.awaySets });
+  const standing = legStanding(leg);
+  const tag = { won: ['winning', 'legNowWinning'], lost: ['losing', 'legNowLosing'], void: ['level', 'legNowLevel'], level: ['level', 'legNowLevel'] }[standing];
+  return el('span', { class: 'leg-inplay' }, [
+    el('span', { class: 'leg-live-score', text: score }),
+    el('span', { class: 'muted', text: ` · ${liveDetail(live, leg.sport)}` }),
+    tag ? el('span', { class: `leg-now ${tag[0]}`, text: t(tag[1]) }) : null
+  ]);
+}
 
 function savedSlipCard(slip) {
   const t = state.t;
@@ -2035,12 +2172,13 @@ function savedSlipCard(slip) {
       document.createTextNode(t('slipProgress', { k: decided, n })),
       !settled && nextStart ? el('span', { class: 'muted', text: ` · ${t('slipNextStart', { time: fmtTime(nextStart) })}` }) : null
     ]),
+    !settled ? slipNowLine(slip, states) : null,
     el('ul', { class: 'parlay-legs saved-legs' },
       slip.legs.map((leg, k) =>
         el('li', { class: `leg-${states[k]}` }, [
           el('span', { class: 'leg-result', 'aria-label': t(`legState_${states[k]}`), title: t(`legState_${states[k]}`), text: LEG_ICON[states[k]] }),
           legIcon(leg),
-          legMain(leg),
+          el('span', { class: 'leg-body' }, [legMain(leg), states[k] === 'live' ? legLiveLine(leg) : leg.result ? legFinalLine(leg) : null]),
           el('span', { class: 'leg-odds' }, [el('small', { text: '@' }), document.createTextNode(fmtOdds(leg.odds))]),
           needsHandSettle(leg, now) ? handSettle(slip, k) : null
         ])
@@ -4773,6 +4911,11 @@ load().then(() => {
   if (state.accountReady) checkResults();
   refreshLive();
 });
+// Open slips with games in play update every 30 seconds while 紀錄 is on screen.
+setInterval(() => {
+  if (document.visibilityState === 'visible' && state.tab === 'history' && state.data) checkResults();
+}, LIVE_REFRESH_MS);
+
 // Back on the tab: pick up what another device did, and any games that ended.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;

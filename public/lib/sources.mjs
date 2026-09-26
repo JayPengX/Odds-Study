@@ -5,7 +5,7 @@
 import { americanToProbability, devigProportional, devigPower } from './odds.mjs';
 import { normalizeTeamName, teamZh, LEAGUES, familyOf, isSoccer, rememberLogo, rememberTeams, hasTeams } from './teams.mjs';
 import { runOrder } from './live.mjs';
-import { fetchKambiLeague, fetchKambiLive, decidedFromLive } from './kambi.mjs';
+import { fetchKambiLeague, fetchKambiLive, decidedFromLive, setsWon } from './kambi.mjs';
 import { KAMBI_LEAGUES } from './teams.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
@@ -540,7 +540,12 @@ export function parseEspnResults(data, sport) {
       awayScore: Number(away.score),
       homeScore: Number(home.score),
       awayInnings: (away.linescores || []).map(l => Number(l.value) || 0),
-      homeInnings: (home.linescores || []).map(l => Number(l.value) || 0)
+      homeInnings: (home.linescores || []).map(l => Number(l.value) || 0),
+      // Where a game in progress is: 'in', ESPN's short detail ("Top 7th",
+      // "Q3 5:21", "67'") and the period number.
+      state: type.state ?? null,
+      detail: type.shortDetail || type.detail || '',
+      period: Number(comp.status?.period) || 0
     });
   }
   return games;
@@ -651,6 +656,7 @@ export async function fetchOutcomes(legs, now = new Date()) {
         const live = await pages.get('kambi-live');
         const result = live && decidedFromLive(live.get(leg.kambiId), leg.sport);
         if (result) out.set(leg.id, result);
+        else if (live?.get(leg.kambiId)) out.set(leg.id, kambiInPlay(live.get(leg.kambiId), leg.sport));
         return;
       }
       const path = ESPN_PATH[leg.sport];
@@ -816,4 +822,15 @@ export async function loadLeagueTeams(sport) {
   const teams = (data?.sports?.[0]?.leagues?.[0]?.teams ?? []).map(x => x.team).filter(t => t?.displayName && t.logos?.[0]?.href).map(t => ({ name: t.displayName, logo: t.logos[0].href }));
   if (teams.length) rememberTeams(sport, teams);
   return teams.length > 0;
+}
+
+// A Kambi match in play as an outcome still pending: sets won so far (or the
+// score, for baseball and basketball) and each set's score.
+export function kambiInPlay(live, sport) {
+  const spec = LEAGUES[sport]?.sets;
+  if (spec && live.sets) {
+    const won = setsWon(live.sets, spec);
+    return { status: 'pending', state: 'in', homeScore: won.home, awayScore: won.away, homeSets: live.sets.home, awaySets: live.sets.away, detail: '' };
+  }
+  return { status: 'pending', state: 'in', homeScore: live.score.home, awayScore: live.score.away, detail: '' };
 }
